@@ -4,7 +4,8 @@
   "description": "Persistent adaptive memory for Claude Code",
   "type": "module",
   "bin": {
-    "laminark-server": "./dist/index.js"
+    "laminark-server": "./dist/index.js",
+    "laminark-hook": "./dist/hooks/handler.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
