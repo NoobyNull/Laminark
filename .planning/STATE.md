@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 Phase: 1 of 8 (Storage Engine) -- COMPLETE
 Plan: 4 of 4 in current phase (all done)
 Status: Phase 1 complete, ready for Phase 2
-Last activity: 2026-02-08 — Completed 01-04 acceptance tests
+Last activity: 2026-02-08 — Completed quick-1 debug logging infrastructure
 
 Progress: [▓▓▓▓░░░░░░] 11%
 
@@ -58,11 +58,14 @@ Recent decisions affecting current work:
 - [01-04]: tsx added as devDependency for child_process.fork() TypeScript support in multi-process tests
 - [01-04]: Crash simulation uses separate crash-writer.ts forked as child process for true process-level WAL recovery testing
 - [01-04]: All 5 Phase 1 success criteria proven by 12 acceptance tests (78 total)
+- [quick-1]: Debug logging via stderr (process.stderr.write) to keep stdout clean for MCP protocol
+- [quick-1]: Cached isDebugEnabled() boolean for zero-cost no-op path when debug disabled
+- [quick-1]: Debug categories: db, obs, search, session -- use debug(category, message, data?) pattern
 
 ### Pending Todos
 
 - [database] Add cross-project memory sharing between Claude instances
-- [general] Add debug logging for all interactions
+- ~~[general] Add debug logging for all interactions~~ -- DONE (quick-1)
 
 ### Blockers/Concerns
 
@@ -74,5 +77,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 01-04-PLAN.md (Phase 1 complete)
+Stopped at: Completed quick-1 debug logging infrastructure
 Resume file: None
