@@ -36,10 +36,10 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 4 plans
 
 Plans:
-- [ ] 01-01-PLAN.md -- Project scaffolding, TypeScript config, core types, and dependency installation
-- [ ] 01-02-PLAN.md -- SQLite database initialization with WAL mode, schema, migration system, and FTS5
-- [ ] 01-03-PLAN.md -- Observation CRUD, session management, and FTS5 keyword search with project scoping
-- [ ] 01-04-PLAN.md -- Concurrency safety, crash recovery, and persistence acceptance tests (TDD)
+- [ ] 01-01-PLAN.md -- @laminark/memory package scaffolding, TypeScript toolchain, core types with Zod schemas, and config utilities
+- [ ] 01-02-PLAN.md -- SQLite database initialization with WAL mode, PRAGMA sequence, FTS5 external content with stable integer rowid, and migration system
+- [ ] 01-03-PLAN.md -- Observation CRUD, session lifecycle, and FTS5 keyword search with BM25 ranking and project scoping
+- [ ] 01-04-PLAN.md -- Acceptance tests proving all 5 success criteria: concurrency, crash recovery, persistence, project isolation, schema completeness (TDD)
 
 ### Phase 2: MCP Interface and Search
 **Goal**: Claude can search, save, and manage memories through MCP tools with keyword search that respects token budgets
