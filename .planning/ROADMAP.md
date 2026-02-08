@@ -87,11 +87,10 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 04-01: Pluggable embedding strategy interface with local ONNX default implementation
-- [ ] 04-02: Worker thread setup for non-blocking embedding generation
-- [ ] 04-03: sqlite-vec integration for vector similarity search
-- [ ] 04-04: Hybrid search with reciprocal rank fusion (FTS5 + vector)
-- [ ] 04-05: Graceful degradation and lazy model loading
+- [ ] 04-01-PLAN.md -- EmbeddingEngine interface, LocalOnnxEngine (BGE Small q8), KeywordOnlyEngine fallback, and migration 006 (cosine distance)
+- [ ] 04-02-PLAN.md -- Worker thread bridge for non-blocking embedding, EmbeddingStore for sqlite-vec vec0 operations, and tsdown worker entry point
+- [ ] 04-03-PLAN.md -- Hybrid search with reciprocal rank fusion (FTS5 + vector), MCP server worker lifecycle, and background embedding loop
+- [ ] 04-04-PLAN.md -- Acceptance tests proving all 5 success criteria: semantic search, hybrid ranking, non-blocking, graceful degradation, zero latency
 
 ### Phase 5: Session Context and Summaries
 **Goal**: Claude starts every session already knowing what happened last time, and users can explicitly save and search memories via slash commands
