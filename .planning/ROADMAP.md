@@ -121,15 +121,15 @@ Plans:
   3. User can type /memorite:resume to see stashed context threads and re-inject a chosen thread back into the conversation
   4. User can ask "where was I?" to see recently abandoned context threads ranked by recency and relevance
   5. Topic detection adapts to the user's natural variance over time -- a scattered session raises the shift threshold, a focused session lowers it
-**Plans**: TBD
+**Plans**: 6 plans
 
 Plans:
-- [ ] 06-01: Static topic shift detection using cosine distance between consecutive embeddings
-- [ ] 06-02: Context stashing mechanism (snapshot topic observations + summary)
-- [ ] 06-03: User notification on stash and /memorite:stash slash command
-- [ ] 06-04: /memorite:resume slash command and "where was I?" query via topic_context MCP tool
-- [ ] 06-05: Adaptive EWMA threshold with historical session seeding
-- [ ] 06-06: User-configurable sensitivity multiplier and decision logging
+- [ ] 06-01-PLAN.md -- Static topic shift detection with cosine distance (TDD)
+- [ ] 06-02-PLAN.md -- Context stash storage layer and StashManager CRUD
+- [ ] 06-03-PLAN.md -- TopicShiftHandler integration and /memorite:stash command
+- [ ] 06-04-PLAN.md -- /memorite:resume command and topic_context MCP tool
+- [ ] 06-05-PLAN.md -- Adaptive EWMA threshold with historical session seeding (TDD)
+- [ ] 06-06-PLAN.md -- Sensitivity configuration and decision logging
 
 ### Phase 7: Knowledge Graph and Advanced Intelligence
 **Goal**: Observations are connected into a navigable knowledge graph of entities and relationships, with high-quality embeddings from Claude's own reasoning
@@ -183,6 +183,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 | 3. Hook Integration and Capture | 0/4 | Not started | - |
 | 4. Embedding Engine and Semantic Search | 0/5 | Not started | - |
 | 5. Session Context and Summaries | 0/3 | Planned | - |
-| 6. Topic Detection and Context Stashing | 0/6 | Not started | - |
+| 6. Topic Detection and Context Stashing | 0/6 | Planned | - |
 | 7. Knowledge Graph and Advanced Intelligence | 0/7 | Not started | - |
 | 8. Web Visualization | 0/5 | Not started | - |
