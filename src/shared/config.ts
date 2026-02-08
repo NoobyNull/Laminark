@@ -1,9 +1,54 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, realpathSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import type { DatabaseConfig } from './types.js';
+
+/**
+ * Cached debug-enabled flag.
+ * Resolved once per process -- debug mode does not change at runtime.
+ */
+let _debugCached: boolean | null = null;
+
+/**
+ * Returns whether debug logging is enabled for this process.
+ *
+ * Resolution order:
+ * 1. `LAMINARK_DEBUG` env var -- `"1"` or `"true"` enables debug mode
+ * 2. `~/.laminark/config.json` -- `{ "debug": true }` enables debug mode
+ * 3. Default: disabled
+ *
+ * The result is cached after the first call.
+ */
+export function isDebugEnabled(): boolean {
+  if (_debugCached !== null) {
+    return _debugCached;
+  }
+
+  // Check environment variable first
+  const envVal = process.env.LAMINARK_DEBUG;
+  if (envVal === '1' || envVal === 'true') {
+    _debugCached = true;
+    return true;
+  }
+
+  // Check config.json
+  try {
+    const configPath = join(homedir(), '.laminark', 'config.json');
+    const raw = readFileSync(configPath, 'utf-8');
+    const config = JSON.parse(raw) as Record<string, unknown>;
+    if (config.debug === true) {
+      _debugCached = true;
+      return true;
+    }
+  } catch {
+    // Config file doesn't exist or is invalid -- that's fine
+  }
+
+  _debugCached = false;
+  return false;
+}
 
 /**
  * Default busy timeout in milliseconds.

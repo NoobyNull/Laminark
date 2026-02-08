@@ -14,4 +14,5 @@ export type {
   SearchResult,
   DatabaseConfig,
 } from '../shared/types.js';
-export { getProjectHash, getDbPath, getDatabaseConfig } from '../shared/config.js';
+export { getProjectHash, getDbPath, getDatabaseConfig, isDebugEnabled } from '../shared/config.js';
+export { debug, debugTimed } from '../shared/debug.js';
