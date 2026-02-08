@@ -1,0 +1,51 @@
+{
+  "name": "@laminark/memory",
+  "version": "0.1.0",
+  "description": "Persistent adaptive memory for Claude Code",
+  "type": "module",
+  "bin": {
+    "laminark-server": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NoobyNull/Laminark.git"
+  },
+  "keywords": [
+    "claude",
+    "memory",
+    "mcp",
+    "sqlite"
+  ],
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/NoobyNull/Laminark/issues"
+  },
+  "homepage": "https://github.com/NoobyNull/Laminark#readme",
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "sqlite-vec": "^0.1.7-alpha.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.2.2",
+    "tsdown": "^0.20.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
