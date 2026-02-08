@@ -9,17 +9,17 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 
 ## Current Position
 
-Phase: 2 of 8 (MCP Interface and Search)
-Plan: 2 of 3 in current phase (02-02 complete)
-Status: Executing Phase 2
-Last activity: 2026-02-08 — Completed 02-02 recall tool with progressive disclosure
+Phase: 2 of 8 (MCP Interface and Search) -- COMPLETE
+Plan: 3 of 3 in current phase (02-03 complete)
+Status: Phase 2 Complete -- Ready for Phase 3
+Last activity: 2026-02-08 — Completed 02-03 plugin manifest and test suite
 
-Progress: [▓▓▓▓▓▓░░░░] 18%
+Progress: [▓▓▓▓▓▓▓░░░] 21%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6
+- Total plans completed: 7
 - Average duration: 4min
 - Total execution time: 0.4 hours
 
@@ -28,10 +28,10 @@ Progress: [▓▓▓▓▓▓░░░░] 18%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-storage-engine | 4/4 | 13min | 3min |
-| 02-mcp-interface-and-search | 2/3 | 9min | 5min |
+| 02-mcp-interface-and-search | 3/3 | 12min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 01-03 (4min), 01-04 (3min), 02-01 (6min), 02-02 (3min)
+- Last 5 plans: 01-04 (3min), 02-01 (6min), 02-02 (3min), 02-03 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -70,6 +70,8 @@ Recent decisions affecting current work:
 - [02-02]: BM25 weights 2.0 (title) / 1.0 (content) for title-biased relevance ranking
 - [02-02]: Single unified recall tool with action parameter (view/purge/restore) -- not separate tools
 - [02-02]: Purge/restore require explicit IDs -- no blind bulk operations on search results
+- [02-03]: .mcp.json uses top-level server name key (plugin-bundled format, not mcpServers wrapper)
+- [02-03]: Integration tests exercise storage layer directly -- MCP SDK is trusted dependency, test our logic on top
 
 ### Pending Todos
 
@@ -92,5 +94,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 02-02 recall tool with progressive disclosure
+Stopped at: Completed 02-03 plugin manifest and test suite -- Phase 2 complete
 Resume file: None
