@@ -54,9 +54,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md -- Schema migration for title column, MCP server scaffold with stdio transport, and save_memory tool
-- [ ] 02-02-PLAN.md -- Unified recall tool with search, view, purge, restore actions and token budget enforcement
-- [ ] 02-03-PLAN.md -- Plugin manifest (.mcp.json) and integration tests proving all Phase 2 success criteria
+- [ ] 02-01-PLAN.md -- Schema migration 005 (title column + FTS5 rebuild), MCP server scaffold with stdio transport, save_memory tool with auto-title, and token budget utility
+- [ ] 02-02-PLAN.md -- Unified recall tool with search/view/purge/restore actions, 3-level progressive disclosure, token budget enforcement, and BM25 title weighting
+- [ ] 02-03-PLAN.md -- Plugin manifest (.mcp.json) and integration tests proving all 5 Phase 2 success criteria
 
 ### Phase 3: Hook Integration and Capture
 **Goal**: Observations are automatically captured from Claude's tool usage without any user intervention
