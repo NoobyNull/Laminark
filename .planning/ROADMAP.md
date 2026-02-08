@@ -13,7 +13,7 @@ Laminark delivers persistent adaptive memory for Claude Code in 8 phases followi
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Storage Engine** - Rock-solid SQLite foundation with WAL, concurrency, and crash recovery
-- [ ] **Phase 2: MCP Interface and Search** - Claude-facing tools with keyword search and progressive disclosure
+- [x] **Phase 2: MCP Interface and Search** - Claude-facing tools with keyword search and progressive disclosure
 - [ ] **Phase 3: Hook Integration and Capture** - Automatic observation capture via Claude Code hooks
 - [ ] **Phase 4: Embedding Engine and Semantic Search** - Vector embeddings with pluggable strategy and hybrid search
 - [ ] **Phase 5: Session Context and Summaries** - Context continuity across sessions with progressive disclosure
@@ -54,9 +54,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md -- Schema migration 005 (title column + FTS5 rebuild), MCP server scaffold with stdio transport, save_memory tool with auto-title, and token budget utility
-- [ ] 02-02-PLAN.md -- Unified recall tool with search/view/purge/restore actions, 3-level progressive disclosure, token budget enforcement, and BM25 title weighting
-- [ ] 02-03-PLAN.md -- Plugin manifest (.mcp.json) and integration tests proving all 5 Phase 2 success criteria
+- [x] 02-01-PLAN.md -- Schema migration 005 (title column + FTS5 rebuild), MCP server scaffold with stdio transport, save_memory tool with auto-title, and token budget utility
+- [x] 02-02-PLAN.md -- Unified recall tool with search/view/purge/restore actions, 3-level progressive disclosure, token budget enforcement, and BM25 title weighting
+- [x] 02-03-PLAN.md -- Plugin manifest (.mcp.json) and integration tests proving all 5 Phase 2 success criteria
 
 ### Phase 3: Hook Integration and Capture
 **Goal**: Observations are automatically captured from Claude's tool usage without any user intervention
@@ -177,7 +177,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Storage Engine | 4/4 | Complete | 2026-02-08 |
-| 2. MCP Interface and Search | 0/3 | Planned | - |
+| 2. MCP Interface and Search | 3/3 | Complete | 2026-02-08 |
 | 3. Hook Integration and Capture | 0/3 | Planned | - |
 | 4. Embedding Engine and Semantic Search | 0/4 | Planned | - |
 | 5. Session Context and Summaries | 0/3 | Planned | - |

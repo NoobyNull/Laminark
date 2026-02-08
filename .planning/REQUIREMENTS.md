@@ -11,8 +11,8 @@
 - [x] **MEM-01**: User's observations persist across Claude Code sessions in a single SQLite database file with WAL mode
 - [ ] **MEM-02**: Observations are automatically captured via PostToolUse hook without user intervention
 - [ ] **MEM-03**: Session lifecycle is tracked via SessionStart and SessionEnd hooks with unique session IDs
-- [ ] **MEM-04**: User can manually save a memory with explicit text via MCP save_memory tool
-- [ ] **MEM-05**: User can delete specific memories via MCP forget tool (soft delete with recovery option)
+- [x] **MEM-04**: User can manually save a memory with explicit text via MCP save_memory tool
+- [x] **MEM-05**: User can delete specific memories via MCP forget tool (soft delete with recovery option)
 - [x] **MEM-06**: All observations are scoped to the project directory — no cross-project contamination
 - [x] **MEM-07**: Multiple concurrent Claude Code sessions can read/write safely without corruption or data loss
 - [x] **MEM-08**: Database uses write-ahead journaling for crash recovery — incomplete writes never corrupt data
@@ -21,12 +21,12 @@
 
 ### Search
 
-- [ ] **SRC-01**: User can search memories by keyword via FTS5 full-text search returning ranked results
+- [x] **SRC-01**: User can search memories by keyword via FTS5 full-text search returning ranked results
 - [ ] **SRC-02**: User can search memories by semantic meaning via vector similarity using sqlite-vec
 - [ ] **SRC-03**: Hybrid search combines FTS5 keyword and vector semantic scores using reciprocal rank fusion
-- [ ] **SRC-04**: Search uses 3-layer progressive disclosure: compact index (~50-100 tokens/result) -> timeline context -> full observation details
+- [x] **SRC-04**: Search uses 3-layer progressive disclosure: compact index (~50-100 tokens/result) -> timeline context -> full observation details
 - [x] **SRC-05**: Search results respect project scoping and never leak observations from other projects
-- [ ] **SRC-06**: MCP search tool response stays under 2000 tokens to prevent context window poisoning
+- [x] **SRC-06**: MCP search tool response stays under 2000 tokens to prevent context window poisoning
 
 ### Context Management
 
@@ -64,7 +64,7 @@
 
 ### User Interface
 
-- [ ] **UI-01**: 5-7 MCP tools exposed to Claude: search, timeline, get_observations, save_memory, forget, graph_query, topic_context
+- [x] **UI-01**: 5-7 MCP tools exposed to Claude: search, timeline, get_observations, save_memory, forget, graph_query, topic_context
 - [ ] **UI-02**: /laminark:remember slash command allows user to explicitly save a memory with context
 - [ ] **UI-03**: /laminark:recall slash command allows user to search memories by description
 - [ ] **UI-04**: /laminark:stash slash command allows user to manually stash current context thread
@@ -105,19 +105,19 @@
 | MEM-01 | Phase 1: Storage Engine | Done |
 | MEM-02 | Phase 3: Hook Integration and Capture | Pending |
 | MEM-03 | Phase 3: Hook Integration and Capture | Pending |
-| MEM-04 | Phase 2: MCP Interface and Search | Pending |
-| MEM-05 | Phase 2: MCP Interface and Search | Pending |
+| MEM-04 | Phase 2: MCP Interface and Search | Done |
+| MEM-05 | Phase 2: MCP Interface and Search | Done |
 | MEM-06 | Phase 1: Storage Engine | Done |
 | MEM-07 | Phase 1: Storage Engine | Done |
 | MEM-08 | Phase 1: Storage Engine | Done |
 | MEM-09 | Phase 1: Storage Engine | Done |
 | MEM-10 | Phase 3: Hook Integration and Capture | Pending |
-| SRC-01 | Phase 2: MCP Interface and Search | Pending |
+| SRC-01 | Phase 2: MCP Interface and Search | Done |
 | SRC-02 | Phase 4: Embedding Engine and Semantic Search | Pending |
 | SRC-03 | Phase 4: Embedding Engine and Semantic Search | Pending |
-| SRC-04 | Phase 2: MCP Interface and Search | Pending |
+| SRC-04 | Phase 2: MCP Interface and Search | Done |
 | SRC-05 | Phase 1: Storage Engine | Done |
-| SRC-06 | Phase 2: MCP Interface and Search | Pending |
+| SRC-06 | Phase 2: MCP Interface and Search | Done |
 | CTX-01 | Phase 5: Session Context and Summaries | Pending |
 | CTX-02 | Phase 5: Session Context and Summaries | Pending |
 | CTX-03 | Phase 6: Topic Detection and Context Stashing | Pending |
@@ -143,7 +143,7 @@
 | VIS-04 | Phase 8: Web Visualization | Pending |
 | VIS-05 | Phase 8: Web Visualization | Pending |
 | VIS-06 | Phase 8: Web Visualization | Pending |
-| UI-01 | Phase 2: MCP Interface and Search | Pending |
+| UI-01 | Phase 2: MCP Interface and Search | Done (2 unified tools per design decision) |
 | UI-02 | Phase 5: Session Context and Summaries | Pending |
 | UI-03 | Phase 5: Session Context and Summaries | Pending |
 | UI-04 | Phase 6: Topic Detection and Context Stashing | Pending |
