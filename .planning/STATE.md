@@ -9,17 +9,17 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 
 ## Current Position
 
-Phase: 1 of 8 (Storage Engine)
-Plan: 3 of 4 in current phase
-Status: Executing phase 1
-Last activity: 2026-02-08 — Completed 01-03 data access layer
+Phase: 1 of 8 (Storage Engine) -- COMPLETE
+Plan: 4 of 4 in current phase (all done)
+Status: Phase 1 complete, ready for Phase 2
+Last activity: 2026-02-08 — Completed 01-04 acceptance tests
 
-Progress: [▓▓▓░░░░░░░] 8%
+Progress: [▓▓▓▓░░░░░░] 11%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
+- Total plans completed: 4
 - Average duration: 3min
 - Total execution time: 0.2 hours
 
@@ -27,10 +27,10 @@ Progress: [▓▓▓░░░░░░░] 8%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01-storage-engine | 3/4 | 10min | 3min |
+| 01-storage-engine | 4/4 | 13min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (3min), 01-02 (3min), 01-03 (4min)
+- Last 5 plans: 01-01 (3min), 01-02 (3min), 01-03 (4min), 01-04 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -55,6 +55,9 @@ Recent decisions affecting current work:
 - [01-03]: ORDER BY includes rowid DESC as tiebreaker for deterministic ordering within same-second timestamps
 - [01-03]: FTS5 query sanitization strips operators and special characters to prevent syntax errors
 - [01-03]: BM25 score exposed as Math.abs(rank) since bm25() returns negative values
+- [01-04]: tsx added as devDependency for child_process.fork() TypeScript support in multi-process tests
+- [01-04]: Crash simulation uses separate crash-writer.ts forked as child process for true process-level WAL recovery testing
+- [01-04]: All 5 Phase 1 success criteria proven by 12 acceptance tests (78 total)
 
 ### Pending Todos
 
@@ -70,5 +73,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 01-03-PLAN.md
+Stopped at: Completed 01-04-PLAN.md (Phase 1 complete)
 Resume file: None
