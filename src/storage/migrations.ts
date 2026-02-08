@@ -1,11 +1,164 @@
 import type BetterSqlite3 from 'better-sqlite3';
 
-// Stub -- full implementation in Task 2
-export function runMigrations(
-  _db: BetterSqlite3.Database,
-  _hasVectorSupport: boolean,
-): void {
-  // placeholder
+/**
+ * A versioned schema migration.
+ * Migrations are applied in order and tracked in the _migrations table.
+ */
+export interface Migration {
+  version: number;
+  name: string;
+  up: string; // SQL to execute
 }
 
-export const MIGRATIONS: unknown[] = [];
+/**
+ * All schema migrations in order.
+ *
+ * Migration 001: Observations table with INTEGER PRIMARY KEY AUTOINCREMENT
+ *   (critical for FTS5 content_rowid stability across VACUUM).
+ * Migration 002: Sessions table for session lifecycle tracking.
+ * Migration 003: FTS5 external content table with porter+unicode61 tokenizer
+ *   and three sync triggers (INSERT, UPDATE, DELETE).
+ * Migration 004: sqlite-vec vec0 table for 384-dim embeddings (conditional).
+ */
+export const MIGRATIONS: Migration[] = [
+  {
+    version: 1,
+    name: 'create_observations',
+    up: `
+      CREATE TABLE observations (
+        rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT NOT NULL UNIQUE DEFAULT (lower(hex(randomblob(16)))),
+        project_hash TEXT NOT NULL,
+        content TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'unknown',
+        session_id TEXT,
+        embedding BLOB,
+        embedding_model TEXT,
+        embedding_version TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        deleted_at TEXT
+      );
+
+      CREATE INDEX idx_observations_project ON observations(project_hash);
+      CREATE INDEX idx_observations_session ON observations(session_id);
+      CREATE INDEX idx_observations_created ON observations(created_at);
+      CREATE INDEX idx_observations_deleted ON observations(deleted_at) WHERE deleted_at IS NOT NULL;
+    `,
+  },
+  {
+    version: 2,
+    name: 'create_sessions',
+    up: `
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        project_hash TEXT NOT NULL,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        ended_at TEXT,
+        summary TEXT
+      );
+
+      CREATE INDEX idx_sessions_project ON sessions(project_hash);
+      CREATE INDEX idx_sessions_started ON sessions(started_at);
+    `,
+  },
+  {
+    version: 3,
+    name: 'create_fts5_observations',
+    up: `
+      CREATE VIRTUAL TABLE observations_fts USING fts5(
+        content,
+        content='observations',
+        content_rowid='rowid',
+        tokenize='porter unicode61'
+      );
+
+      -- Sync trigger: INSERT
+      CREATE TRIGGER observations_ai AFTER INSERT ON observations BEGIN
+        INSERT INTO observations_fts(rowid, content)
+          VALUES (new.rowid, new.content);
+      END;
+
+      -- Sync trigger: UPDATE (delete old entry, insert new)
+      CREATE TRIGGER observations_au AFTER UPDATE ON observations BEGIN
+        INSERT INTO observations_fts(observations_fts, rowid, content)
+          VALUES('delete', old.rowid, old.content);
+        INSERT INTO observations_fts(rowid, content)
+          VALUES (new.rowid, new.content);
+      END;
+
+      -- Sync trigger: DELETE
+      CREATE TRIGGER observations_ad AFTER DELETE ON observations BEGIN
+        INSERT INTO observations_fts(observations_fts, rowid, content)
+          VALUES('delete', old.rowid, old.content);
+      END;
+    `,
+  },
+  {
+    version: 4,
+    name: 'create_vec0_embeddings',
+    up: `
+      CREATE VIRTUAL TABLE IF NOT EXISTS observation_embeddings USING vec0(
+        observation_id TEXT PRIMARY KEY,
+        embedding float[384]
+      );
+    `,
+  },
+];
+
+/**
+ * Applies unapplied schema migrations in order.
+ *
+ * Creates a _migrations tracking table if it does not exist, then applies
+ * each migration whose version exceeds the current max applied version.
+ * Each migration runs inside a transaction for atomicity.
+ *
+ * Migration 004 (vec0 table) is only applied when hasVectorSupport is true.
+ * If sqlite-vec is not available, it is silently skipped and will be applied
+ * on a future run when the extension becomes available.
+ *
+ * @param db - An open better-sqlite3 database connection
+ * @param hasVectorSupport - Whether sqlite-vec loaded successfully
+ */
+export function runMigrations(
+  db: BetterSqlite3.Database,
+  hasVectorSupport: boolean,
+): void {
+  // Create tracking table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS _migrations (
+      version INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  // Get current max applied version
+  const maxVersion = db.prepare(
+    'SELECT COALESCE(MAX(version), 0) FROM _migrations',
+  ).pluck().get() as number;
+
+  // Prepare insert statement
+  const insertMigration = db.prepare(
+    'INSERT INTO _migrations (version, name) VALUES (?, ?)',
+  );
+
+  // Apply each unapplied migration in a transaction
+  const applyMigration = db.transaction((m: Migration) => {
+    db.exec(m.up);
+    insertMigration.run(m.version, m.name);
+  });
+
+  for (const migration of MIGRATIONS) {
+    if (migration.version <= maxVersion) {
+      continue;
+    }
+
+    // Skip vec0 migration if sqlite-vec is not available
+    if (migration.version === 4 && !hasVectorSupport) {
+      continue;
+    }
+
+    applyMigration(migration);
+  }
+}
