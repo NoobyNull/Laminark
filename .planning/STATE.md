@@ -5,32 +5,33 @@
 See: .planning/PROJECT.md (updated 2026-02-08)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable.
-**Current focus:** Phase 1 - Storage Engine
+**Current focus:** Phase 2 - MCP Interface and Search
 
 ## Current Position
 
-Phase: 1 of 8 (Storage Engine) -- COMPLETE
-Plan: 4 of 4 in current phase (all done)
-Status: Phase 1 complete, ready for Phase 2
-Last activity: 2026-02-08 — Completed quick-1 debug logging infrastructure
+Phase: 2 of 8 (MCP Interface and Search)
+Plan: 1 of 3 in current phase (02-01 complete)
+Status: Executing Phase 2
+Last activity: 2026-02-08 — Completed 02-01 MCP server scaffold with save_memory tool
 
-Progress: [▓▓▓▓░░░░░░] 11%
+Progress: [▓▓▓▓▓░░░░░] 14%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: 3min
-- Total execution time: 0.2 hours
+- Total plans completed: 5
+- Average duration: 4min
+- Total execution time: 0.3 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-storage-engine | 4/4 | 13min | 3min |
+| 02-mcp-interface-and-search | 1/3 | 6min | 6min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (3min), 01-02 (3min), 01-03 (4min), 01-04 (3min)
+- Last 5 plans: 01-02 (3min), 01-03 (4min), 01-04 (3min), 02-01 (6min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -61,6 +62,11 @@ Recent decisions affecting current work:
 - [quick-1]: Debug logging via stderr (process.stderr.write) to keep stdout clean for MCP protocol
 - [quick-1]: Cached isDebugEnabled() boolean for zero-cost no-op path when debug disabled
 - [quick-1]: Debug categories: db, obs, search, session -- use debug(category, message, data?) pattern
+- [02-01]: Used z.input instead of z.infer for ObservationInsert -- Zod v4 z.infer produces output type where defaulted fields are required
+- [02-01]: FTS5 snippet column index 1 (content) after title column added at FTS5 position 0
+- [02-01]: registerTool() used for MCP tool registration (not deprecated server.tool())
+- [02-01]: MCP tool pattern: export registerXxx(server, db, projectHash) from src/mcp/tools/
+- [02-01]: Token budget: 2000 default, 4000 full view, ~4 chars/token estimation
 
 ### Pending Todos
 
@@ -83,5 +89,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed quick-1 debug logging infrastructure
+Stopped at: Completed 02-01 MCP server scaffold with save_memory tool
 Resume file: None
