@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-08)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable.
-**Current focus:** Phase 3 - Hook Integration and Capture
+**Current focus:** Phase 3 Complete - Ready for Phase 4
 
 ## Current Position
 
-Phase: 3 of 8 (Hook Integration and Capture)
-Plan: 2 of 3 in current phase (03-02 complete)
-Status: Executing Phase 3
-Last activity: 2026-02-08 — Completed 03-02 admission filter and privacy filter
+Phase: 3 of 8 (Hook Integration and Capture) -- COMPLETE
+Plan: 3 of 3 in current phase (03-03 complete)
+Status: Phase 3 Complete
+Last activity: 2026-02-08 — Completed 03-03 hook integration and capture pipeline
 
-Progress: [▓▓▓▓▓▓▓▓░░] 27%
+Progress: [████████░░░░░░░░░░░░] 30%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 9
+- Total plans completed: 10
 - Average duration: 4min
-- Total execution time: 0.5 hours
+- Total execution time: 0.6 hours
 
 **By Phase:**
 
@@ -29,10 +29,10 @@ Progress: [▓▓▓▓▓▓▓▓░░] 27%
 |-------|-------|-------|----------|
 | 01-storage-engine | 4/4 | 13min | 3min |
 | 02-mcp-interface-and-search | 3/3 | 12min | 4min |
-| 03-hook-integration-and-capture | 2/3 | 8min | 4min |
+| 03-hook-integration-and-capture | 3/3 | 11min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 02-02 (3min), 02-03 (3min), 03-01 (3min), 03-02 (5min)
+- Last 5 plans: 02-03 (3min), 03-01 (3min), 03-02 (5min), 03-03 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -80,6 +80,9 @@ Recent decisions affecting current work:
 - [03-02]: Laminark self-referential MCP tools (mcp__laminark__*) rejected in admission filter
 - [03-02]: Privacy patterns cached per-process with _resetPatternCache() escape hatch for testing
 - [03-01]: Self-referential filter: skip tools with mcp__laminark__ prefix to prevent recursive capture
+- [03-03]: Handler orchestrates pipeline (processPostToolUseFiltered) -- extract -> file exclusion -> privacy redaction -> admission filter -> store
+- [03-03]: LAMINARK_DATA_DIR env var added to getConfigDir() for test isolation without mocking
+- [03-03]: Privacy filter runs before admission filter to prevent secret content in debug logs
 
 ### Pending Todos
 
@@ -88,7 +91,7 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
-- Phase 3 (Hooks): Claude Code hooks API must be verified against current SDK version during planning
+- ~~Phase 3 (Hooks): Claude Code hooks API must be verified against current SDK version during planning~~ -- DONE (Phase 3 complete)
 - Phase 4 (Embeddings): @huggingface/transformers replaces archived fastembed-js -- integration needs validation
 - Phase 6 (Topic Detection): EWMA parameter tuning is novel territory, expect iteration
 - Phase 7 (Knowledge Graph): Entity extraction from casual conversation text is noisy, start conservative
@@ -102,5 +105,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 03-02-PLAN.md admission filter and privacy filter
+Stopped at: Completed 03-03-PLAN.md hook integration and capture pipeline (Phase 3 complete)
 Resume file: None
