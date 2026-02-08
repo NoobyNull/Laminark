@@ -2,8 +2,10 @@ import { openDatabase } from '../storage/database.js';
 import { getDatabaseConfig, getProjectHash } from '../shared/config.js';
 import { ObservationRepository } from '../storage/observations.js';
 import { SessionRepository } from '../storage/sessions.js';
-import { processPostToolUse } from './capture.js';
+import { extractObservation } from './capture.js';
 import { handleSessionStart, handleSessionEnd } from './session-lifecycle.js';
+import { redactSensitiveContent, isExcludedFile } from './privacy-filter.js';
+import { shouldAdmit } from './admission-filter.js';
 import { debug } from '../shared/debug.js';
 
 /**
@@ -18,6 +20,13 @@ import { debug } from '../shared/debug.js';
  * - ALWAYS exits 0 (non-zero exit codes surface as errors to Claude)
  * - Opens its own database connection (WAL mode handles concurrent access with MCP server)
  * - Imports only storage modules -- NO @modelcontextprotocol/sdk (cold start overhead)
+ *
+ * Filter pipeline (PostToolUse/PostToolUseFailure):
+ *   1. Self-referential filter (mcp__laminark__ prefix)
+ *   2. Extract observation text from payload
+ *   3. Privacy filter: exclude sensitive files, redact secrets
+ *   4. Admission filter: reject noise content
+ *   5. Store to database
  */
 
 async function readStdin(): Promise<string> {
@@ -26,6 +35,81 @@ async function readStdin(): Promise<string> {
     chunks.push(chunk as Buffer);
   }
   return Buffer.concat(chunks).toString('utf-8');
+}
+
+/**
+ * Processes a PostToolUse or PostToolUseFailure event through the full
+ * filter pipeline: extract -> privacy -> admission -> store.
+ *
+ * Exported for unit testing of the pipeline logic.
+ */
+export function processPostToolUseFiltered(
+  input: Record<string, unknown>,
+  obsRepo: ObservationRepository,
+): void {
+  const toolName = input.tool_name as string | undefined;
+
+  if (!toolName) {
+    debug('hook', 'PostToolUse missing tool_name, skipping');
+    return;
+  }
+
+  // 1. Skip self-referential capture (Laminark observing its own operations)
+  if (toolName.startsWith('mcp__laminark__')) {
+    debug('hook', 'Skipping self-referential tool', { tool: toolName });
+    return;
+  }
+
+  // 2. Extract file path from tool_input (for file exclusion check)
+  const toolInput = (input.tool_input as Record<string, unknown>) ?? {};
+  const filePath = toolInput.file_path as string | undefined;
+
+  // 3. Privacy filter: check file exclusion first
+  if (filePath && isExcludedFile(filePath)) {
+    debug('hook', 'Observation excluded (sensitive file)', { tool: toolName, filePath });
+    return;
+  }
+
+  // 4. Extract observation text from payload
+  const payload = {
+    session_id: input.session_id as string,
+    cwd: input.cwd as string,
+    hook_event_name: input.hook_event_name as string,
+    tool_name: toolName,
+    tool_input: toolInput,
+    tool_response: input.tool_response as Record<string, unknown> | undefined,
+    tool_use_id: input.tool_use_id as string | undefined,
+  };
+
+  const summary = extractObservation(payload);
+
+  if (summary === null) {
+    debug('hook', 'No observation extracted', { tool: toolName });
+    return;
+  }
+
+  // 5. Privacy filter: redact sensitive content
+  const redacted = redactSensitiveContent(summary, filePath);
+
+  if (redacted === null) {
+    debug('hook', 'Observation excluded by privacy filter', { tool: toolName });
+    return;
+  }
+
+  // 6. Admission filter: reject noise
+  if (!shouldAdmit(toolName, redacted)) {
+    debug('hook', 'Observation rejected by admission filter', { tool: toolName });
+    return;
+  }
+
+  // 7. Store the filtered, redacted observation
+  obsRepo.create({
+    content: redacted,
+    source: 'hook:' + toolName,
+    sessionId: payload.session_id ?? null,
+  });
+
+  debug('hook', 'Captured observation', { tool: toolName, length: redacted.length });
 }
 
 async function main(): Promise<void> {
@@ -54,7 +138,7 @@ async function main(): Promise<void> {
     switch (eventName) {
       case 'PostToolUse':
       case 'PostToolUseFailure':
-        processPostToolUse(input, obsRepo);
+        processPostToolUseFiltered(input, obsRepo);
         break;
       case 'SessionStart':
         handleSessionStart(input, sessionRepo);
