@@ -12,7 +12,7 @@ Laminark delivers persistent adaptive memory for Claude Code in 8 phases followi
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Storage Engine** - Rock-solid SQLite foundation with WAL, concurrency, and crash recovery
+- [x] **Phase 1: Storage Engine** - Rock-solid SQLite foundation with WAL, concurrency, and crash recovery
 - [ ] **Phase 2: MCP Interface and Search** - Claude-facing tools with keyword search and progressive disclosure
 - [ ] **Phase 3: Hook Integration and Capture** - Automatic observation capture via Claude Code hooks
 - [ ] **Phase 4: Embedding Engine and Semantic Search** - Vector embeddings with pluggable strategy and hybrid search
@@ -36,10 +36,10 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 4 plans
 
 Plans:
-- [ ] 01-01-PLAN.md -- @laminark/memory package scaffolding, TypeScript toolchain, core types with Zod schemas, and config utilities
-- [ ] 01-02-PLAN.md -- SQLite database initialization with WAL mode, PRAGMA sequence, FTS5 external content with stable integer rowid, and migration system
-- [ ] 01-03-PLAN.md -- Observation CRUD, session lifecycle, and FTS5 keyword search with BM25 ranking and project scoping
-- [ ] 01-04-PLAN.md -- Acceptance tests proving all 5 success criteria: concurrency, crash recovery, persistence, project isolation, schema completeness (TDD)
+- [x] 01-01-PLAN.md -- @laminark/memory package scaffolding, TypeScript toolchain, core types with Zod schemas, and config utilities
+- [x] 01-02-PLAN.md -- SQLite database initialization with WAL mode, PRAGMA sequence, FTS5 external content with stable integer rowid, and migration system
+- [x] 01-03-PLAN.md -- Observation CRUD, session lifecycle, and FTS5 keyword search with BM25 ranking and project scoping
+- [x] 01-04-PLAN.md -- Acceptance tests proving all 5 success criteria: concurrency, crash recovery, persistence, project isolation, schema completeness (TDD)
 
 ### Phase 2: MCP Interface and Search
 **Goal**: Claude can search, save, and manage memories through MCP tools with keyword search that respects token budgets
@@ -178,7 +178,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Storage Engine | 0/4 | Planned | - |
+| 1. Storage Engine | 4/4 | Complete | 2026-02-08 |
 | 2. MCP Interface and Search | 0/4 | Planned | - |
 | 3. Hook Integration and Capture | 0/4 | Planned | - |
 | 4. Embedding Engine and Semantic Search | 0/4 | Planned | - |

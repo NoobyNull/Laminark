@@ -8,15 +8,15 @@
 
 ### Memory Core
 
-- [ ] **MEM-01**: User's observations persist across Claude Code sessions in a single SQLite database file with WAL mode
+- [x] **MEM-01**: User's observations persist across Claude Code sessions in a single SQLite database file with WAL mode
 - [ ] **MEM-02**: Observations are automatically captured via PostToolUse hook without user intervention
 - [ ] **MEM-03**: Session lifecycle is tracked via SessionStart and SessionEnd hooks with unique session IDs
 - [ ] **MEM-04**: User can manually save a memory with explicit text via MCP save_memory tool
 - [ ] **MEM-05**: User can delete specific memories via MCP forget tool (soft delete with recovery option)
-- [ ] **MEM-06**: All observations are scoped to the project directory — no cross-project contamination
-- [ ] **MEM-07**: Multiple concurrent Claude Code sessions can read/write safely without corruption or data loss
-- [ ] **MEM-08**: Database uses write-ahead journaling for crash recovery — incomplete writes never corrupt data
-- [ ] **MEM-09**: Schema stores original text alongside embeddings with model version metadata for future migration
+- [x] **MEM-06**: All observations are scoped to the project directory — no cross-project contamination
+- [x] **MEM-07**: Multiple concurrent Claude Code sessions can read/write safely without corruption or data loss
+- [x] **MEM-08**: Database uses write-ahead journaling for crash recovery — incomplete writes never corrupt data
+- [x] **MEM-09**: Schema stores original text alongside embeddings with model version metadata for future migration
 - [ ] **MEM-10**: Observation admission filters prevent storing low-signal noise (build logs, large file reads) — only meaningful content is retained
 
 ### Search
@@ -25,7 +25,7 @@
 - [ ] **SRC-02**: User can search memories by semantic meaning via vector similarity using sqlite-vec
 - [ ] **SRC-03**: Hybrid search combines FTS5 keyword and vector semantic scores using reciprocal rank fusion
 - [ ] **SRC-04**: Search uses 3-layer progressive disclosure: compact index (~50-100 tokens/result) -> timeline context -> full observation details
-- [ ] **SRC-05**: Search results respect project scoping and never leak observations from other projects
+- [x] **SRC-05**: Search results respect project scoping and never leak observations from other projects
 - [ ] **SRC-06**: MCP search tool response stays under 2000 tokens to prevent context window poisoning
 
 ### Context Management
@@ -102,21 +102,21 @@
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| MEM-01 | Phase 1: Storage Engine | Pending |
+| MEM-01 | Phase 1: Storage Engine | Done |
 | MEM-02 | Phase 3: Hook Integration and Capture | Pending |
 | MEM-03 | Phase 3: Hook Integration and Capture | Pending |
 | MEM-04 | Phase 2: MCP Interface and Search | Pending |
 | MEM-05 | Phase 2: MCP Interface and Search | Pending |
-| MEM-06 | Phase 1: Storage Engine | Pending |
-| MEM-07 | Phase 1: Storage Engine | Pending |
-| MEM-08 | Phase 1: Storage Engine | Pending |
-| MEM-09 | Phase 1: Storage Engine | Pending |
+| MEM-06 | Phase 1: Storage Engine | Done |
+| MEM-07 | Phase 1: Storage Engine | Done |
+| MEM-08 | Phase 1: Storage Engine | Done |
+| MEM-09 | Phase 1: Storage Engine | Done |
 | MEM-10 | Phase 3: Hook Integration and Capture | Pending |
 | SRC-01 | Phase 2: MCP Interface and Search | Pending |
 | SRC-02 | Phase 4: Embedding Engine and Semantic Search | Pending |
 | SRC-03 | Phase 4: Embedding Engine and Semantic Search | Pending |
 | SRC-04 | Phase 2: MCP Interface and Search | Pending |
-| SRC-05 | Phase 1: Storage Engine | Pending |
+| SRC-05 | Phase 1: Storage Engine | Done |
 | SRC-06 | Phase 2: MCP Interface and Search | Pending |
 | CTX-01 | Phase 5: Session Context and Summaries | Pending |
 | CTX-02 | Phase 5: Session Context and Summaries | Pending |
