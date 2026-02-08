@@ -19,6 +19,8 @@ export interface Migration {
  * Migration 003: FTS5 external content table with porter+unicode61 tokenizer
  *   and three sync triggers (INSERT, UPDATE, DELETE).
  * Migration 004: sqlite-vec vec0 table for 384-dim embeddings (conditional).
+ * Migration 005: Add title column to observations and rebuild FTS5 with
+ *   title+content dual-column indexing.
  */
 export const MIGRATIONS: Migration[] = [
   {
@@ -102,6 +104,45 @@ export const MIGRATIONS: Migration[] = [
         observation_id TEXT PRIMARY KEY,
         embedding float[384]
       );
+    `,
+  },
+  {
+    version: 5,
+    name: 'add_observation_title',
+    up: `
+      ALTER TABLE observations ADD COLUMN title TEXT;
+
+      DROP TRIGGER observations_ai;
+      DROP TRIGGER observations_au;
+      DROP TRIGGER observations_ad;
+      DROP TABLE observations_fts;
+
+      CREATE VIRTUAL TABLE observations_fts USING fts5(
+        title,
+        content,
+        content='observations',
+        content_rowid='rowid',
+        tokenize='porter unicode61'
+      );
+
+      CREATE TRIGGER observations_ai AFTER INSERT ON observations BEGIN
+        INSERT INTO observations_fts(rowid, title, content)
+          VALUES (new.rowid, new.title, new.content);
+      END;
+
+      CREATE TRIGGER observations_au AFTER UPDATE ON observations BEGIN
+        INSERT INTO observations_fts(observations_fts, rowid, title, content)
+          VALUES('delete', old.rowid, old.title, old.content);
+        INSERT INTO observations_fts(rowid, title, content)
+          VALUES (new.rowid, new.title, new.content);
+      END;
+
+      CREATE TRIGGER observations_ad AFTER DELETE ON observations BEGIN
+        INSERT INTO observations_fts(observations_fts, rowid, title, content)
+          VALUES('delete', old.rowid, old.title, old.content);
+      END;
+
+      INSERT INTO observations_fts(observations_fts) VALUES('rebuild');
     `,
   },
 ];

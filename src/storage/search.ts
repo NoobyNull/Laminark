@@ -47,7 +47,7 @@ export class SearchEngine {
       SELECT
         o.*,
         bm25(observations_fts) AS rank,
-        snippet(observations_fts, 0, '<mark>', '</mark>', '...', 32) AS snippet
+        snippet(observations_fts, 1, '<mark>', '</mark>', '...', 32) AS snippet
       FROM observations_fts
       JOIN observations o ON o.rowid = observations_fts.rowid
       WHERE observations_fts MATCH ?
@@ -108,7 +108,7 @@ export class SearchEngine {
       SELECT
         o.*,
         bm25(observations_fts) AS rank,
-        snippet(observations_fts, 0, '<mark>', '</mark>', '...', 32) AS snippet
+        snippet(observations_fts, 1, '<mark>', '</mark>', '...', 32) AS snippet
       FROM observations_fts
       JOIN observations o ON o.rowid = observations_fts.rowid
       WHERE observations_fts MATCH ?

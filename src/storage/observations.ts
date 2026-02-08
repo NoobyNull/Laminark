@@ -36,8 +36,8 @@ export class ObservationRepository {
     this.projectHash = projectHash;
 
     this.stmtInsert = db.prepare(`
-      INSERT INTO observations (id, project_hash, content, source, session_id, embedding, embedding_model, embedding_version)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO observations (id, project_hash, content, title, source, session_id, embedding, embedding_model, embedding_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.stmtGetById = db.prepare(`
@@ -87,6 +87,7 @@ export class ObservationRepository {
       id,
       this.projectHash,
       validated.content,
+      validated.title,
       validated.source,
       validated.sessionId,
       embeddingBuffer,

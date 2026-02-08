@@ -14,6 +14,7 @@ export const ObservationRowSchema = z.object({
   id: z.string(),
   project_hash: z.string(),
   content: z.string(),
+  title: z.string().nullable(),
   source: z.string(),
   session_id: z.string().nullable(),
   embedding: z.instanceof(Buffer).nullable(),
@@ -40,6 +41,7 @@ export interface Observation {
   id: string;
   projectHash: string;
   content: string;
+  title: string | null;
   source: string;
   sessionId: string | null;
   embedding: Float32Array | null;
@@ -60,6 +62,7 @@ export interface Observation {
  */
 export const ObservationInsertSchema = z.object({
   content: z.string().min(1).max(100_000),
+  title: z.string().max(200).nullable().default(null),
   source: z.string().default('unknown'),
   sessionId: z.string().nullable().default(null),
   embedding: z.instanceof(Float32Array).nullable().default(null),
@@ -67,7 +70,7 @@ export const ObservationInsertSchema = z.object({
   embeddingVersion: z.string().nullable().default(null),
 });
 
-export type ObservationInsert = z.infer<typeof ObservationInsertSchema>;
+export type ObservationInsert = z.input<typeof ObservationInsertSchema>;
 
 // =============================================================================
 // Session Types
@@ -115,6 +118,7 @@ export function rowToObservation(row: ObservationRow): Observation {
     id: row.id,
     projectHash: row.project_hash,
     content: row.content,
+    title: row.title,
     source: row.source,
     sessionId: row.session_id,
     embedding: row.embedding
