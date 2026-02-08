@@ -10,27 +10,27 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 ## Current Position
 
 Phase: 1 of 8 (Storage Engine)
-Plan: 2 of 4 in current phase
+Plan: 3 of 4 in current phase
 Status: Executing phase 1
-Last activity: 2026-02-08 — Completed 01-02 database initialization
+Last activity: 2026-02-08 — Completed 01-03 data access layer
 
-Progress: [▓▓░░░░░░░░] 5%
+Progress: [▓▓▓░░░░░░░] 8%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
+- Total plans completed: 3
 - Average duration: 3min
-- Total execution time: 0.1 hours
+- Total execution time: 0.2 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01-storage-engine | 2/4 | 6min | 3min |
+| 01-storage-engine | 3/4 | 10min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (3min), 01-02 (3min)
+- Last 5 plans: 01-01 (3min), 01-02 (3min), 01-03 (4min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -51,6 +51,10 @@ Recent decisions affecting current work:
 - [01-02]: PRAGMAs set in strict order: WAL first, then busy_timeout, synchronous NORMAL, cache_size, foreign_keys, temp_store, wal_autocheckpoint
 - [01-02]: FTS5 content_rowid references explicit INTEGER PRIMARY KEY AUTOINCREMENT per research critical finding
 - [01-02]: Migration 004 (vec0) conditionally applied based on sqlite-vec availability
+- [01-03]: Constructor-bound projectHash ensures every query is project-scoped -- callers cannot accidentally query wrong project
+- [01-03]: ORDER BY includes rowid DESC as tiebreaker for deterministic ordering within same-second timestamps
+- [01-03]: FTS5 query sanitization strips operators and special characters to prevent syntax errors
+- [01-03]: BM25 score exposed as Math.abs(rank) since bm25() returns negative values
 
 ### Pending Todos
 
@@ -66,5 +70,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 01-02-PLAN.md
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None
