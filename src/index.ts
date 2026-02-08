@@ -8,6 +8,7 @@ import { openDatabase } from './storage/database.js';
 import { getDatabaseConfig, getProjectHash } from './shared/config.js';
 import { debug } from './shared/debug.js';
 import { createServer, startServer } from './mcp/server.js';
+import { registerRecall } from './mcp/tools/recall.js';
 import { registerSaveMemory } from './mcp/tools/save-memory.js';
 
 const db = openDatabase(getDatabaseConfig());
@@ -15,7 +16,7 @@ const projectHash = getProjectHash(process.cwd());
 
 const server = createServer();
 registerSaveMemory(server, db.db, projectHash);
-// registerRecall will be added in Plan 02-02
+registerRecall(server, db.db, projectHash);
 
 startServer(server).catch((err) => {
   debug('mcp', 'Fatal: failed to start server', { error: err.message });

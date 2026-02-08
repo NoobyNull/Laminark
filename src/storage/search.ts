@@ -46,7 +46,7 @@ export class SearchEngine {
     let sql = `
       SELECT
         o.*,
-        bm25(observations_fts) AS rank,
+        bm25(observations_fts, 2.0, 1.0) AS rank,
         snippet(observations_fts, 1, '<mark>', '</mark>', '...', 32) AS snippet
       FROM observations_fts
       JOIN observations o ON o.rowid = observations_fts.rowid
@@ -107,7 +107,7 @@ export class SearchEngine {
     const sql = `
       SELECT
         o.*,
-        bm25(observations_fts) AS rank,
+        bm25(observations_fts, 2.0, 1.0) AS rank,
         snippet(observations_fts, 1, '<mark>', '</mark>', '...', 32) AS snippet
       FROM observations_fts
       JOIN observations o ON o.rowid = observations_fts.rowid
