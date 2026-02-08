@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 ## Current Position
 
 Phase: 1 of 8 (Storage Engine)
-Plan: 1 of 4 in current phase
+Plan: 2 of 4 in current phase
 Status: Executing phase 1
-Last activity: 2026-02-08 — Completed 01-01 project scaffolding
+Last activity: 2026-02-08 — Completed 01-02 database initialization
 
-Progress: [▓░░░░░░░░░] 3%
+Progress: [▓▓░░░░░░░░] 5%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
+- Total plans completed: 2
 - Average duration: 3min
-- Total execution time: 0.05 hours
+- Total execution time: 0.1 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01-storage-engine | 1/4 | 3min | 3min |
+| 01-storage-engine | 2/4 | 6min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (3min)
-- Trend: Starting
+- Last 5 plans: 01-01 (3min), 01-02 (3min)
+- Trend: Consistent
 
 *Updated after each plan completion*
 
@@ -48,6 +48,9 @@ Recent decisions affecting current work:
 - [01-01]: tsdown outputOptions.entryFileNames set to [name].js to produce dist/index.js matching package.json bin entry
 - [01-01]: ObservationRow includes explicit integer rowid for FTS5 content_rowid compatibility
 - [01-01]: Single database at ~/.laminark/data.db with project_hash scoping (user locked decision confirmed)
+- [01-02]: PRAGMAs set in strict order: WAL first, then busy_timeout, synchronous NORMAL, cache_size, foreign_keys, temp_store, wal_autocheckpoint
+- [01-02]: FTS5 content_rowid references explicit INTEGER PRIMARY KEY AUTOINCREMENT per research critical finding
+- [01-02]: Migration 004 (vec0) conditionally applied based on sqlite-vec availability
 
 ### Pending Todos
 
@@ -63,5 +66,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 01-01-PLAN.md
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None
