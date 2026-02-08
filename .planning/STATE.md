@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 ## Current Position
 
 Phase: 2 of 8 (MCP Interface and Search)
-Plan: 1 of 3 in current phase (02-01 complete)
+Plan: 2 of 3 in current phase (02-02 complete)
 Status: Executing Phase 2
-Last activity: 2026-02-08 — Completed 02-01 MCP server scaffold with save_memory tool
+Last activity: 2026-02-08 — Completed 02-02 recall tool with progressive disclosure
 
-Progress: [▓▓▓▓▓░░░░░] 14%
+Progress: [▓▓▓▓▓▓░░░░] 18%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
+- Total plans completed: 6
 - Average duration: 4min
-- Total execution time: 0.3 hours
+- Total execution time: 0.4 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-storage-engine | 4/4 | 13min | 3min |
-| 02-mcp-interface-and-search | 1/3 | 6min | 6min |
+| 02-mcp-interface-and-search | 2/3 | 9min | 5min |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (3min), 01-03 (4min), 01-04 (3min), 02-01 (6min)
+- Last 5 plans: 01-03 (4min), 01-04 (3min), 02-01 (6min), 02-02 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -67,6 +67,9 @@ Recent decisions affecting current work:
 - [02-01]: registerTool() used for MCP tool registration (not deprecated server.tool())
 - [02-01]: MCP tool pattern: export registerXxx(server, db, projectHash) from src/mcp/tools/
 - [02-01]: Token budget: 2000 default, 4000 full view, ~4 chars/token estimation
+- [02-02]: BM25 weights 2.0 (title) / 1.0 (content) for title-biased relevance ranking
+- [02-02]: Single unified recall tool with action parameter (view/purge/restore) -- not separate tools
+- [02-02]: Purge/restore require explicit IDs -- no blind bulk operations on search results
 
 ### Pending Todos
 
@@ -89,5 +92,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 02-01 MCP server scaffold with save_memory tool
+Stopped at: Completed 02-02 recall tool with progressive disclosure
 Resume file: None
