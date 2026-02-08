@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Storage Engine** - Rock-solid SQLite foundation with WAL, concurrency, and crash recovery
 - [x] **Phase 2: MCP Interface and Search** - Claude-facing tools with keyword search and progressive disclosure
-- [ ] **Phase 3: Hook Integration and Capture** - Automatic observation capture via Claude Code hooks
+- [x] **Phase 3: Hook Integration and Capture** - Automatic observation capture via Claude Code hooks
 - [ ] **Phase 4: Embedding Engine and Semantic Search** - Vector embeddings with pluggable strategy and hybrid search
 - [ ] **Phase 5: Session Context and Summaries** - Context continuity across sessions with progressive disclosure
 - [ ] **Phase 6: Topic Detection and Context Stashing** - Adaptive topic shift detection with automatic context preservation
@@ -70,9 +70,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md -- Hook handler entry point, observation capture from PostToolUse, session lifecycle, and dual-entry-point build config
-- [ ] 03-02-PLAN.md -- Admission filter with noise detection and privacy filter with sensitive content redaction (TDD)
-- [ ] 03-03-PLAN.md -- hooks.json plugin configuration, filter pipeline wiring, and end-to-end integration tests
+- [x] 03-01-PLAN.md -- Hook handler entry point, observation capture from PostToolUse, session lifecycle, and dual-entry-point build config
+- [x] 03-02-PLAN.md -- Admission filter with noise detection and privacy filter with sensitive content redaction (TDD)
+- [x] 03-03-PLAN.md -- hooks.json plugin configuration, filter pipeline wiring, and end-to-end integration tests
 
 ### Phase 4: Embedding Engine and Semantic Search
 **Goal**: Observations gain semantic meaning through vector embeddings enabling "search by concept" alongside keyword search
@@ -178,7 +178,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 |-------|----------------|--------|-----------|
 | 1. Storage Engine | 4/4 | Complete | 2026-02-08 |
 | 2. MCP Interface and Search | 3/3 | Complete | 2026-02-08 |
-| 3. Hook Integration and Capture | 0/3 | Planned | - |
+| 3. Hook Integration and Capture | 3/3 | Complete | 2026-02-08 |
 | 4. Embedding Engine and Semantic Search | 0/4 | Planned | - |
 | 5. Session Context and Summaries | 0/3 | Planned | - |
 | 6. Topic Detection and Context Stashing | 0/6 | Planned | - |
