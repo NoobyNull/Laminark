@@ -68,13 +68,13 @@ Plans:
   2. Session start and end events are tracked with unique session IDs in the database
   3. Low-signal noise (raw build output, large file dumps, repetitive linter warnings) is filtered out and never stored
   4. Sensitive content matching configured patterns (like .env file contents, API keys) is excluded from capture
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 03-01: Hook dispatcher scripts (PostToolUse, SessionStart, SessionEnd, Stop)
-- [ ] 03-02: Observation admission filter with noise detection and relevance scoring
-- [ ] 03-03: Privacy filter for sensitive content exclusion
-- [ ] 03-04: hooks.json configuration and end-to-end capture testing
+- [ ] 03-01-PLAN.md -- Hook dispatcher scripts and ingest receiver HTTP endpoint with normalizer
+- [ ] 03-02-PLAN.md -- Observation admission filter with noise detection and relevance scoring
+- [ ] 03-03-PLAN.md -- Privacy filter for sensitive content redaction with configurable patterns
+- [ ] 03-04-PLAN.md -- hooks.json configuration, pipeline orchestrator, and end-to-end capture testing
 
 ### Phase 4: Embedding Engine and Semantic Search
 **Goal**: Observations gain semantic meaning through vector embeddings enabling "search by concept" alongside keyword search
@@ -86,7 +86,7 @@ Plans:
   3. Embedding generation happens in a worker thread and never blocks MCP tool responses or slows Claude's output
   4. If the ONNX model is unavailable (missing file, load failure), the system silently falls back to keyword-only search with no errors
   5. Plugin startup completes with zero perceptible latency -- the ONNX model loads lazily on first observation, not at process start
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
 - [ ] 04-01: Pluggable embedding strategy interface with local ONNX default implementation
@@ -141,7 +141,7 @@ Plans:
   3. Claude can query the knowledge graph via MCP tool (e.g., "what files does this decision affect?" returns traversal results)
   4. Graph enforces entity type taxonomy and caps node degree at 50 edges, preventing unnavigable hairball growth
   5. Curation agent periodically merges similar observations and generates consolidated summaries during quiet periods
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
 - [ ] 07-01: Entity extraction from observations (typed entity identification)
@@ -162,7 +162,7 @@ Plans:
   3. User can click a node to see its associated observations, filter nodes by entity type, and zoom to specific time ranges
   4. Timeline view shows chronological flow of sessions, observations, and topic shift points
   5. UI updates live as new observations are processed (no manual refresh needed)
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
 - [ ] 08-01: Hono web server setup with static asset serving and SSE endpoint
@@ -180,7 +180,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 |-------|----------------|--------|-----------|
 | 1. Storage Engine | 0/4 | Planned | - |
 | 2. MCP Interface and Search | 0/4 | Planned | - |
-| 3. Hook Integration and Capture | 0/4 | Not started | - |
+| 3. Hook Integration and Capture | 0/4 | Planned | - |
 | 4. Embedding Engine and Semantic Search | 0/5 | Not started | - |
 | 5. Session Context and Summaries | 0/3 | Planned | - |
 | 6. Topic Detection and Context Stashing | 0/6 | Planned | - |
