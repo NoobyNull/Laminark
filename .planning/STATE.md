@@ -74,6 +74,12 @@ Recent decisions affecting current work:
 - Phase 6 (Topic Detection): EWMA parameter tuning is novel territory, expect iteration
 - Phase 7 (Knowledge Graph): Entity extraction from casual conversation text is noisy, start conservative
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 1 | Add debug logging infrastructure with LAMINARK_DEBUG env var and config.json support | 2026-02-08 | aa7666c | [1-add-debug-logging-infrastructure-with-la](./quick/1-add-debug-logging-infrastructure-with-la/) |
+
 ## Session Continuity
 
 Last session: 2026-02-08
