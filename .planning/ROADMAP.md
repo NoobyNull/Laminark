@@ -67,13 +67,12 @@ Plans:
   2. Session start and end events are tracked with unique session IDs in the database
   3. Low-signal noise (raw build output, large file dumps, repetitive linter warnings) is filtered out and never stored
   4. Sensitive content matching configured patterns (like .env file contents, API keys) is excluded from capture
-**Plans**: 4 plans
+**Plans**: 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md -- Hook dispatcher scripts and ingest receiver HTTP endpoint with normalizer
-- [ ] 03-02-PLAN.md -- Observation admission filter with noise detection and relevance scoring
-- [ ] 03-03-PLAN.md -- Privacy filter for sensitive content redaction with configurable patterns
-- [ ] 03-04-PLAN.md -- hooks.json configuration, pipeline orchestrator, and end-to-end capture testing
+- [ ] 03-01-PLAN.md -- Hook handler entry point, observation capture from PostToolUse, session lifecycle, and dual-entry-point build config
+- [ ] 03-02-PLAN.md -- Admission filter with noise detection and privacy filter with sensitive content redaction (TDD)
+- [ ] 03-03-PLAN.md -- hooks.json plugin configuration, filter pipeline wiring, and end-to-end integration tests
 
 ### Phase 4: Embedding Engine and Semantic Search
 **Goal**: Observations gain semantic meaning through vector embeddings enabling "search by concept" alongside keyword search
@@ -179,7 +178,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 |-------|----------------|--------|-----------|
 | 1. Storage Engine | 4/4 | Complete | 2026-02-08 |
 | 2. MCP Interface and Search | 0/3 | Planned | - |
-| 3. Hook Integration and Capture | 0/4 | Planned | - |
+| 3. Hook Integration and Capture | 0/3 | Planned | - |
 | 4. Embedding Engine and Semantic Search | 0/4 | Planned | - |
 | 5. Session Context and Summaries | 0/3 | Planned | - |
 | 6. Topic Detection and Context Stashing | 0/6 | Planned | - |
