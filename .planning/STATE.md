@@ -48,7 +48,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None yet.
+- [database] Add cross-project memory sharing between Claude instances
 
 ### Blockers/Concerns
 
