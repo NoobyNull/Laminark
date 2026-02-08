@@ -181,7 +181,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 | 1. Storage Engine | 0/4 | Planned | - |
 | 2. MCP Interface and Search | 0/4 | Planned | - |
 | 3. Hook Integration and Capture | 0/4 | Planned | - |
-| 4. Embedding Engine and Semantic Search | 0/5 | Not started | - |
+| 4. Embedding Engine and Semantic Search | 0/4 | Planned | - |
 | 5. Session Context and Summaries | 0/3 | Planned | - |
 | 6. Topic Detection and Context Stashing | 0/6 | Planned | - |
 | 7. Knowledge Graph and Advanced Intelligence | 0/7 | Not started | - |
