@@ -1,13 +1,13 @@
 # Project Research Summary
 
-**Project:** Memorite - Claude Code Persistent Adaptive Memory Plugin
+**Project:** Laminark - Claude Code Persistent Adaptive Memory Plugin
 **Domain:** Developer tooling / LLM memory system / Claude Code plugin
 **Researched:** 2026-02-08
 **Confidence:** HIGH
 
 ## Executive Summary
 
-Memorite is a Claude Code plugin providing persistent cross-session memory with adaptive topic detection, semantic search, and visual exploration. The research reveals a crowded competitive landscape (Anthropic's official memory server, Mem0 OpenMemory, claude-mem, mcp-memory-service) where differentiation comes from adaptive per-user behavior and ADHD-friendly workflow patterns. The recommended architecture uses Node.js 22 LTS with SQLite + WAL for storage, sqlite-vec for vector search, and a pluggable embedding strategy defaulting to local ONNX models. The critical architectural insight is worker-thread-based analysis decoupled from MCP response latency, with zero-latency semantic processing during Claude's response generation window.
+Laminark is a Claude Code plugin providing persistent cross-session memory with adaptive topic detection, semantic search, and visual exploration. The research reveals a crowded competitive landscape (Anthropic's official memory server, Mem0 OpenMemory, claude-mem, mcp-memory-service) where differentiation comes from adaptive per-user behavior and ADHD-friendly workflow patterns. The recommended architecture uses Node.js 22 LTS with SQLite + WAL for storage, sqlite-vec for vector search, and a pluggable embedding strategy defaulting to local ONNX models. The critical architectural insight is worker-thread-based analysis decoupled from MCP response latency, with zero-latency semantic processing during Claude's response generation window.
 
 The key risks center on SQLite corruption from concurrent session access, embedding model lock-in without migration support, and context window poisoning from over-eager memory injection. These are well-understood problems with proven solutions: WAL mode with proper PRAGMA configuration eliminates corruption, storing original text with model version metadata enables migration, and 3-layer progressive disclosure (search index -> timeline -> full details) keeps token usage under control. The technology choices are conservative and proven - better-sqlite3 is the fastest SQLite driver for Node.js, FTS5 is battle-tested for keyword search, and sqlite-vec is the only in-process vector solution that doesn't require external services.
 
@@ -161,7 +161,7 @@ Based on research findings, the roadmap should follow the architecture's natural
 ---
 
 ### Phase 3: Adaptive Intelligence - Topic Learning and Knowledge Graph
-**Rationale:** Core capture and search are working. Now add the intelligence layer that differentiates Memorite: adaptive thresholds that learn per-user patterns, and knowledge graph for relationship queries.
+**Rationale:** Core capture and search are working. Now add the intelligence layer that differentiates Laminark: adaptive thresholds that learn per-user patterns, and knowledge graph for relationship queries.
 
 **Delivers:**
 - Adaptive threshold learning (EWMA-based, per-user historical baseline)

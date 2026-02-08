@@ -40,7 +40,7 @@ You pick an embedding model, store thousands of vectors, then need to change mod
 Research on "query drift compensation" confirms this is a fundamental problem: embeddings from different model versions are mathematically incompatible, and failing to reindex produces silently incorrect search results.
 
 **Why it happens:**
-Embeddings feel like an implementation detail, so developers store only vectors without the metadata needed for migration. The pluggable embedding strategy (a stated Memorite requirement) makes this worse -- the system explicitly supports multiple models, increasing the likelihood of model switches.
+Embeddings feel like an implementation detail, so developers store only vectors without the metadata needed for migration. The pluggable embedding strategy (a stated Laminark requirement) makes this worse -- the system explicitly supports multiple models, increasing the likelihood of model switches.
 
 **How to avoid:**
 - Always store the original text alongside vectors. Vectors are derived, text is primary.
@@ -209,7 +209,7 @@ Phase 3 (Knowledge Graph). But the entity extraction rules and type taxonomy mus
 | Hardcode embedding dimensions | Avoids dynamic tensor handling | Locked to one model family; changing to a model with different dimensions requires schema migration | Only if you commit to one model for the project lifetime |
 | Inline knowledge graph in the memory SQLite DB | Single file, simpler deployment | Graph queries fight with memory writes for locks; no graph-specific indexing | Acceptable for MVP if graph is read-heavy. Split to separate connection or DB if write contention appears |
 | Use synchronous embedding in the save path | Simpler code, guaranteed consistency | Blocks the MCP response until embedding completes, adding 50-200ms latency per save | Never for user-facing saves. Acceptable for background batch processing |
-| Ship web UI bundled with core plugin | Single install | Doubles package size, pulls in frontend dependencies (React, D3, etc.) for users who only want CLI memory | Only for initial release. Split into optional `@memorite/web` package by Phase 4 |
+| Ship web UI bundled with core plugin | Single install | Doubles package size, pulls in frontend dependencies (React, D3, etc.) for users who only want CLI memory | Only for initial release. Split into optional `@laminark/web` package by Phase 4 |
 
 ## Integration Gotchas
 
@@ -241,7 +241,7 @@ Phase 3 (Knowledge Graph). But the entity extraction rules and type taxonomy mus
 | Web UI server binding to 0.0.0.0 | Any device on the local network can access the memory database | Bind to 127.0.0.1 only. Require a session token for WebSocket connections. Add CORS restrictions |
 | No authentication on MCP tools | Any MCP client connected to the system can read/write/delete all memories | Implement per-session tokens. Scope tool access by session ID. Add a confirmation step for bulk delete operations |
 | Storing file contents verbatim in observations | Proprietary source code stored in memory database, persisting after the project is deleted | Store references (file path + hash) rather than full file contents. Respect .gitignore patterns for what to observe |
-| Memory database file permissions too open | Other users on shared machines can read the SQLite file | Set file permissions to 0600 (owner read/write only) on database creation. Store in user-specific directory (~/.memorite/) |
+| Memory database file permissions too open | Other users on shared machines can read the SQLite file | Set file permissions to 0600 (owner read/write only) on database creation. Store in user-specific directory (~/.laminark/) |
 
 ## UX Pitfalls
 
@@ -315,5 +315,5 @@ Phase 3 (Knowledge Graph). But the entity extraction rules and type taxonomy mus
 - [EvolvingLMMs-Lab/engram GitHub Repository](https://github.com/EvolvingLMMs-Lab/engram) -- predecessor architecture reference, E2EE memory layer
 
 ---
-*Pitfalls research for: Claude Code persistent memory plugin (Memorite)*
+*Pitfalls research for: Claude Code persistent memory plugin (Laminark)*
 *Researched: 2026-02-08*

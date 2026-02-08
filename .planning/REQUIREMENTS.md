@@ -1,6 +1,6 @@
 # Requirements
 
-**Project:** Memorite — Claude Code Persistent Adaptive Memory Plugin
+**Project:** Laminark — Claude Code Persistent Adaptive Memory Plugin
 **Version:** v1
 **Core Value:** You never lose context. Every thread is recoverable, every thought is findable.
 
@@ -34,7 +34,7 @@
 - [ ] **CTX-02**: Session summaries are generated at Stop hook by compressing session observations into concise summaries
 - [ ] **CTX-03**: When adaptive topic shift is detected, current context thread is silently stashed (snapshot of topic observations + summary)
 - [ ] **CTX-04**: User is notified when context has been stashed with a message indicating they can return to it
-- [ ] **CTX-05**: User can resume a stashed context thread via /memorite:resume slash command, re-injecting the saved context
+- [ ] **CTX-05**: User can resume a stashed context thread via /laminark:resume slash command, re-injecting the saved context
 - [ ] **CTX-06**: User can query "where was I?" to surface recently abandoned context threads ranked by recency and relevance
 
 ### Intelligence
@@ -65,10 +65,10 @@
 ### User Interface
 
 - [ ] **UI-01**: 5-7 MCP tools exposed to Claude: search, timeline, get_observations, save_memory, forget, graph_query, topic_context
-- [ ] **UI-02**: /memorite:remember slash command allows user to explicitly save a memory with context
-- [ ] **UI-03**: /memorite:recall slash command allows user to search memories by description
-- [ ] **UI-04**: /memorite:stash slash command allows user to manually stash current context thread
-- [ ] **UI-05**: /memorite:resume slash command allows user to resume a previously stashed context thread
+- [ ] **UI-02**: /laminark:remember slash command allows user to explicitly save a memory with context
+- [ ] **UI-03**: /laminark:recall slash command allows user to search memories by description
+- [ ] **UI-04**: /laminark:stash slash command allows user to manually stash current context thread
+- [ ] **UI-05**: /laminark:resume slash command allows user to resume a previously stashed context thread
 
 ### Data Quality
 

@@ -30,7 +30,7 @@
 │         │  HTTP POST / Unix domain socket                            │
 │         ▼                                                            │
 ├─────────────────────────────────────────────────────────────────────┤
-│                     Memorite Core Process                            │
+│                     Laminark Core Process                            │
 │                                                                      │
 │  ┌────────────┐  ┌──────────────┐  ┌────────────────┐               │
 │  │  Ingest    │  │  Analysis    │  │  Curation      │               │
@@ -74,7 +74,7 @@
 ## Recommended Project Structure
 
 ```
-memorite/
+laminark/
 ├── .claude-plugin/
 │   └── plugin.json           # Plugin manifest (name, version, MCP config)
 ├── hooks/
@@ -86,10 +86,10 @@ memorite/
 │   └── memory/
 │       └── SKILL.md          # Memory skill for Claude auto-invocation
 ├── commands/
-│   ├── remember.md           # /memorite:remember — manual save
-│   ├── recall.md             # /memorite:recall — manual search
-│   ├── stash.md              # /memorite:stash — stash current context
-│   └── resume.md             # /memorite:resume — resume stashed context
+│   ├── remember.md           # /laminark:remember — manual save
+│   ├── recall.md             # /laminark:recall — manual search
+│   ├── stash.md              # /laminark:stash — stash current context
+│   └── resume.md             # /laminark:resume — resume stashed context
 ├── .mcp.json                 # MCP server configuration (stdio transport)
 ├── src/
 │   ├── index.ts              # Core process entry: starts MCP, web, analysis
@@ -387,7 +387,7 @@ New topic initialized with fresh EWMA baseline
     ▼
 Next MCP interaction or SessionStart injects:
     "Topic shift detected. Previous context stashed.
-     Use /memorite:resume to return."
+     Use /laminark:resume to return."
 ```
 
 ### Key Data Flows
@@ -515,7 +515,7 @@ This order means each layer delivers standalone value:
 - **After Layer 4:** Semantic search, topic detection, knowledge graph. The "intelligence" layer.
 - **After Layer 5:** Visual exploration and curation. Polish and long-term data quality.
 
-The critical insight is that Layers 1-3 form a minimum viable plugin. A developer could use Memorite with only keyword search and manual saves, and it would still be useful. Layers 4-5 add the differentiating intelligence and visual features.
+The critical insight is that Layers 1-3 form a minimum viable plugin. A developer could use Laminark with only keyword search and manual saves, and it would still be useful. Layers 4-5 add the differentiating intelligence and visual features.
 
 ## Sources
 

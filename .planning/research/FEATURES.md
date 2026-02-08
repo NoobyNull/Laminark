@@ -28,19 +28,19 @@ Features users assume exist. Missing these = product feels incomplete. Every ser
 
 ### Differentiators (Competitive Advantage)
 
-Features that set Memorite apart. Not expected, but valued. These are where Memorite competes.
+Features that set Laminark apart. Not expected, but valued. These are where Laminark competes.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| **Adaptive per-user topic shift detection** | NO competitor does this. Static thresholds fail for ADHD/variable focus patterns. Some days you're laser-focused (high threshold), some days scattered (low threshold). Memorite learns your personal baseline per-session using rolling cosine similarity windows between consecutive observations. When drift exceeds the adaptive threshold, it triggers context stashing. | HIGH | Requires: (1) rolling embedding comparison of consecutive observations, (2) per-user historical threshold data, (3) session-level recalibration based on early session behavior, (4) decay/learning rate for threshold adjustment. Research shows sliding window cosine similarity is standard for topic segmentation, but making it adaptive and per-user is novel. Depends on: embeddings infrastructure, observation capture. |
-| **Zero-latency semantic processing** | Process embeddings and topic analysis during Claude's response generation time -- the user is already waiting. Claude-mem's worker processes async but still adds background load. Memorite makes this architectural: semantic work happens in the "free" compute window while Claude streams. No other memory plugin advertises this specific optimization. | HIGH | Requires precise lifecycle hook timing. PostToolUse fires during response generation, giving a window for parallel embedding computation. Must not block the response stream. Worker must be fast enough to complete before next observation arrives. |
+| **Adaptive per-user topic shift detection** | NO competitor does this. Static thresholds fail for ADHD/variable focus patterns. Some days you're laser-focused (high threshold), some days scattered (low threshold). Laminark learns your personal baseline per-session using rolling cosine similarity windows between consecutive observations. When drift exceeds the adaptive threshold, it triggers context stashing. | HIGH | Requires: (1) rolling embedding comparison of consecutive observations, (2) per-user historical threshold data, (3) session-level recalibration based on early session behavior, (4) decay/learning rate for threshold adjustment. Research shows sliding window cosine similarity is standard for topic segmentation, but making it adaptive and per-user is novel. Depends on: embeddings infrastructure, observation capture. |
+| **Zero-latency semantic processing** | Process embeddings and topic analysis during Claude's response generation time -- the user is already waiting. Claude-mem's worker processes async but still adds background load. Laminark makes this architectural: semantic work happens in the "free" compute window while Claude streams. No other memory plugin advertises this specific optimization. | HIGH | Requires precise lifecycle hook timing. PostToolUse fires during response generation, giving a window for parallel embedding computation. Must not block the response stream. Worker must be fast enough to complete before next observation arrives. |
 | **Silent context stashing with recovery** | When topic shift is detected, silently preserve the previous context thread and notify the user it's been saved. User can `/resume` later. This directly addresses ADHD workflow: you jump topics, lose your thread, but the system caught it. No competitor does automatic stash-on-drift. | MEDIUM | Builds on adaptive topic detection. Stash = snapshot of current topic's observation cluster + summary. Resume = re-inject stashed context. Depends on: topic detection, session summaries. |
-| **Knowledge graph with typed relationships** | Anthropic's official server stores entities+relations in flat JSONL. That's a toy. Zep/Graphiti builds real temporal knowledge graphs but requires Neo4j. Memorite builds a knowledge graph in SQLite with typed entities (concepts, files, decisions, people, tools) and typed relations (uses, depends_on, decided_by, related_to). Richer than Anthropic's, lighter than Graphiti's. | HIGH | Entity extraction from observations (LLM-assisted or rule-based). Relation inference. Graph query capability. Must not make the simple case complex -- knowledge graph should enhance search, not replace it. Depends on: observation capture, embeddings. |
+| **Knowledge graph with typed relationships** | Anthropic's official server stores entities+relations in flat JSONL. That's a toy. Zep/Graphiti builds real temporal knowledge graphs but requires Neo4j. Laminark builds a knowledge graph in SQLite with typed entities (concepts, files, decisions, people, tools) and typed relations (uses, depends_on, decided_by, related_to). Richer than Anthropic's, lighter than Graphiti's. | HIGH | Entity extraction from observations (LLM-assisted or rule-based). Relation inference. Graph query capability. Must not make the simple case complex -- knowledge graph should enhance search, not replace it. Depends on: observation capture, embeddings. |
 | **Interactive web visualization (knowledge graph + timeline)** | Anthropic's memory-visualizer exists but is a static JSON viewer. No competitor offers a live, interactive graph exploration UI integrated with the memory server. D3.js force-directed graphs can visualize entity relationships. Timeline view shows conversation flow and topic shifts over time. | HIGH | Local web server (already needed for MCP SSE). D3.js or similar for force-directed graph. Timeline component showing sessions, topic shifts, stash points. Must be useful, not just pretty -- click a node to see its observations, filter by entity type, zoom to time range. Depends on: knowledge graph, session management. |
-| **Pluggable embedding strategy** | Most competitors lock you into one approach (ChromaDB + sentence-transformers, or Qdrant, or OpenAI embeddings). Memorite supports: (1) local ONNX model (fast, private, works offline), (2) Claude piggyback (extract semantic features during response generation), (3) hybrid (local for speed, Claude for quality). User picks based on their constraints. | MEDIUM | Strategy pattern with common interface. Each strategy implements embed(text) -> vector. Config selects strategy. The Claude piggyback strategy is the novel one -- extracting embeddings from Claude's own processing. Depends on: core storage layer. |
+| **Pluggable embedding strategy** | Most competitors lock you into one approach (ChromaDB + sentence-transformers, or Qdrant, or OpenAI embeddings). Laminark supports: (1) local ONNX model (fast, private, works offline), (2) Claude piggyback (extract semantic features during response generation), (3) hybrid (local for speed, Claude for quality). User picks based on their constraints. | MEDIUM | Strategy pattern with common interface. Each strategy implements embed(text) -> vector. Config selects strategy. The Claude piggyback strategy is the novel one -- extracting embeddings from Claude's own processing. Depends on: core storage layer. |
 | **ADHD-friendly workflow patterns** | The target user jumps between topics constantly. Design every feature around this: (1) stash/resume for topic recovery, (2) "where was I?" query that surfaces recently abandoned threads, (3) notification when stashed context might be relevant again, (4) minimal friction for all operations. No competitor explicitly designs for neurodivergent workflows. | MEDIUM | Mostly a design philosophy applied across features rather than a standalone feature. Stash/resume is the killer pattern. "Where was I?" is a specialized search query. Context re-surfacing is a proactive notification triggered by semantic similarity to stashed topics. Depends on: topic detection, context stashing, search. |
 | **Progressive disclosure search (3-layer)** | Claude-mem pioneered this: search (compact index ~50-100 tokens/result) -> timeline (context around results) -> get_observations (full details ~500-1000 tokens/result). ~10x token savings vs dumping everything. This is genuinely better UX for the LLM consumer. | LOW | Already proven pattern. Implement search returning IDs+snippets, timeline returning chronological context, get_observations returning full content. Low complexity because the pattern is well-understood. Depends on: search infrastructure. |
-| **Temporal awareness** | Zep/Graphiti's key insight: memories have timestamps and validity periods. "Uses React 17" becomes stale when "Upgraded to React 19" is recorded. Memorite should track when facts were true, not just when they were stored. Enables "what did we decide about X last week?" queries. | MEDIUM | Timestamps on all observations. Temporal queries (before/after/during). Staleness detection when newer observations contradict older ones. Depends on: observation capture, conflict detection. |
+| **Temporal awareness** | Zep/Graphiti's key insight: memories have timestamps and validity periods. "Uses React 17" becomes stale when "Upgraded to React 19" is recorded. Laminark should track when facts were true, not just when they were stored. Enables "what did we decide about X last week?" queries. | MEDIUM | Timestamps on all observations. Temporal queries (before/after/during). Staleness detection when newer observations contradict older ones. Depends on: observation capture, conflict detection. |
 
 ### Anti-Features (Commonly Requested, Often Problematic)
 
@@ -48,7 +48,7 @@ Features that seem good but create problems. Explicitly NOT building these.
 
 | Feature | Why Requested | Why Problematic | Alternative |
 |---------|---------------|-----------------|-------------|
-| **Cloud sync / multi-device** | "I want my memories everywhere" | Massive complexity (encryption, conflict resolution, auth, server infrastructure). Engram tried zero-knowledge sync -- it's a whole product. Memorite is a local developer tool. Cloud sync turns it into a SaaS product. | Local-first, single machine. Export/import for migration. If someone needs sync, they can sync the SQLite file with Syncthing. |
+| **Cloud sync / multi-device** | "I want my memories everywhere" | Massive complexity (encryption, conflict resolution, auth, server infrastructure). Engram tried zero-knowledge sync -- it's a whole product. Laminark is a local developer tool. Cloud sync turns it into a SaaS product. | Local-first, single machine. Export/import for migration. If someone needs sync, they can sync the SQLite file with Syncthing. |
 | **Real-time everything (WebSocket live updates)** | "I want the graph to update live as I work" | WebSocket infrastructure adds complexity, debugging difficulty, connection management. For a local dev tool, the graph doesn't need sub-second updates. | Polling-based refresh (5-10s interval) for the web UI. HTTP SSE for MCP transport (already required). Good enough for a tool you glance at, not stare at. |
 | **Multi-user / team memory** | "My team should share memories" | Requires auth, access control, conflict resolution between users, shared vs private memories. Completely different product. The MCP memory benchmark found project cross-contamination is already hard with ONE user. | Single-user only. If teams want shared context, that's a different tool (like a wiki or shared CLAUDE.md). |
 | **Aggressive auto-curation (LLM rewriting memories)** | "Clean up and organize my memories automatically" | LLMs hallucinate. Auto-rewriting memories risks corrupting ground truth. Mem0's auto-categorization is useful but auto-editing is dangerous. You lose the original signal. | Store originals immutably. Generate summaries as a separate layer. Let the user curate explicitly via forget/update tools. Summaries can be regenerated; originals cannot. |
@@ -190,12 +190,12 @@ Features to defer until product-market fit is established.
 
 **Priority key:**
 - P1: Must have for launch -- core memory loop (capture -> store -> search -> inject)
-- P2: Should have -- differentiators that make Memorite better than competitors
+- P2: Should have -- differentiators that make Laminark better than competitors
 - P3: Nice to have -- visualization and polish once foundation is solid
 
 ## Competitor Feature Analysis
 
-| Feature | Anthropic Official Memory | Mem0 OpenMemory | claude-mem | mcp-memory-service | Memorite (planned) |
+| Feature | Anthropic Official Memory | Mem0 OpenMemory | claude-mem | mcp-memory-service | Laminark (planned) |
 |---------|---------------------------|-----------------|------------|--------------------|--------------------|
 | Storage | JSONL file | Postgres + Qdrant (Docker) | SQLite + ChromaDB | SQLite-vec / ChromaDB | SQLite + WAL + FTS5 + sqlite-vec |
 | Search | String matching on entities | Semantic (Qdrant) | Hybrid (FTS5 + Chroma) | Semantic (sentence-transformers) | Hybrid (FTS5 + sqlite-vec) |
@@ -211,7 +211,7 @@ Features to defer until product-market fit is established.
 | Concurrency | N/A (file-based) | Database-level | Session-scoped | Not documented | WAL mode + session scoping |
 | Privacy | Local file | Local Docker | `<private>` tags | Local | Exclude patterns + forget tool |
 
-**Key competitive gaps Memorite fills:**
+**Key competitive gaps Laminark fills:**
 1. No competitor does adaptive topic detection
 2. No competitor does automatic context stashing on topic drift
 3. No competitor explicitly designs for neurodivergent workflows
@@ -219,10 +219,10 @@ Features to defer until product-market fit is established.
 5. Interactive graph + timeline visualization is unique (Anthropic's is static, claude-mem's is basic)
 
 **Where competitors are ahead:**
-1. claude-mem is shipping and proven -- Memorite is greenfield
-2. Mem0 has broad ecosystem support (13+ clients) -- Memorite is Claude Code only
-3. Anthropic's official server has brand trust -- Memorite must earn it
-4. Zep/Graphiti has sophisticated temporal graph tech -- Memorite's graph will be simpler
+1. claude-mem is shipping and proven -- Laminark is greenfield
+2. Mem0 has broad ecosystem support (13+ clients) -- Laminark is Claude Code only
+3. Anthropic's official server has brand trust -- Laminark must earn it
+4. Zep/Graphiti has sophisticated temporal graph tech -- Laminark's graph will be simpler
 
 ## Sources
 

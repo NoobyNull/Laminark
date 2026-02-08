@@ -194,5 +194,5 @@ npm install -D typescript @types/better-sqlite3 tsdown vitest
 - [Zod v4](https://zod.dev/v4) -- v4.3.6, 2kb core, 57% smaller than v3 (HIGH confidence)
 
 ---
-*Stack research for: Memorite -- Claude Code persistent adaptive memory plugin*
+*Stack research for: Laminark -- Claude Code persistent adaptive memory plugin*
 *Researched: 2026-02-08*

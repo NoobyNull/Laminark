@@ -1,8 +1,8 @@
-# Roadmap: Memorite
+# Roadmap: Laminark
 
 ## Overview
 
-Memorite delivers persistent adaptive memory for Claude Code in 8 phases following the natural dependency chain: storage foundation, then interfaces, then capture, then intelligence, then visualization. Phases 1-3 produce a minimum viable plugin with keyword search and automatic observation capture. Phases 4-6 add semantic intelligence, session continuity, and adaptive topic detection. Phases 7-8 add the knowledge graph, advanced embedding strategies, and visual exploration. Every phase delivers a coherent, independently verifiable capability.
+Laminark delivers persistent adaptive memory for Claude Code in 8 phases following the natural dependency chain: storage foundation, then interfaces, then capture, then intelligence, then visualization. Phases 1-3 produce a minimum viable plugin with keyword search and automatic observation capture. Phases 4-6 add semantic intelligence, session continuity, and adaptive topic detection. Phases 7-8 add the knowledge graph, advanced embedding strategies, and visual exploration. Every phase delivers a coherent, independently verifiable capability.
 
 ## Phases
 
@@ -102,14 +102,14 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. When a new Claude Code session starts, Claude receives a concise summary of the last session plus high-value recent observations within 2 seconds
   2. When a session ends, observations from that session are compressed into a concise session summary stored for future retrieval
-  3. User can type /memorite:remember followed by text to explicitly save a memory with context
-  4. User can type /memorite:recall followed by a description to search memories and see relevant results
+  3. User can type /laminark:remember followed by text to explicitly save a memory with context
+  4. User can type /laminark:recall followed by a description to search memories and see relevant results
 **Plans**: 3 plans
 
 Plans:
 - [ ] 05-01-PLAN.md -- Session summary generation at Stop hook (compress session observations)
 - [ ] 05-02-PLAN.md -- SessionStart context injection with progressive disclosure index
-- [ ] 05-03-PLAN.md -- /memorite:remember and /memorite:recall slash command implementations
+- [ ] 05-03-PLAN.md -- /laminark:remember and /laminark:recall slash command implementations
 
 ### Phase 6: Topic Detection and Context Stashing
 **Goal**: When the user jumps to a new topic, the system preserves their previous context thread and lets them return to it
@@ -118,7 +118,7 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. When the user shifts to a clearly different topic mid-session, the system detects it and silently stashes the previous context thread
   2. User sees a brief notification that their previous context was stashed, with an indication of how to return
-  3. User can type /memorite:resume to see stashed context threads and re-inject a chosen thread back into the conversation
+  3. User can type /laminark:resume to see stashed context threads and re-inject a chosen thread back into the conversation
   4. User can ask "where was I?" to see recently abandoned context threads ranked by recency and relevance
   5. Topic detection adapts to the user's natural variance over time -- a scattered session raises the shift threshold, a focused session lowers it
 **Plans**: 6 plans
@@ -126,8 +126,8 @@ Plans:
 Plans:
 - [ ] 06-01-PLAN.md -- Static topic shift detection with cosine distance (TDD)
 - [ ] 06-02-PLAN.md -- Context stash storage layer and StashManager CRUD
-- [ ] 06-03-PLAN.md -- TopicShiftHandler integration and /memorite:stash command
-- [ ] 06-04-PLAN.md -- /memorite:resume command and topic_context MCP tool
+- [ ] 06-03-PLAN.md -- TopicShiftHandler integration and /laminark:stash command
+- [ ] 06-04-PLAN.md -- /laminark:resume command and topic_context MCP tool
 - [ ] 06-05-PLAN.md -- Adaptive EWMA threshold with historical session seeding (TDD)
 - [ ] 06-06-PLAN.md -- Sensitivity configuration and decision logging
 
