@@ -60,9 +60,13 @@ export const DEFAULT_BUSY_TIMEOUT = 5000;
 /**
  * Returns the Laminark configuration directory (~/.laminark/).
  * Creates the directory recursively if it does not exist.
+ *
+ * Supports LAMINARK_DATA_DIR env var override for testing --
+ * redirects all data storage to a custom directory without
+ * affecting the real ~/.laminark/ data.
  */
 export function getConfigDir(): string {
-  const dir = join(homedir(), '.laminark');
+  const dir = process.env.LAMINARK_DATA_DIR || join(homedir(), '.laminark');
   mkdirSync(dir, { recursive: true });
   return dir;
 }
