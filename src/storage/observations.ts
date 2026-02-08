@@ -1,6 +1,7 @@
 import type BetterSqlite3 from 'better-sqlite3';
 import { randomBytes } from 'node:crypto';
 
+import { debug } from '../shared/debug.js';
 import {
   ObservationInsertSchema,
   rowToObservation,
@@ -60,6 +61,8 @@ export class ObservationRepository {
       SELECT COUNT(*) AS count FROM observations
       WHERE project_hash = ? AND deleted_at IS NULL
     `);
+
+    debug('obs', 'ObservationRepository initialized', { projectHash });
   }
 
   /**
@@ -77,6 +80,8 @@ export class ObservationRepository {
           validated.embedding.byteLength,
         )
       : null;
+
+    debug('obs', 'Creating observation', { source: validated.source, contentLength: validated.content.length });
 
     this.stmtInsert.run(
       id,
@@ -97,6 +102,8 @@ export class ObservationRepository {
     if (!row) {
       throw new Error('Failed to retrieve newly created observation');
     }
+
+    debug('obs', 'Observation created', { id });
 
     return rowToObservation(row);
   }
@@ -122,6 +129,8 @@ export class ObservationRepository {
     sessionId?: string;
     since?: string;
   }): Observation[] {
+    debug('obs', 'Listing observations', { ...options });
+
     const limit = options?.limit ?? 50;
     const offset = options?.offset ?? 0;
 
@@ -143,6 +152,9 @@ export class ObservationRepository {
     params.push(limit, offset);
 
     const rows = this.db.prepare(sql).all(...params) as ObservationRow[];
+
+    debug('obs', 'Listed observations', { count: rows.length });
+
     return rows.map(rowToObservation);
   }
 
@@ -160,6 +172,8 @@ export class ObservationRepository {
       >
     >,
   ): Observation | null {
+    debug('obs', 'Updating observation', { id });
+
     const setClauses: string[] = ["updated_at = datetime('now')"];
     const params: unknown[] = [];
 
@@ -197,8 +211,11 @@ export class ObservationRepository {
     const result = this.db.prepare(sql).run(...params);
 
     if (result.changes === 0) {
+      debug('obs', 'Observation not found for update', { id });
       return null;
     }
+
+    debug('obs', 'Observation updated', { id });
 
     return this.getById(id);
   }
@@ -208,7 +225,9 @@ export class ObservationRepository {
    * Returns true if the observation was found and deleted.
    */
   softDelete(id: string): boolean {
+    debug('obs', 'Soft-deleting observation', { id });
     const result = this.stmtSoftDelete.run(id, this.projectHash);
+    debug('obs', result.changes > 0 ? 'Observation soft-deleted' : 'Observation not found for delete', { id });
     return result.changes > 0;
   }
 

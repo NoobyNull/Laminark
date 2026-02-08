@@ -1,5 +1,6 @@
 import type BetterSqlite3 from 'better-sqlite3';
 
+import { debug, debugTimed } from '../shared/debug.js';
 import {
   rowToObservation,
   type ObservationRow,
@@ -63,17 +64,23 @@ export class SearchEngine {
     sql += ' ORDER BY rank LIMIT ?';
     params.push(limit);
 
-    const rows = this.db.prepare(sql).all(...params) as (ObservationRow & {
-      rank: number;
-      snippet: string;
-    })[];
+    const results = debugTimed('search', 'FTS5 keyword search', () => {
+      const rows = this.db.prepare(sql).all(...params) as (ObservationRow & {
+        rank: number;
+        snippet: string;
+      })[];
 
-    return rows.map((row) => ({
-      observation: rowToObservation(row),
-      score: Math.abs(row.rank),
-      matchType: 'fts' as const,
-      snippet: row.snippet,
-    }));
+      return rows.map((row) => ({
+        observation: rowToObservation(row),
+        score: Math.abs(row.rank),
+        matchType: 'fts' as const,
+        snippet: row.snippet,
+      }));
+    });
+
+    debug('search', 'Keyword search completed', { query: sanitized, resultCount: results.length });
+
+    return results;
   }
 
   /**
@@ -111,25 +118,32 @@ export class SearchEngine {
       LIMIT ?
     `;
 
-    const rows = this.db
-      .prepare(sql)
-      .all(ftsQuery, this.projectHash, effectiveLimit) as (ObservationRow & {
-      rank: number;
-      snippet: string;
-    })[];
+    const results = debugTimed('search', 'FTS5 prefix search', () => {
+      const rows = this.db
+        .prepare(sql)
+        .all(ftsQuery, this.projectHash, effectiveLimit) as (ObservationRow & {
+        rank: number;
+        snippet: string;
+      })[];
 
-    return rows.map((row) => ({
-      observation: rowToObservation(row),
-      score: Math.abs(row.rank),
-      matchType: 'fts' as const,
-      snippet: row.snippet,
-    }));
+      return rows.map((row) => ({
+        observation: rowToObservation(row),
+        score: Math.abs(row.rank),
+        matchType: 'fts' as const,
+        snippet: row.snippet,
+      }));
+    });
+
+    debug('search', 'Prefix search completed', { prefix, resultCount: results.length });
+
+    return results;
   }
 
   /**
    * Rebuild the FTS5 index if it gets out of sync.
    */
   rebuildIndex(): void {
+    debug('search', 'Rebuilding FTS5 index');
     this.db.exec(
       "INSERT INTO observations_fts(observations_fts) VALUES('rebuild')",
     );

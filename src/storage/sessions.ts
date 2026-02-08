@@ -1,5 +1,6 @@
 import type BetterSqlite3 from 'better-sqlite3';
 
+import { debug } from '../shared/debug.js';
 import type { Session } from '../shared/types.js';
 
 /**
@@ -61,6 +62,8 @@ export class SessionRepository {
       ORDER BY started_at DESC
       LIMIT 1
     `);
+
+    debug('session', 'SessionRepository initialized', { projectHash });
   }
 
   /**
@@ -76,6 +79,8 @@ export class SessionRepository {
     if (!row) {
       throw new Error('Failed to retrieve newly created session');
     }
+
+    debug('session', 'Session created', { id });
 
     return rowToSession(row);
   }
@@ -101,6 +106,8 @@ export class SessionRepository {
     if (result.changes === 0) {
       return null;
     }
+
+    debug('session', 'Session ended', { id, hasSummary: !!summary });
 
     return this.getById(id);
   }

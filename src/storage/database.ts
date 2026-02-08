@@ -3,6 +3,7 @@ import * as sqliteVec from 'sqlite-vec';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+import { debug } from '../shared/debug.js';
 import type { DatabaseConfig } from '../shared/types.js';
 import { runMigrations } from './migrations.js';
 
@@ -65,6 +66,8 @@ export function openDatabase(config: DatabaseConfig): LaminarkDatabase {
   // wal_autocheckpoint -- explicit default, prevents WAL growth
   db.pragma('wal_autocheckpoint = 1000');
 
+  debug('db', 'PRAGMAs configured', { journalMode, busyTimeout: config.busyTimeout });
+
   // 4. Load sqlite-vec with graceful degradation
   let hasVectorSupport = false;
   try {
@@ -74,8 +77,12 @@ export function openDatabase(config: DatabaseConfig): LaminarkDatabase {
     // Vector search unavailable -- keyword-only mode
   }
 
+  debug('db', hasVectorSupport ? 'sqlite-vec loaded' : 'sqlite-vec unavailable, keyword-only mode');
+
   // 5. Run migrations
   runMigrations(db, hasVectorSupport);
+
+  debug('db', 'Database opened', { path: config.dbPath, hasVectorSupport });
 
   // 6. Return LaminarkDatabase
   return {
@@ -89,6 +96,7 @@ export function openDatabase(config: DatabaseConfig): LaminarkDatabase {
       } catch {
         // If checkpoint fails (e.g., locked), still close
       }
+      debug('db', 'Database closed');
       db.close();
     },
 
