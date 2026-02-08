@@ -27,6 +27,7 @@ export class ObservationRepository {
   // Prepared statements (prepared once, reused for every call)
   private readonly stmtInsert: BetterSqlite3.Statement;
   private readonly stmtGetById: BetterSqlite3.Statement;
+  private readonly stmtGetByIdIncludingDeleted: BetterSqlite3.Statement;
   private readonly stmtSoftDelete: BetterSqlite3.Statement;
   private readonly stmtRestore: BetterSqlite3.Statement;
   private readonly stmtCount: BetterSqlite3.Statement;
@@ -43,6 +44,11 @@ export class ObservationRepository {
     this.stmtGetById = db.prepare(`
       SELECT * FROM observations
       WHERE id = ? AND project_hash = ? AND deleted_at IS NULL
+    `);
+
+    this.stmtGetByIdIncludingDeleted = db.prepare(`
+      SELECT * FROM observations
+      WHERE id = ? AND project_hash = ?
     `);
 
     this.stmtSoftDelete = db.prepare(`
@@ -247,5 +253,71 @@ export class ObservationRepository {
   count(): number {
     const row = this.stmtCount.get(this.projectHash) as { count: number };
     return row.count;
+  }
+
+  /**
+   * Gets an observation by ID, including soft-deleted observations.
+   * Used by the recall tool for restore operations (must find purged items).
+   */
+  getByIdIncludingDeleted(id: string): Observation | null {
+    debug('obs', 'Getting observation including deleted', { id });
+    const row = this.stmtGetByIdIncludingDeleted.get(id, this.projectHash) as
+      | ObservationRow
+      | undefined;
+    return row ? rowToObservation(row) : null;
+  }
+
+  /**
+   * Lists observations for this project, including soft-deleted ones.
+   * Used by recall with include_purged: true to show all items.
+   */
+  listIncludingDeleted(options?: {
+    limit?: number;
+    offset?: number;
+  }): Observation[] {
+    const limit = options?.limit ?? 50;
+    const offset = options?.offset ?? 0;
+
+    debug('obs', 'Listing observations including deleted', { limit, offset });
+
+    const sql =
+      'SELECT * FROM observations WHERE project_hash = ? ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?';
+    const rows = this.db
+      .prepare(sql)
+      .all(this.projectHash, limit, offset) as ObservationRow[];
+
+    debug('obs', 'Listed observations including deleted', {
+      count: rows.length,
+    });
+
+    return rows.map(rowToObservation);
+  }
+
+  /**
+   * Searches observations by title substring (partial match via LIKE).
+   * Optionally includes soft-deleted items.
+   */
+  getByTitle(
+    title: string,
+    options?: { limit?: number; includePurged?: boolean },
+  ): Observation[] {
+    const limit = options?.limit ?? 20;
+    const includePurged = options?.includePurged ?? false;
+
+    debug('obs', 'Searching by title', { title, limit, includePurged });
+
+    let sql = 'SELECT * FROM observations WHERE project_hash = ? AND title LIKE ?';
+    if (!includePurged) {
+      sql += ' AND deleted_at IS NULL';
+    }
+    sql += ' ORDER BY created_at DESC, rowid DESC LIMIT ?';
+
+    const rows = this.db
+      .prepare(sql)
+      .all(this.projectHash, `%${title}%`, limit) as ObservationRow[];
+
+    debug('obs', 'Title search completed', { count: rows.length });
+
+    return rows.map(rowToObservation);
   }
 }
