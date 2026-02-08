@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 ## Current Position
 
 Phase: 3 of 8 (Hook Integration and Capture)
-Plan: 1 of 3 in current phase (03-01 complete)
+Plan: 2 of 3 in current phase (03-02 complete)
 Status: Executing Phase 3
-Last activity: 2026-02-08 — Completed 03-01 hook handler and capture pipeline
+Last activity: 2026-02-08 — Completed 03-02 admission filter and privacy filter
 
-Progress: [▓▓▓▓▓▓▓▓░░] 24%
+Progress: [▓▓▓▓▓▓▓▓░░] 27%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
+- Total plans completed: 9
 - Average duration: 4min
 - Total execution time: 0.5 hours
 
@@ -29,10 +29,10 @@ Progress: [▓▓▓▓▓▓▓▓░░] 24%
 |-------|-------|-------|----------|
 | 01-storage-engine | 4/4 | 13min | 3min |
 | 02-mcp-interface-and-search | 3/3 | 12min | 4min |
-| 03-hook-integration-and-capture | 1/3 | 3min | 3min |
+| 03-hook-integration-and-capture | 2/3 | 8min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 02-01 (6min), 02-02 (3min), 02-03 (3min), 03-01 (3min)
+- Last 5 plans: 02-02 (3min), 02-03 (3min), 03-01 (3min), 03-02 (5min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -75,6 +75,10 @@ Recent decisions affecting current work:
 - [02-03]: Integration tests exercise storage layer directly -- MCP SDK is trusted dependency, test our logic on top
 - [03-01]: Stop events log only (no observation) -- Stop has no tool_name/tool_input per hook spec
 - [03-01]: processPostToolUse is synchronous -- better-sqlite3 is inherently synchronous, no awaits needed
+- [03-02]: API key patterns applied before env_variable with negative lookahead to prevent double-match on redacted values
+- [03-02]: Write/Edit tools unconditionally admitted via HIGH_SIGNAL_TOOLS set -- content patterns only apply to Bash/Read
+- [03-02]: Laminark self-referential MCP tools (mcp__laminark__*) rejected in admission filter
+- [03-02]: Privacy patterns cached per-process with _resetPatternCache() escape hatch for testing
 - [03-01]: Self-referential filter: skip tools with mcp__laminark__ prefix to prevent recursive capture
 
 ### Pending Todos
@@ -98,5 +102,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 03-01-PLAN.md hook handler and capture pipeline
+Stopped at: Completed 03-02-PLAN.md admission filter and privacy filter
 Resume file: None
