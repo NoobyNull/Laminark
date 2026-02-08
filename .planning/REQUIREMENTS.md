@@ -102,7 +102,58 @@
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| *(populated by roadmap)* | | |
+| MEM-01 | Phase 1: Storage Engine | Pending |
+| MEM-02 | Phase 3: Hook Integration and Capture | Pending |
+| MEM-03 | Phase 3: Hook Integration and Capture | Pending |
+| MEM-04 | Phase 2: MCP Interface and Search | Pending |
+| MEM-05 | Phase 2: MCP Interface and Search | Pending |
+| MEM-06 | Phase 1: Storage Engine | Pending |
+| MEM-07 | Phase 1: Storage Engine | Pending |
+| MEM-08 | Phase 1: Storage Engine | Pending |
+| MEM-09 | Phase 1: Storage Engine | Pending |
+| MEM-10 | Phase 3: Hook Integration and Capture | Pending |
+| SRC-01 | Phase 2: MCP Interface and Search | Pending |
+| SRC-02 | Phase 4: Embedding Engine and Semantic Search | Pending |
+| SRC-03 | Phase 4: Embedding Engine and Semantic Search | Pending |
+| SRC-04 | Phase 2: MCP Interface and Search | Pending |
+| SRC-05 | Phase 1: Storage Engine | Pending |
+| SRC-06 | Phase 2: MCP Interface and Search | Pending |
+| CTX-01 | Phase 5: Session Context and Summaries | Pending |
+| CTX-02 | Phase 5: Session Context and Summaries | Pending |
+| CTX-03 | Phase 6: Topic Detection and Context Stashing | Pending |
+| CTX-04 | Phase 6: Topic Detection and Context Stashing | Pending |
+| CTX-05 | Phase 6: Topic Detection and Context Stashing | Pending |
+| CTX-06 | Phase 6: Topic Detection and Context Stashing | Pending |
+| INT-01 | Phase 4: Embedding Engine and Semantic Search | Pending |
+| INT-02 | Phase 7: Knowledge Graph and Advanced Intelligence | Pending |
+| INT-03 | Phase 7: Knowledge Graph and Advanced Intelligence | Pending |
+| INT-04 | Phase 4: Embedding Engine and Semantic Search | Pending |
+| INT-05 | Phase 6: Topic Detection and Context Stashing | Pending |
+| INT-06 | Phase 6: Topic Detection and Context Stashing | Pending |
+| INT-07 | Phase 6: Topic Detection and Context Stashing | Pending |
+| INT-08 | Phase 6: Topic Detection and Context Stashing | Pending |
+| INT-09 | Phase 7: Knowledge Graph and Advanced Intelligence | Pending |
+| INT-10 | Phase 7: Knowledge Graph and Advanced Intelligence | Pending |
+| INT-11 | Phase 7: Knowledge Graph and Advanced Intelligence | Pending |
+| INT-12 | Phase 7: Knowledge Graph and Advanced Intelligence | Pending |
+| INT-13 | Phase 7: Knowledge Graph and Advanced Intelligence | Pending |
+| VIS-01 | Phase 8: Web Visualization | Pending |
+| VIS-02 | Phase 8: Web Visualization | Pending |
+| VIS-03 | Phase 8: Web Visualization | Pending |
+| VIS-04 | Phase 8: Web Visualization | Pending |
+| VIS-05 | Phase 8: Web Visualization | Pending |
+| VIS-06 | Phase 8: Web Visualization | Pending |
+| UI-01 | Phase 2: MCP Interface and Search | Pending |
+| UI-02 | Phase 5: Session Context and Summaries | Pending |
+| UI-03 | Phase 5: Session Context and Summaries | Pending |
+| UI-04 | Phase 6: Topic Detection and Context Stashing | Pending |
+| UI-05 | Phase 6: Topic Detection and Context Stashing | Pending |
+| DQ-01 | Phase 7: Knowledge Graph and Advanced Intelligence | Pending |
+| DQ-02 | Phase 3: Hook Integration and Capture | Pending |
+| DQ-03 | Phase 4: Embedding Engine and Semantic Search | Pending |
+| DQ-04 | Phase 4: Embedding Engine and Semantic Search | Pending |
+| DQ-05 | Phase 6: Topic Detection and Context Stashing | Pending |
 
 ---
 *Generated: 2026-02-08 from research + user selections*
+*Traceability updated: 2026-02-08 by roadmap creation*
