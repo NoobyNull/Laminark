@@ -141,16 +141,16 @@ Plans:
   3. Claude can query the knowledge graph via MCP tool (e.g., "what files does this decision affect?" returns traversal results)
   4. Graph enforces entity type taxonomy and caps node degree at 50 edges, preventing unnavigable hairball growth
   5. Curation agent periodically merges similar observations and generates consolidated summaries during quiet periods
-**Plans**: 4 plans
+**Plans**: 7 plans
 
 Plans:
-- [ ] 07-01: Entity extraction from observations (typed entity identification)
-- [ ] 07-02: Relationship detection between entities (typed edge creation)
-- [ ] 07-03: Knowledge graph storage schema and graph traversal queries
-- [ ] 07-04: Graph constraints (type taxonomy enforcement, max degree, deduplication)
-- [ ] 07-05: Claude piggyback and hybrid embedding strategies
-- [ ] 07-06: Temporal awareness and observation staleness detection
-- [ ] 07-07: Curation agent for periodic observation merging and consolidation
+- [ ] 07-01-PLAN.md -- Graph storage schema, type taxonomy, and recursive CTE traversal queries
+- [ ] 07-02-PLAN.md -- Claude piggyback embedding strategy and hybrid selector
+- [ ] 07-03-PLAN.md -- Entity extraction rules and pipeline for all 7 entity types
+- [ ] 07-04-PLAN.md -- Temporal awareness and observation staleness detection
+- [ ] 07-05-PLAN.md -- Relationship detection and graph constraint enforcement (max degree, dedup)
+- [ ] 07-06-PLAN.md -- MCP query_graph and graph_stats tools for Claude graph access
+- [ ] 07-07-PLAN.md -- Curation agent for observation merging and graph maintenance
 
 ### Phase 8: Web Visualization
 **Goal**: Users can visually explore their memory graph and session timeline in an interactive browser UI
@@ -162,14 +162,14 @@ Plans:
   3. User can click a node to see its associated observations, filter nodes by entity type, and zoom to specific time ranges
   4. Timeline view shows chronological flow of sessions, observations, and topic shift points
   5. UI updates live as new observations are processed (no manual refresh needed)
-**Plans**: 4 plans
+**Plans**: 5 plans
 
 Plans:
-- [ ] 08-01: Hono web server setup with static asset serving and SSE endpoint
-- [ ] 08-02: Knowledge graph visualization with Cytoscape force-directed layout
-- [ ] 08-03: Graph interaction (node click details, entity type filtering, time range zoom)
-- [ ] 08-04: Timeline view with session and observation chronology
-- [ ] 08-05: Live SSE updates and viewport culling for 500+ node performance
+- [ ] 08-01-PLAN.md -- Hono web server with static SPA serving, REST API for graph/timeline data, and SSE endpoint
+- [ ] 08-02-PLAN.md -- Cytoscape knowledge graph with force-directed layout and entity type styling
+- [ ] 08-03-PLAN.md -- Graph interaction: node click details, entity type filtering, time range zoom
+- [ ] 08-04-PLAN.md -- Timeline view with session cards, observation entries, and topic shift markers
+- [ ] 08-05-PLAN.md -- Live SSE updates end-to-end and viewport culling for 500+ node performance
 
 ## Progress
 
@@ -184,5 +184,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 | 4. Embedding Engine and Semantic Search | 0/4 | Planned | - |
 | 5. Session Context and Summaries | 0/3 | Planned | - |
 | 6. Topic Detection and Context Stashing | 0/6 | Planned | - |
-| 7. Knowledge Graph and Advanced Intelligence | 0/7 | Not started | - |
-| 8. Web Visualization | 0/5 | Not started | - |
+| 7. Knowledge Graph and Advanced Intelligence | 0/7 | Planned | - |
+| 8. Web Visualization | 0/5 | Planned | - |
