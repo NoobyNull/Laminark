@@ -93,8 +93,15 @@ describe('privacy-filter', () => {
 
     describe('env variable redaction', () => {
       it('redacts env variable with 8+ char value', () => {
+        // When the value IS an API key, the api_key pattern fires first (more specific)
         const result = redactSensitiveContent('API_KEY=sk-abc123defg456hijklmnop789');
-        expect(result).toBe('API_KEY=[REDACTED:env]');
+        expect(result).toContain('[REDACTED:');
+        expect(result).not.toContain('sk-abc');
+      });
+
+      it('redacts plain env variable with 8+ char value', () => {
+        const result = redactSensitiveContent('MY_SECRET=supersecretvalue123');
+        expect(result).toBe('MY_SECRET=[REDACTED:env]');
       });
 
       it('redacts quoted env variable', () => {
