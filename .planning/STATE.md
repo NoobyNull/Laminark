@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-08)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable.
-**Current focus:** Phase 2 - MCP Interface and Search
+**Current focus:** Phase 3 - Hook Integration and Capture
 
 ## Current Position
 
-Phase: 2 of 8 (MCP Interface and Search) -- COMPLETE
-Plan: 3 of 3 in current phase (02-03 complete)
-Status: Phase 2 Complete -- Ready for Phase 3
-Last activity: 2026-02-08 — Completed 02-03 plugin manifest and test suite
+Phase: 3 of 8 (Hook Integration and Capture)
+Plan: 1 of 3 in current phase (03-01 complete)
+Status: Executing Phase 3
+Last activity: 2026-02-08 — Completed 03-01 hook handler and capture pipeline
 
-Progress: [▓▓▓▓▓▓▓░░░] 21%
+Progress: [▓▓▓▓▓▓▓▓░░] 24%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
+- Total plans completed: 8
 - Average duration: 4min
-- Total execution time: 0.4 hours
+- Total execution time: 0.5 hours
 
 **By Phase:**
 
@@ -29,9 +29,10 @@ Progress: [▓▓▓▓▓▓▓░░░] 21%
 |-------|-------|-------|----------|
 | 01-storage-engine | 4/4 | 13min | 3min |
 | 02-mcp-interface-and-search | 3/3 | 12min | 4min |
+| 03-hook-integration-and-capture | 1/3 | 3min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 01-04 (3min), 02-01 (6min), 02-02 (3min), 02-03 (3min)
+- Last 5 plans: 02-01 (6min), 02-02 (3min), 02-03 (3min), 03-01 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -72,6 +73,9 @@ Recent decisions affecting current work:
 - [02-02]: Purge/restore require explicit IDs -- no blind bulk operations on search results
 - [02-03]: .mcp.json uses top-level server name key (plugin-bundled format, not mcpServers wrapper)
 - [02-03]: Integration tests exercise storage layer directly -- MCP SDK is trusted dependency, test our logic on top
+- [03-01]: Stop events log only (no observation) -- Stop has no tool_name/tool_input per hook spec
+- [03-01]: processPostToolUse is synchronous -- better-sqlite3 is inherently synchronous, no awaits needed
+- [03-01]: Self-referential filter: skip tools with mcp__laminark__ prefix to prevent recursive capture
 
 ### Pending Todos
 
@@ -94,5 +98,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-08
-Stopped at: Completed 02-03 plugin manifest and test suite -- Phase 2 complete
+Stopped at: Completed 03-01-PLAN.md hook handler and capture pipeline
 Resume file: None
