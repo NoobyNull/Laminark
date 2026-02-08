@@ -51,13 +51,12 @@ Plans:
   3. Claude can call forget tool to soft-delete a memory, which disappears from search but is recoverable
   4. Search results use 3-layer progressive disclosure (compact index, then timeline, then full details) and never exceed 2000 tokens
   5. All 5-7 MCP tools are discoverable and callable from Claude Code
-**Plans**: 4 plans
+**Plans**: 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md -- MCP server scaffold with stdio transport and FTS5 keyword search tool
-- [ ] 02-02-PLAN.md -- save_memory, forget, and get_observations CRUD tools
-- [ ] 02-03-PLAN.md -- Timeline tool and token budget enforcement (2000 token cap)
-- [ ] 02-04-PLAN.md -- Plugin manifest (.mcp.json) and Claude Code integration verification
+- [ ] 02-01-PLAN.md -- Schema migration for title column, MCP server scaffold with stdio transport, and save_memory tool
+- [ ] 02-02-PLAN.md -- Unified recall tool with search, view, purge, restore actions and token budget enforcement
+- [ ] 02-03-PLAN.md -- Plugin manifest (.mcp.json) and integration tests proving all Phase 2 success criteria
 
 ### Phase 3: Hook Integration and Capture
 **Goal**: Observations are automatically captured from Claude's tool usage without any user intervention
@@ -179,7 +178,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Storage Engine | 4/4 | Complete | 2026-02-08 |
-| 2. MCP Interface and Search | 0/4 | Planned | - |
+| 2. MCP Interface and Search | 0/3 | Planned | - |
 | 3. Hook Integration and Capture | 0/4 | Planned | - |
 | 4. Embedding Engine and Semantic Search | 0/4 | Planned | - |
 | 5. Session Context and Summaries | 0/3 | Planned | - |
