@@ -33,13 +33,13 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. A process crash mid-write leaves the database in a consistent state with no partial records
   4. Observations from project A are never returned when querying from project B
   5. Schema stores original text, embedding vector (nullable), and model version metadata in every observation row
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 01-01: Project scaffolding, TypeScript config, and dependency installation
-- [ ] 01-02: SQLite database initialization with WAL mode, schema, and migration system
-- [ ] 01-03: Observation CRUD operations with project scoping and FTS5 indexing
-- [ ] 01-04: Concurrency safety testing and crash recovery validation
+- [ ] 01-01-PLAN.md -- Project scaffolding, TypeScript config, core types, and dependency installation
+- [ ] 01-02-PLAN.md -- SQLite database initialization with WAL mode, schema, migration system, and FTS5
+- [ ] 01-03-PLAN.md -- Observation CRUD, session management, and FTS5 keyword search with project scoping
+- [ ] 01-04-PLAN.md -- Concurrency safety, crash recovery, and persistence acceptance tests (TDD)
 
 ### Phase 2: MCP Interface and Search
 **Goal**: Claude can search, save, and manage memories through MCP tools with keyword search that respects token budgets
@@ -179,7 +179,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Storage Engine | 0/4 | Not started | - |
+| 1. Storage Engine | 0/4 | Planned | - |
 | 2. MCP Interface and Search | 0/5 | Not started | - |
 | 3. Hook Integration and Capture | 0/4 | Not started | - |
 | 4. Embedding Engine and Semantic Search | 0/5 | Not started | - |
