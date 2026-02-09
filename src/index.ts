@@ -10,6 +10,7 @@ import { debug } from './shared/debug.js';
 import { createServer, startServer } from './mcp/server.js';
 import { registerRecall } from './mcp/tools/recall.js';
 import { registerSaveMemory } from './mcp/tools/save-memory.js';
+import { registerTopicContext } from './mcp/tools/topic-context.js';
 import { AnalysisWorker } from './analysis/worker-bridge.js';
 import { EmbeddingStore } from './storage/embeddings.js';
 import { ObservationRepository } from './storage/observations.js';
@@ -79,6 +80,7 @@ const embedTimer = setInterval(() => {
 const server = createServer();
 registerSaveMemory(server, db.db, projectHash);
 registerRecall(server, db.db, projectHash, worker, embeddingStore);
+registerTopicContext(server, db.db, projectHash);
 
 startServer(server).catch((err) => {
   debug('mcp', 'Fatal: failed to start server', { error: err.message });
