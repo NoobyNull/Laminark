@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Storage Engine** - Rock-solid SQLite foundation with WAL, concurrency, and crash recovery
 - [x] **Phase 2: MCP Interface and Search** - Claude-facing tools with keyword search and progressive disclosure
 - [x] **Phase 3: Hook Integration and Capture** - Automatic observation capture via Claude Code hooks
-- [ ] **Phase 4: Embedding Engine and Semantic Search** - Vector embeddings with pluggable strategy and hybrid search
+- [x] **Phase 4: Embedding Engine and Semantic Search** - Vector embeddings with pluggable strategy and hybrid search
 - [ ] **Phase 5: Session Context and Summaries** - Context continuity across sessions with progressive disclosure
 - [ ] **Phase 6: Topic Detection and Context Stashing** - Adaptive topic shift detection with automatic context preservation
 - [ ] **Phase 7: Knowledge Graph and Advanced Intelligence** - Entity extraction, relationship mapping, and Claude piggyback embeddings
@@ -87,10 +87,10 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 04-01-PLAN.md -- EmbeddingEngine interface, LocalOnnxEngine (BGE Small q8), KeywordOnlyEngine fallback, and migration 006 (cosine distance)
-- [ ] 04-02-PLAN.md -- Worker thread bridge for non-blocking embedding, EmbeddingStore for sqlite-vec vec0 operations, and tsdown worker entry point
-- [ ] 04-03-PLAN.md -- Hybrid search with reciprocal rank fusion (FTS5 + vector), MCP server worker lifecycle, and background embedding loop
-- [ ] 04-04-PLAN.md -- Acceptance tests proving all 5 success criteria: semantic search, hybrid ranking, non-blocking, graceful degradation, zero latency
+- [x] 04-01-PLAN.md -- EmbeddingEngine interface, LocalOnnxEngine (BGE Small q8), KeywordOnlyEngine fallback, and migration 006 (cosine distance)
+- [x] 04-02-PLAN.md -- Worker thread bridge for non-blocking embedding, EmbeddingStore for sqlite-vec vec0 operations, and tsdown worker entry point
+- [x] 04-03-PLAN.md -- Hybrid search with reciprocal rank fusion (FTS5 + vector), MCP server worker lifecycle, and background embedding loop
+- [x] 04-04-PLAN.md -- Acceptance tests proving all 5 success criteria: semantic search, hybrid ranking, non-blocking, graceful degradation, zero latency
 
 ### Phase 5: Session Context and Summaries
 **Goal**: Claude starts every session already knowing what happened last time, and users can explicitly save and search memories via slash commands
@@ -178,7 +178,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 | 1. Storage Engine | 4/4 | Complete | 2026-02-08 |
 | 2. MCP Interface and Search | 3/3 | Complete | 2026-02-08 |
 | 3. Hook Integration and Capture | 3/3 | Complete | 2026-02-08 |
-| 4. Embedding Engine and Semantic Search | 0/4 | Planned | - |
+| 4. Embedding Engine and Semantic Search | 4/4 | Complete | 2026-02-08 |
 | 5. Session Context and Summaries | 0/3 | Planned | - |
 | 6. Topic Detection and Context Stashing | 0/6 | Planned | - |
 | 7. Knowledge Graph and Advanced Intelligence | 0/7 | Planned | - |

@@ -113,8 +113,8 @@
 | MEM-09 | Phase 1: Storage Engine | Done |
 | MEM-10 | Phase 3: Hook Integration and Capture | Pending |
 | SRC-01 | Phase 2: MCP Interface and Search | Done |
-| SRC-02 | Phase 4: Embedding Engine and Semantic Search | Pending |
-| SRC-03 | Phase 4: Embedding Engine and Semantic Search | Pending |
+| SRC-02 | Phase 4: Embedding Engine and Semantic Search | Done |
+| SRC-03 | Phase 4: Embedding Engine and Semantic Search | Done |
 | SRC-04 | Phase 2: MCP Interface and Search | Done |
 | SRC-05 | Phase 1: Storage Engine | Done |
 | SRC-06 | Phase 2: MCP Interface and Search | Done |
@@ -124,10 +124,10 @@
 | CTX-04 | Phase 6: Topic Detection and Context Stashing | Pending |
 | CTX-05 | Phase 6: Topic Detection and Context Stashing | Pending |
 | CTX-06 | Phase 6: Topic Detection and Context Stashing | Pending |
-| INT-01 | Phase 4: Embedding Engine and Semantic Search | Pending |
+| INT-01 | Phase 4: Embedding Engine and Semantic Search | Done |
 | INT-02 | Phase 7: Knowledge Graph and Advanced Intelligence | Pending |
 | INT-03 | Phase 7: Knowledge Graph and Advanced Intelligence | Pending |
-| INT-04 | Phase 4: Embedding Engine and Semantic Search | Pending |
+| INT-04 | Phase 4: Embedding Engine and Semantic Search | Done |
 | INT-05 | Phase 6: Topic Detection and Context Stashing | Pending |
 | INT-06 | Phase 6: Topic Detection and Context Stashing | Pending |
 | INT-07 | Phase 6: Topic Detection and Context Stashing | Pending |
@@ -150,8 +150,8 @@
 | UI-05 | Phase 6: Topic Detection and Context Stashing | Pending |
 | DQ-01 | Phase 7: Knowledge Graph and Advanced Intelligence | Pending |
 | DQ-02 | Phase 3: Hook Integration and Capture | Pending |
-| DQ-03 | Phase 4: Embedding Engine and Semantic Search | Pending |
-| DQ-04 | Phase 4: Embedding Engine and Semantic Search | Pending |
+| DQ-03 | Phase 4: Embedding Engine and Semantic Search | Done |
+| DQ-04 | Phase 4: Embedding Engine and Semantic Search | Done |
 | DQ-05 | Phase 6: Topic Detection and Context Stashing | Pending |
 
 ---
