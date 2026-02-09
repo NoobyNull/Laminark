@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-08)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable.
-**Current focus:** Phase 4 in progress - Embedding Engine and Semantic Search
+**Current focus:** Phase 4 complete - ready for Phase 5 (Topic Detection)
 
 ## Current Position
 
-Phase: 4 of 8 (Embedding Engine and Semantic Search)
-Plan: 3 of 4 in current phase (04-03 complete)
-Status: Executing Phase 4
-Last activity: 2026-02-09 — Completed 04-03 hybrid search and worker lifecycle integration
+Phase: 4 of 8 (Embedding Engine and Semantic Search) -- COMPLETE
+Plan: 4 of 4 in current phase (04-04 complete)
+Status: Phase 4 Complete
+Last activity: 2026-02-09 — Completed 04-04 acceptance tests for embedding pipeline
 
-Progress: [████████░░░░░░░░░░░░] 41%
+Progress: [█████████░░░░░░░░░░░] 45%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 13
-- Average duration: 4min
-- Total execution time: 0.73 hours
+- Total plans completed: 14
+- Average duration: 3min
+- Total execution time: 0.78 hours
 
 **By Phase:**
 
@@ -30,10 +30,10 @@ Progress: [████████░░░░░░░░░░░░] 41%
 | 01-storage-engine | 4/4 | 13min | 3min |
 | 02-mcp-interface-and-search | 3/3 | 12min | 4min |
 | 03-hook-integration-and-capture | 3/3 | 11min | 4min |
-| 04-embedding-engine-and-semantic-search | 3/4 | 8min | 3min |
+| 04-embedding-engine-and-semantic-search | 4/4 | 11min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 03-03 (3min), 04-01 (3min), 04-02 (3min), 04-03 (2min)
+- Last 5 plans: 04-01 (3min), 04-02 (3min), 04-03 (2min), 04-04 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -94,6 +94,9 @@ Recent decisions affecting current work:
 - [04-03]: hybridSearch requires db and projectHash params for ObservationRepository lookups on vector-only results
 - [04-03]: Background embedding interval 5s, 10 observations per batch -- balances responsiveness with resource usage
 - [04-03]: worker.start() fire-and-forget with .catch() -- server starts immediately, model loads lazily on first embed
+- [04-04]: Vec0 tests use if (!hasVecSupport) return guard rather than describe.skipIf for clarity
+- [04-04]: Mock factories for SearchEngine/EmbeddingStore/AnalysisWorker keep hybrid search tests unit-level
+- [04-04]: All 5 Phase 4 SCs proven by 41 new tests (286 total)
 
 ### Pending Todos
 
@@ -103,7 +106,7 @@ Recent decisions affecting current work:
 ### Blockers/Concerns
 
 - ~~Phase 3 (Hooks): Claude Code hooks API must be verified against current SDK version during planning~~ -- DONE (Phase 3 complete)
-- Phase 4 (Embeddings): @huggingface/transformers replaces archived fastembed-js -- integration needs validation
+- ~~Phase 4 (Embeddings): @huggingface/transformers replaces archived fastembed-js -- integration needs validation~~ -- DONE (Phase 4 complete)
 - Phase 6 (Topic Detection): EWMA parameter tuning is novel territory, expect iteration
 - Phase 7 (Knowledge Graph): Entity extraction from casual conversation text is noisy, start conservative
 
@@ -116,5 +119,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 04-03-PLAN.md hybrid search and worker lifecycle integration
+Stopped at: Completed 04-04-PLAN.md -- Phase 4 complete, ready for Phase 5
 Resume file: None
