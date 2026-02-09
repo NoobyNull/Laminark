@@ -139,16 +139,17 @@ Plans:
   3. Claude can query the knowledge graph via MCP tool (e.g., "what files does this decision affect?" returns traversal results)
   4. Graph enforces entity type taxonomy and caps node degree at 50 edges, preventing unnavigable hairball growth
   5. Curation agent periodically merges similar observations and generates consolidated summaries during quiet periods
-**Plans**: 7 plans
+**Plans**: 8 plans
 
 Plans:
-- [ ] 07-01-PLAN.md -- Graph storage schema, type taxonomy, and recursive CTE traversal queries
-- [ ] 07-02-PLAN.md -- Claude piggyback embedding strategy and hybrid selector
-- [ ] 07-03-PLAN.md -- Entity extraction rules and pipeline for all 7 entity types
-- [ ] 07-04-PLAN.md -- Temporal awareness and observation staleness detection
-- [ ] 07-05-PLAN.md -- Relationship detection and graph constraint enforcement (max degree, dedup)
-- [ ] 07-06-PLAN.md -- MCP query_graph and graph_stats tools for Claude graph access
-- [ ] 07-07-PLAN.md -- Curation agent for observation merging and graph maintenance
+- [x] 07-01-PLAN.md -- Graph storage schema, type taxonomy, and recursive CTE traversal queries
+- [x] 07-02-PLAN.md -- Claude piggyback embedding strategy and hybrid selector
+- [x] 07-03-PLAN.md -- Entity extraction rules and pipeline for all 7 entity types
+- [x] 07-04-PLAN.md -- Temporal awareness and observation staleness detection
+- [x] 07-05-PLAN.md -- Relationship detection and graph constraint enforcement (max degree, dedup)
+- [x] 07-06-PLAN.md -- MCP query_graph and graph_stats tools for Claude graph access
+- [x] 07-07-PLAN.md -- Curation agent for observation merging and graph maintenance
+- [ ] 07-08-PLAN.md -- Gap closure: wire entity extraction, relationship detection, and curation agent into live flow
 
 ### Phase 8: Web Visualization
 **Goal**: Users can visually explore their memory graph and session timeline in an interactive browser UI
