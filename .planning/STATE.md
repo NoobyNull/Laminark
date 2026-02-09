@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 ## Current Position
 
 Phase: 7 of 8 (Knowledge Graph and Advanced Intelligence)
-Plan: 2 of 7 in current phase (07-01, 07-02 complete)
+Plan: 4 of 7 in current phase (07-01, 07-02, 07-04 complete)
 Status: Executing Phase 7
-Last activity: 2026-02-09 — Completed 07-02 Piggyback embedding strategy and hybrid selector
+Last activity: 2026-02-09 — Completed 07-04 Temporal awareness and staleness detection
 
 Progress: [██████████████████████] 91%
 
@@ -40,6 +40,7 @@ Progress: [██████████████████████] 9
 - Trend: Consistent
 
 *Updated after each plan completion*
+| Phase 07 P04 | 3min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -141,6 +142,9 @@ Recent decisions affecting current work:
 - [07-02]: LAMINARK_EMBEDDING_MODE env var for strategy selection (local/piggyback/hybrid), default hybrid
 - [07-02]: Signal cache Map with 30s TTL lazy eviction connects hook extractor to embedding strategy
 - [07-02]: Vector blending: 70% ONNX + 30% keyword features with re-normalization to unit length
+- [Phase 07-04]: Staleness flags stored in separate staleness_flags table, decoupled from core observations schema
+- [Phase 07-04]: Pattern-based contradiction detection (string matching, not LLM) for deterministic staleness detection
+- [Phase 07-04]: Staleness is advisory only -- flagged observations remain queryable, users decide trust
 
 ### Pending Todos
 
@@ -163,5 +167,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 07-02-PLAN.md -- Piggyback embedding strategy and hybrid selector (50 new tests, 489 total)
+Stopped at: Completed 07-04-PLAN.md -- Temporal awareness and staleness detection (28 new tests)
 Resume file: None
