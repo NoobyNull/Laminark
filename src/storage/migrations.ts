@@ -21,6 +21,7 @@ export interface Migration {
  * Migration 004: sqlite-vec vec0 table for 384-dim embeddings (conditional).
  * Migration 005: Add title column to observations and rebuild FTS5 with
  *   title+content dual-column indexing.
+ * Migration 006: Recreate vec0 table with cosine distance metric (conditional).
  */
 export const MIGRATIONS: Migration[] = [
   {
@@ -145,6 +146,17 @@ export const MIGRATIONS: Migration[] = [
       INSERT INTO observations_fts(observations_fts) VALUES('rebuild');
     `,
   },
+  {
+    version: 6,
+    name: 'recreate_vec0_cosine_distance',
+    up: `
+      DROP TABLE IF EXISTS observation_embeddings;
+      CREATE VIRTUAL TABLE IF NOT EXISTS observation_embeddings USING vec0(
+        observation_id TEXT PRIMARY KEY,
+        embedding float[384] distance_metric=cosine
+      );
+    `,
+  },
 ];
 
 /**
@@ -154,9 +166,9 @@ export const MIGRATIONS: Migration[] = [
  * each migration whose version exceeds the current max applied version.
  * Each migration runs inside a transaction for atomicity.
  *
- * Migration 004 (vec0 table) is only applied when hasVectorSupport is true.
- * If sqlite-vec is not available, it is silently skipped and will be applied
- * on a future run when the extension becomes available.
+ * Migrations 004 and 006 (vec0 tables) are only applied when hasVectorSupport
+ * is true. If sqlite-vec is not available, they are silently skipped and will
+ * be applied on a future run when the extension becomes available.
  *
  * @param db - An open better-sqlite3 database connection
  * @param hasVectorSupport - Whether sqlite-vec loaded successfully
@@ -195,8 +207,8 @@ export function runMigrations(
       continue;
     }
 
-    // Skip vec0 migration if sqlite-vec is not available
-    if (migration.version === 4 && !hasVectorSupport) {
+    // Skip vec0 migrations if sqlite-vec is not available
+    if ((migration.version === 4 || migration.version === 6) && !hasVectorSupport) {
       continue;
     }
 
