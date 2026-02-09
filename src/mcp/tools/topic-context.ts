@@ -85,6 +85,18 @@ export function formatStashes(stashes: ContextStash[]): string {
 // Response helpers
 // ---------------------------------------------------------------------------
 
+function prependNotifications(
+  notificationStore: NotificationStore | null,
+  projectHash: string,
+  responseText: string,
+): string {
+  if (!notificationStore) return responseText;
+  const pending = notificationStore.consumePending(projectHash);
+  if (pending.length === 0) return responseText;
+  const banner = pending.map(n => `[Laminark] ${n.message}`).join('\n');
+  return banner + '\n\n' + responseText;
+}
+
 function textResponse(text: string) {
   return { content: [{ type: 'text' as const, text }] };
 }
@@ -128,6 +140,10 @@ export function registerTopicContext(
       },
     },
     async (args) => {
+      // Helper to wrap textResponse with pending notifications
+      const withNotifications = (text: string) =>
+        textResponse(prependNotifications(notificationStore, projectHash, text));
+
       try {
         debug('mcp', 'topic_context: request', { query: args.query, limit: args.limit });
 
@@ -144,7 +160,7 @@ export function registerTopicContext(
         }
 
         if (stashes.length === 0) {
-          return textResponse(
+          return withNotifications(
             'No stashed context threads found. You\'re working in a single thread.',
           );
         }
@@ -154,7 +170,7 @@ export function registerTopicContext(
 
         debug('mcp', 'topic_context: returning', { count: stashes.length });
 
-        return textResponse(formatted + footer);
+        return withNotifications(formatted + footer);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         debug('mcp', 'topic_context: error', { error: message });

@@ -79,6 +79,18 @@ function formatFullItem(obs: Observation): string {
 // Response helpers
 // ---------------------------------------------------------------------------
 
+function prependNotifications(
+  notificationStore: NotificationStore | null,
+  projectHash: string,
+  responseText: string,
+): string {
+  if (!notificationStore) return responseText;
+  const pending = notificationStore.consumePending(projectHash);
+  if (pending.length === 0) return responseText;
+  const banner = pending.map(n => `[Laminark] ${n.message}`).join('\n');
+  return banner + '\n\n' + responseText;
+}
+
 function textResponse(text: string) {
   return { content: [{ type: 'text' as const, text }] };
 }
@@ -149,6 +161,10 @@ export function registerRecall(
       },
     },
     async (args) => {
+      // Helper to wrap textResponse with pending notifications
+      const withNotifications = (text: string) =>
+        textResponse(prependNotifications(notificationStore, projectHash, text));
+
       try {
         const repo = new ObservationRepository(db, projectHash);
         const searchEngine = new SearchEngine(db, projectHash);
@@ -191,7 +207,7 @@ export function registerRecall(
             }
           }
           if (notFound.length > 0 && observations.length === 0) {
-            return textResponse(
+            return withNotifications(
               `No memories found matching '${notFound.join(', ')}'. Try broader search terms or check the ID.`,
             );
           }
@@ -200,7 +216,7 @@ export function registerRecall(
             ? repo.getByIdIncludingDeleted(args.id)
             : repo.getById(args.id);
           if (!obs) {
-            return textResponse(
+            return withNotifications(
               `No memories found matching '${args.id}'. Try broader search terms or check the ID.`,
             );
           }
@@ -236,7 +252,7 @@ export function registerRecall(
 
         if (observations.length === 0) {
           const searchTerm = args.query ?? args.title ?? args.id ?? '';
-          return textResponse(
+          return withNotifications(
             `No memories found matching '${searchTerm}'. Try broader search terms or check the ID.`,
           );
         }
@@ -247,12 +263,15 @@ export function registerRecall(
 
         // --- VIEW ---
         if (args.action === 'view') {
-          return formatViewResponse(
+          const viewResponse = formatViewResponse(
             observations,
             searchResults,
             args.detail,
             args.id !== undefined,
           );
+          // Prepend notifications to view response text
+          const originalText = viewResponse.content[0].text;
+          return textResponse(prependNotifications(notificationStore, projectHash, originalText));
         }
 
         // --- PURGE ---
@@ -272,7 +291,7 @@ export function registerRecall(
           if (failures.length > 0) {
             msg += ` Not found or already purged: ${failures.join(', ')}`;
           }
-          return textResponse(msg);
+          return withNotifications(msg);
         }
 
         // --- RESTORE ---
@@ -295,7 +314,7 @@ export function registerRecall(
           if (failures.length > 0) {
             msg += ` Not found: ${failures.join(', ')}`;
           }
-          return textResponse(msg);
+          return withNotifications(msg);
         }
 
         // Should not reach here, but TypeScript exhaustiveness

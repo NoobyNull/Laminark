@@ -71,11 +71,21 @@ export function registerSaveMemory(
           title: resolvedTitle,
         });
 
+        // Prepend any pending notifications to the response
+        let responseText = `Saved memory "${resolvedTitle}" (id: ${obs.id})`;
+        if (notificationStore) {
+          const pending = notificationStore.consumePending(projectHash);
+          if (pending.length > 0) {
+            const banner = pending.map(n => `[Laminark] ${n.message}`).join('\n');
+            responseText = banner + '\n\n' + responseText;
+          }
+        }
+
         return {
           content: [
             {
               type: 'text' as const,
-              text: `Saved memory "${resolvedTitle}" (id: ${obs.id})`,
+              text: responseText,
             },
           ],
         };
