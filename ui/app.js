@@ -12,6 +12,8 @@
 window.laminarkState = {
   graph: null,
   timeline: null,
+  graphInitialized: false,
+  timelineInitialized: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -181,6 +183,21 @@ function initNavigation() {
       if (filterBar) {
         filterBar.style.display = targetView === 'graph-view' ? '' : 'none';
       }
+
+      // Lazy initialization: only init each view when first activated
+      if (targetView === 'timeline-view' && !window.laminarkState.timelineInitialized) {
+        if (window.laminarkTimeline) {
+          window.laminarkTimeline.initTimeline('timeline-view');
+          window.laminarkTimeline.loadTimelineData();
+          window.laminarkState.timelineInitialized = true;
+        }
+      } else if (targetView === 'graph-view' && !window.laminarkState.graphInitialized) {
+        if (window.laminarkGraph) {
+          window.laminarkGraph.initGraph('cy');
+          window.laminarkGraph.loadGraphData();
+          window.laminarkState.graphInitialized = true;
+        }
+      }
     });
   });
 }
@@ -330,14 +347,22 @@ document.addEventListener('DOMContentLoaded', async function () {
     observations: timelineData.observations.length,
   });
 
-  // Initialize and load the knowledge graph
+  // Initialize the knowledge graph (active by default)
   if (window.laminarkGraph) {
     window.laminarkGraph.initGraph('cy');
     await window.laminarkGraph.loadGraphData();
+    window.laminarkState.graphInitialized = true;
   }
 
-  // Render timeline
-  renderTimeline(timelineData);
+  // Initialize timeline module (lazy -- waits for tab click, or pre-init if timeline tab is active)
+  var activeTab = document.querySelector('.nav-tab.active');
+  if (activeTab && activeTab.getAttribute('data-view') === 'timeline-view') {
+    if (window.laminarkTimeline) {
+      window.laminarkTimeline.initTimeline('timeline-view');
+      window.laminarkTimeline.loadTimelineData();
+      window.laminarkState.timelineInitialized = true;
+    }
+  }
 
   // Listen for SSE-dispatched events for graph updates
   document.addEventListener('laminark:entity_updated', function (e) {
