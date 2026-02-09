@@ -7,6 +7,7 @@ export { SessionRepository } from './sessions.js';
 export { SearchEngine } from './search.js';
 export { EmbeddingStore } from './embeddings.js';
 export type { EmbeddingSearchResult } from './embeddings.js';
+export { StashManager } from './stash-manager.js';
 
 // Re-export types that consumers need
 export type {
