@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-08)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable.
-**Current focus:** Phase 6 - Topic Detection and Context Stashing
+**Current focus:** Phase 6 Complete - Ready for Phase 7
 
 ## Current Position
 
-Phase: 6 of 8 (Topic Detection and Context Stashing)
-Plan: 5 of 6 in current phase (06-01, 06-02, 06-03, 06-04, 06-05 complete)
-Status: Executing Phase 6
-Last activity: 2026-02-09 — Completed 06-05 EWMA adaptive threshold
+Phase: 6 of 8 (Topic Detection and Context Stashing) -- COMPLETE
+Plan: 6 of 6 in current phase (06-01, 06-02, 06-03, 06-04, 06-05, 06-06 complete)
+Status: Phase 6 Complete
+Last activity: 2026-02-09 — Completed 06-06 Sensitivity configuration and decision logging
 
-Progress: [████████████████░░░░] 79%
+Progress: [████████████████████] 82%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 22
+- Total plans completed: 23
 - Average duration: 3min
-- Total execution time: 1.20 hours
+- Total execution time: 1.28 hours
 
 **By Phase:**
 
@@ -32,10 +32,10 @@ Progress: [████████████████░░░░] 79%
 | 03-hook-integration-and-capture | 3/3 | 11min | 4min |
 | 04-embedding-engine-and-semantic-search | 4/4 | 11min | 3min |
 | 05-session-context-and-summaries | 3/3 | 9min | 3min |
-| 06-topic-detection-and-context-stashing | 5/6 | 16min | 3min |
+| 06-topic-detection-and-context-stashing | 6/6 | 21min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 06-01 (2min), 06-02 (3min), 06-04 (3min), 06-03 (5min), 06-05 (3min)
+- Last 5 plans: 06-02 (3min), 06-04 (3min), 06-03 (5min), 06-05 (3min), 06-06 (5min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -124,6 +124,9 @@ Recent decisions affecting current work:
 - [06-05]: EWMA variance uses post-update mean (standard formulation) for accurate tracking
 - [06-05]: seedFromHistory preserves observationCount -- count tracks session activity independently from statistical seed
 - [06-05]: ThresholdStore follows prepared-statement constructor pattern matching StashManager
+- [06-06]: Migration 009 for shift_decisions (008 was already taken by threshold_history)
+- [06-06]: Optional dependency injection in TopicShiftHandlerDeps: config, decisionLogger, adaptiveManager all optional for backward compat
+- [06-06]: Decision logger randomBytes(16) ID generation matches ObservationRepository and StashManager patterns
 
 ### Pending Todos
 
@@ -146,5 +149,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 06-05-PLAN.md -- EWMA adaptive threshold (Phase 6, 1 plan remaining)
+Stopped at: Completed 06-06-PLAN.md -- Phase 6 complete (all 6 plans done, ready for Phase 7)
 Resume file: None
