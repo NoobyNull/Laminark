@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-08)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable.
-**Current focus:** Phase 6 Complete - Ready for Phase 7
+**Current focus:** Phase 7 - Knowledge Graph and Advanced Intelligence
 
 ## Current Position
 
-Phase: 6 of 8 (Topic Detection and Context Stashing) -- COMPLETE
-Plan: 7 of 7 in current phase (06-01, 06-02, 06-03, 06-04, 06-05, 06-06, 06-07 complete)
-Status: Phase 6 Complete (gap closure plan 06-07 done)
-Last activity: 2026-02-09 — Completed 06-07 Topic detection wiring and notification delivery
+Phase: 7 of 8 (Knowledge Graph and Advanced Intelligence)
+Plan: 1 of 7 in current phase (07-01 complete)
+Status: Executing Phase 7
+Last activity: 2026-02-09 — Completed 07-01 Graph schema foundation
 
-Progress: [█████████████████████] 86%
+Progress: [██████████████████████] 89%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 24
+- Total plans completed: 25
 - Average duration: 3min
-- Total execution time: 1.36 hours
+- Total execution time: 1.41 hours
 
 **By Phase:**
 
@@ -33,9 +33,10 @@ Progress: [█████████████████████] 86%
 | 04-embedding-engine-and-semantic-search | 4/4 | 11min | 3min |
 | 05-session-context-and-summaries | 3/3 | 9min | 3min |
 | 06-topic-detection-and-context-stashing | 7/7 | 26min | 4min |
+| 07-knowledge-graph-and-advanced-intelligence | 1/7 | 3min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 06-04 (3min), 06-03 (5min), 06-05 (3min), 06-06 (5min), 06-07 (5min)
+- Last 5 plans: 06-05 (3min), 06-06 (5min), 06-07 (5min), 07-01 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -130,6 +131,11 @@ Recent decisions affecting current work:
 - [06-07]: NotificationStore uses CREATE TABLE IF NOT EXISTS inline (no migration) -- transient queue not core data
 - [06-07]: Notification delivery via MCP tool response piggybacking -- consume-on-read pattern, no polling
 - [06-07]: Topic detection errors wrapped in try/catch to never crash the background embedding loop
+- [07-01]: Graph schema in src/graph/ as self-contained module, separate from src/storage/ migration system
+- [07-01]: Graph tables use CREATE IF NOT EXISTS (idempotent init) instead of versioned migration tracking
+- [07-01]: upsertNode merges observation_ids (dedup via Set) and metadata (override) on name+type collision
+- [07-01]: insertEdge ON CONFLICT keeps MAX(existing, new) weight -- confidence only goes up through repeated extraction
+- [07-01]: TraversalRow uses column aliases (n_*, e_*) to disambiguate in recursive CTE joins
 
 ### Pending Todos
 
@@ -152,5 +158,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 06-07-PLAN.md -- Phase 6 fully complete (all 7 plans including gap closure done, ready for Phase 7)
+Stopped at: Completed 07-01-PLAN.md -- Graph schema foundation (types, tables, traversal queries)
 Resume file: None
