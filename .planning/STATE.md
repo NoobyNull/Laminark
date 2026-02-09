@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 ## Current Position
 
 Phase: 4 of 8 (Embedding Engine and Semantic Search)
-Plan: 1 of 4 in current phase (04-01 complete)
+Plan: 2 of 4 in current phase (04-02 complete)
 Status: Executing Phase 4
-Last activity: 2026-02-09 — Completed 04-01 embedding engine foundation
+Last activity: 2026-02-09 — Completed 04-02 worker thread bridge and EmbeddingStore
 
-Progress: [████████░░░░░░░░░░░░] 34%
+Progress: [████████░░░░░░░░░░░░] 38%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 11
+- Total plans completed: 12
 - Average duration: 4min
-- Total execution time: 0.65 hours
+- Total execution time: 0.70 hours
 
 **By Phase:**
 
@@ -30,10 +30,10 @@ Progress: [████████░░░░░░░░░░░░] 34%
 | 01-storage-engine | 4/4 | 13min | 3min |
 | 02-mcp-interface-and-search | 3/3 | 12min | 4min |
 | 03-hook-integration-and-capture | 3/3 | 11min | 4min |
-| 04-embedding-engine-and-semantic-search | 1/4 | 3min | 3min |
+| 04-embedding-engine-and-semantic-search | 2/4 | 6min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 03-01 (3min), 03-02 (5min), 03-03 (3min), 04-01 (3min)
+- Last 5 plans: 03-02 (5min), 03-03 (3min), 04-01 (3min), 04-02 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -88,6 +88,9 @@ Recent decisions affecting current work:
 - [04-01]: LocalOnnxEngine uses dynamic import('@huggingface/transformers') for zero startup cost (DQ-04)
 - [04-01]: Float32Array.from(output.data) for ONNX pipeline output -- ArrayLike<number> not ArrayBuffer
 - [04-01]: Migration 006 recreates vec0 table with distance_metric=cosine for normalized BGE embeddings
+- [04-02]: Worker thread bridge resolves ./worker.js relative to import.meta.url for correct dist/ path resolution
+- [04-02]: Embed request timeouts resolve with null (not reject) for graceful degradation -- callers never need try/catch
+- [04-02]: Float32Array.buffer cast to ArrayBuffer for postMessage transfer list (TypeScript ArrayBufferLike strictness)
 
 ### Pending Todos
 
@@ -110,5 +113,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 04-01-PLAN.md embedding engine foundation
+Stopped at: Completed 04-02-PLAN.md worker thread bridge and EmbeddingStore
 Resume file: None
