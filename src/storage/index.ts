@@ -5,6 +5,8 @@ export type { Migration } from './migrations.js';
 export { ObservationRepository } from './observations.js';
 export { SessionRepository } from './sessions.js';
 export { SearchEngine } from './search.js';
+export { EmbeddingStore } from './embeddings.js';
+export type { EmbeddingSearchResult } from './embeddings.js';
 
 // Re-export types that consumers need
 export type {

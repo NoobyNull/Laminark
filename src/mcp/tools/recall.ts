@@ -6,6 +6,9 @@ import { debug } from '../../shared/debug.js';
 import type { Observation, SearchResult } from '../../shared/types.js';
 import { ObservationRepository } from '../../storage/observations.js';
 import { SearchEngine } from '../../storage/search.js';
+import type { EmbeddingStore } from '../../storage/embeddings.js';
+import type { AnalysisWorker } from '../../analysis/worker-bridge.js';
+import { hybridSearch } from '../../search/hybrid.js';
 import {
   enforceTokenBudget,
   estimateTokens,
@@ -91,6 +94,8 @@ export function registerRecall(
   server: McpServer,
   db: BetterSqlite3.Database,
   projectHash: string,
+  worker: AnalysisWorker | null = null,
+  embeddingStore: EmbeddingStore | null = null,
 ): void {
   server.registerTool(
     'recall',
@@ -199,9 +204,21 @@ export function registerRecall(
           }
           observations = [obs];
         } else if (args.query) {
-          searchResults = searchEngine.searchKeyword(args.query, {
-            limit: args.limit,
-          });
+          if (embeddingStore) {
+            searchResults = await hybridSearch({
+              searchEngine,
+              embeddingStore,
+              worker,
+              query: args.query,
+              db,
+              projectHash,
+              options: { limit: args.limit },
+            });
+          } else {
+            searchResults = searchEngine.searchKeyword(args.query, {
+              limit: args.limit,
+            });
+          }
           observations = searchResults.map((r) => r.observation);
         } else if (args.title) {
           observations = repo.getByTitle(args.title, {
