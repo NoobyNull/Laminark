@@ -254,18 +254,25 @@ export const personRule: ExtractionRule = (text: string): ExtractionMatch[] => {
   }
 
   // "with [Capitalized Name]" when preceded by interaction verbs
-  const withRegex = /\b(?:decided|worked|paired|collaborated|discussed|met)\s+with\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b/g;
-  while ((match = withRegex.exec(text)) !== null) {
-    const name = match[1];
+  // Two-stage match: first find the verb+with phrase, then extract capitalized name after it
+  const withVerbRegex = /\b(?:[Dd]ecided|[Ww]orked|[Pp]aired|[Cc]ollaborated|[Dd]iscussed|[Mm]et)\s+with\s+/g;
+  while ((match = withVerbRegex.exec(text)) !== null) {
+    // Extract capitalized name from text after the verb phrase
+    const afterVerb = text.slice(match.index + match[0].length);
+    const nameMatch = afterVerb.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b/);
+    if (!nameMatch) continue;
+
+    const name = nameMatch[1];
     const lower = name.toLowerCase();
     if (seen.has(lower)) continue;
     seen.add(lower);
 
+    const fullEnd = match.index + match[0].length + nameMatch[0].length;
     matches.push({
       name,
       type: 'Person',
       confidence: 0.6,
-      span: [match.index, match.index + match[0].length],
+      span: [match.index, fullEnd],
     });
   }
 
@@ -379,7 +386,8 @@ export const projectRule: ExtractionRule = (text: string): ExtractionMatch[] => 
 
   // org/repo pattern (e.g., "facebook/react", "vercel/next.js")
   // Must have org/ prefix to distinguish from file paths (file paths have extensions)
-  const orgRepoRegex = /\b([a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+)(?!\.[a-zA-Z]{1,4}(?:\b|\/))(?!\/)/g;
+  // Negative lookbehind for @ to avoid matching scoped packages (handled separately)
+  const orgRepoRegex = /(?<![@a-zA-Z0-9])\b([a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+)(?!\.[a-zA-Z]{1,4}(?:\b|\/))(?!\/)/g;
   let match: RegExpExecArray | null;
   while ((match = orgRepoRegex.exec(text)) !== null) {
     const candidate = match[1];
