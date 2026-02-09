@@ -214,23 +214,44 @@ function initFilters() {
       const type = pill.getAttribute('data-type');
 
       if (type === 'all') {
-        // "All" is exclusive -- deactivate others
-        pills.forEach(function (p) { p.classList.remove('active'); });
-        pill.classList.add('active');
+        // "All" is exclusive -- activate all type pills
+        pills.forEach(function (p) {
+          p.classList.add('active');
+        });
+
+        // Reset graph filters
+        if (window.laminarkGraph && window.laminarkGraph.resetFilters) {
+          window.laminarkGraph.resetFilters();
+        }
       } else {
-        // Toggle this filter
-        const allPill = document.querySelector('.filter-pill[data-type="all"]');
-        if (allPill) allPill.classList.remove('active');
+        // Toggle this filter pill
         pill.classList.toggle('active');
 
-        // If nothing selected, re-activate "All"
-        const anyActive = document.querySelector('.filter-pill.active:not([data-type="all"])');
-        if (!anyActive && allPill) {
-          allPill.classList.add('active');
+        // Check if all type pills are now active
+        const typePills = document.querySelectorAll('.filter-pill:not([data-type="all"])');
+        const allActive = Array.from(typePills).every(function (p) { return p.classList.contains('active'); });
+        const noneActive = !Array.from(typePills).some(function (p) { return p.classList.contains('active'); });
+        const allPill = document.querySelector('.filter-pill[data-type="all"]');
+
+        if (allActive || noneActive) {
+          // All selected or none selected -- reset to "All"
+          pills.forEach(function (p) { p.classList.add('active'); });
+          if (window.laminarkGraph && window.laminarkGraph.resetFilters) {
+            window.laminarkGraph.resetFilters();
+          }
+          return;
+        }
+
+        // Update "All" pill state
+        if (allPill) allPill.classList.remove('active');
+
+        // Use graph.js filterByType for toggle behavior
+        if (window.laminarkGraph && window.laminarkGraph.filterByType) {
+          window.laminarkGraph.filterByType(type);
         }
       }
 
-      // Dispatch filter change event
+      // Dispatch filter change event for any other listeners
       const activeTypes = getActiveFilters();
       document.dispatchEvent(new CustomEvent('laminark:filter_change', { detail: { types: activeTypes } }));
     });
@@ -250,12 +271,16 @@ function getActiveFilters() {
 // ---------------------------------------------------------------------------
 
 function initDetailPanel() {
-  const panel = document.getElementById('detail-panel');
   const closeBtn = document.getElementById('detail-close');
 
-  if (closeBtn && panel) {
+  if (closeBtn) {
     closeBtn.addEventListener('click', function () {
-      panel.classList.add('hidden');
+      if (window.laminarkGraph && window.laminarkGraph.hideDetailPanel) {
+        window.laminarkGraph.hideDetailPanel();
+      } else {
+        var panel = document.getElementById('detail-panel');
+        if (panel) panel.classList.add('hidden');
+      }
     });
   }
 }
@@ -269,47 +294,132 @@ function showNodeDetails(nodeData) {
 
   title.textContent = nodeData.entity.label;
 
-  let html = '';
+  // Build detail panel content using DOM elements for safety
+  body.innerHTML = '';
 
-  // Entity info
-  html += '<div class="detail-section">';
-  html += '<div class="detail-section-title">Entity</div>';
-  html += '<div class="detail-field"><span class="field-label">Type:</span> ';
-  html += '<span class="type-badge" data-type="' + nodeData.entity.type + '">' + nodeData.entity.type + '</span></div>';
-  html += '<div class="detail-field"><span class="field-label">Created:</span> <span class="field-value">' + nodeData.entity.createdAt + '</span></div>';
-  html += '</div>';
+  // Entity info section
+  var entitySection = document.createElement('div');
+  entitySection.className = 'detail-section';
 
-  // Observations
+  var entityTitle = document.createElement('div');
+  entityTitle.className = 'detail-section-title';
+  entityTitle.textContent = 'Entity';
+  entitySection.appendChild(entityTitle);
+
+  // Type field with colored badge
+  var typeField = document.createElement('div');
+  typeField.className = 'detail-field';
+  var typeLabel = document.createElement('span');
+  typeLabel.className = 'field-label';
+  typeLabel.textContent = 'Type: ';
+  var typeBadge = document.createElement('span');
+  typeBadge.className = 'type-badge';
+  typeBadge.setAttribute('data-type', nodeData.entity.type);
+  typeBadge.textContent = nodeData.entity.type;
+  typeField.appendChild(typeLabel);
+  typeField.appendChild(typeBadge);
+  entitySection.appendChild(typeField);
+
+  // Created date
+  var createdField = document.createElement('div');
+  createdField.className = 'detail-field';
+  var createdLabel = document.createElement('span');
+  createdLabel.className = 'field-label';
+  createdLabel.textContent = 'Created: ';
+  var createdValue = document.createElement('span');
+  createdValue.className = 'field-value';
+  createdValue.textContent = formatTime(nodeData.entity.createdAt);
+  createdField.appendChild(createdLabel);
+  createdField.appendChild(createdValue);
+  entitySection.appendChild(createdField);
+
+  body.appendChild(entitySection);
+
+  // Observations section -- scrollable list sorted most recent first
   if (nodeData.observations && nodeData.observations.length > 0) {
-    html += '<div class="detail-section">';
-    html += '<div class="detail-section-title">Observations (' + nodeData.observations.length + ')</div>';
+    var obsSection = document.createElement('div');
+    obsSection.className = 'detail-section';
+
+    var obsTitle = document.createElement('div');
+    obsTitle.className = 'detail-section-title';
+    obsTitle.textContent = 'Observations (' + nodeData.observations.length + ')';
+    obsSection.appendChild(obsTitle);
+
+    var obsList = document.createElement('div');
+    obsList.className = 'observation-list-panel';
+
     nodeData.observations.forEach(function (obs) {
-      const text = obs.text.length > 200 ? obs.text.substring(0, 200) + '...' : obs.text;
-      html += '<div class="detail-observation">' + escapeHtml(text) + '</div>';
+      var item = document.createElement('div');
+      item.className = 'observation-item';
+
+      var timestamp = document.createElement('span');
+      timestamp.className = 'obs-timestamp';
+      timestamp.textContent = formatTime(obs.createdAt);
+      item.appendChild(timestamp);
+
+      var text = document.createElement('span');
+      text.className = 'obs-text-content';
+      text.textContent = obs.text.length > 200 ? obs.text.substring(0, 200) + '...' : obs.text;
+      item.appendChild(text);
+
+      obsList.appendChild(item);
     });
-    html += '</div>';
+
+    obsSection.appendChild(obsList);
+    body.appendChild(obsSection);
   }
 
-  // Relationships
+  // Relationships section -- each clickable to navigate to that node
   if (nodeData.relationships && nodeData.relationships.length > 0) {
-    html += '<div class="detail-section">';
-    html += '<div class="detail-section-title">Relationships (' + nodeData.relationships.length + ')</div>';
+    var relSection = document.createElement('div');
+    relSection.className = 'detail-section';
+
+    var relTitle = document.createElement('div');
+    relTitle.className = 'detail-section-title';
+    relTitle.textContent = 'Relationships (' + nodeData.relationships.length + ')';
+    relSection.appendChild(relTitle);
+
     nodeData.relationships.forEach(function (rel) {
-      const arrow = rel.direction === 'outgoing' ? ' \u2192 ' : ' \u2190 ';
-      html += '<div class="detail-relationship">';
-      html += '<span class="rel-type">' + escapeHtml(rel.type) + '</span>';
-      html += arrow;
-      html += '<span class="rel-target">' + escapeHtml(rel.targetLabel) + '</span>';
-      html += '</div>';
+      var item = document.createElement('div');
+      item.className = 'relationship-item';
+      item.setAttribute('data-target-id', rel.targetId);
+      item.style.cursor = 'pointer';
+
+      var relType = document.createElement('span');
+      relType.className = 'rel-type';
+      relType.textContent = rel.type;
+      item.appendChild(relType);
+
+      var arrow = document.createElement('span');
+      arrow.className = 'rel-arrow';
+      arrow.textContent = rel.direction === 'outgoing' ? ' \u2192 ' : ' \u2190 ';
+      item.appendChild(arrow);
+
+      var target = document.createElement('span');
+      target.className = 'rel-target';
+      target.textContent = rel.targetLabel;
+      item.appendChild(target);
+
+      // Click to navigate to the related node in the graph
+      item.addEventListener('click', function () {
+        if (window.laminarkGraph && window.laminarkGraph.selectAndCenterNode) {
+          window.laminarkGraph.selectAndCenterNode(rel.targetId);
+        }
+      });
+
+      relSection.appendChild(item);
     });
-    html += '</div>';
+
+    body.appendChild(relSection);
   }
 
   if (!nodeData.observations?.length && !nodeData.relationships?.length) {
-    html = '<p class="empty-state">No details available for this node.</p>';
+    var emptyMsg = document.createElement('p');
+    emptyMsg.className = 'empty-state';
+    emptyMsg.textContent = 'No details available for this node.';
+    body.appendChild(emptyMsg);
   }
 
-  body.innerHTML = html;
   panel.classList.remove('hidden');
 }
 
@@ -387,12 +497,18 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
   });
 
-  // Filter change handler for graph
-  document.addEventListener('laminark:filter_change', function (e) {
-    if (!window.laminarkGraph) return;
-    var types = e.detail ? e.detail.types : null;
-    window.laminarkGraph.applyFilter(types);
+  // Filter change handler for graph (legacy listener)
+  document.addEventListener('laminark:filter_change', function () {
+    // Filter changes now handled directly in initFilters via graph.filterByType/resetFilters
+    // This listener remains for any external consumers
   });
+
+  // After initial graph load, update filter pill counts
+  setTimeout(function () {
+    if (window.laminarkGraph && window.laminarkGraph.updateFilterCounts) {
+      window.laminarkGraph.updateFilterCounts();
+    }
+  }, 1000);
 });
 
 // ---------------------------------------------------------------------------

@@ -165,6 +165,9 @@ body {
 }
 
 .filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 4px 12px;
   background: transparent;
   border: 1px solid var(--border);
@@ -173,7 +176,20 @@ body {
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
-  transition: all var(--transition);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.filter-pill .color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.filter-pill .count {
+  color: var(--text-muted);
+  font-size: 11px;
+  opacity: 0.7;
 }
 
 .filter-pill:hover {
@@ -627,6 +643,73 @@ body {
 }
 
 .detail-relationship .rel-target {
+  color: var(--text);
+}
+
+/* Detail panel -- enhanced observation items */
+.observation-list-panel {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.observation-item {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.observation-item:last-child {
+  border-bottom: none;
+}
+
+.observation-item .obs-timestamp {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+.observation-item .obs-text-content {
+  color: var(--text);
+  line-height: 1.4;
+}
+
+/* Detail panel -- clickable relationship items */
+.relationship-item {
+  padding: 6px 8px;
+  margin-bottom: 2px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.relationship-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.relationship-item:hover .rel-target {
+  text-decoration: underline;
+}
+
+.relationship-item .rel-type {
+  color: var(--accent);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.relationship-item .rel-arrow {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.relationship-item .rel-target {
   color: var(--text);
 }
 

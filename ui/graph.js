@@ -42,6 +42,7 @@ const COSE_DEFAULTS = {
 // ---------------------------------------------------------------------------
 
 let cy = null;
+var activeEntityTypes = new Set(Object.keys(ENTITY_STYLES)); // All types active initially
 
 // ---------------------------------------------------------------------------
 // initGraph
@@ -73,10 +74,15 @@ function initGraph(containerId) {
     autoungrabify: false, // Allow node dragging
   });
 
-  // Node click handler -- show detail panel
+  // Node click handler -- show detail panel and highlight selected node
   cy.on('tap', 'node', async function (evt) {
     var node = evt.target;
     var nodeId = node.data('id');
+
+    // Highlight the selected node
+    cy.$(':selected').unselect();
+    node.select();
+
     if (window.laminarkApp && window.laminarkApp.fetchNodeDetails) {
       var details = await window.laminarkApp.fetchNodeDetails(nodeId);
       if (details && window.laminarkApp.showNodeDetails) {
@@ -85,11 +91,10 @@ function initGraph(containerId) {
     }
   });
 
-  // Click on background closes detail panel
+  // Click on background closes detail panel and deselects all
   cy.on('tap', function (evt) {
     if (evt.target === cy) {
-      var panel = document.getElementById('detail-panel');
-      if (panel) panel.classList.add('hidden');
+      hideDetailPanel();
     }
   });
 
@@ -451,6 +456,211 @@ function updateGraphStatsFromCy() {
 }
 
 // ---------------------------------------------------------------------------
+// Detail panel helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Hides the detail panel and deselects all nodes.
+ */
+function hideDetailPanel() {
+  var panel = document.getElementById('detail-panel');
+  if (panel) panel.classList.add('hidden');
+  if (cy) cy.$(':selected').unselect();
+}
+
+/**
+ * Selects a node by ID and centers the graph on it.
+ * Used when clicking relationship links in the detail panel.
+ * @param {string} nodeId - The ID of the node to select and center
+ */
+function selectAndCenterNode(nodeId) {
+  if (!cy) return;
+  var node = cy.getElementById(nodeId);
+  if (node.length === 0) return;
+
+  cy.$(':selected').unselect();
+  node.select();
+  cy.animate({
+    center: { eles: node },
+    duration: 300,
+  });
+
+  // Also fetch and show details for the navigated node
+  if (window.laminarkApp && window.laminarkApp.fetchNodeDetails) {
+    window.laminarkApp.fetchNodeDetails(nodeId).then(function (details) {
+      if (details && window.laminarkApp.showNodeDetails) {
+        window.laminarkApp.showNodeDetails(details);
+      }
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Entity type filtering with state tracking
+// ---------------------------------------------------------------------------
+
+/**
+ * Toggles an entity type filter on/off.
+ * @param {string} type - Entity type to toggle
+ */
+function filterByType(type) {
+  if (activeEntityTypes.has(type)) {
+    activeEntityTypes.delete(type);
+  } else {
+    activeEntityTypes.add(type);
+  }
+  applyActiveFilters();
+}
+
+/**
+ * Resets all entity type filters to active (show all).
+ */
+function resetFilters() {
+  Object.keys(ENTITY_STYLES).forEach(function (type) {
+    activeEntityTypes.add(type);
+  });
+  applyActiveFilters();
+}
+
+/**
+ * Sets which entity types are active (replaces the current set).
+ * @param {string[]|null} types - Array of active types, or null for all
+ */
+function setActiveTypes(types) {
+  activeEntityTypes.clear();
+  if (!types) {
+    Object.keys(ENTITY_STYLES).forEach(function (t) { activeEntityTypes.add(t); });
+  } else {
+    types.forEach(function (t) { activeEntityTypes.add(t); });
+  }
+  applyActiveFilters();
+}
+
+/**
+ * Applies the current activeEntityTypes + time range filter to the graph.
+ */
+function applyActiveFilters() {
+  if (!cy) return;
+
+  var allActive = activeEntityTypes.size === Object.keys(ENTITY_STYLES).length;
+
+  if (allActive && !activeTimeRange.from && !activeTimeRange.to) {
+    // Show all
+    cy.elements().style('display', 'element');
+  } else {
+    cy.nodes().forEach(function (node) {
+      var nodeType = node.data('type');
+      var typeOk = activeEntityTypes.has(nodeType);
+
+      // Time range check
+      var timeOk = true;
+      if (activeTimeRange.from || activeTimeRange.to) {
+        var createdAt = node.data('createdAt');
+        if (createdAt) {
+          if (activeTimeRange.from && createdAt < activeTimeRange.from) timeOk = false;
+          if (activeTimeRange.to && createdAt > activeTimeRange.to) timeOk = false;
+        }
+      }
+
+      if (typeOk && timeOk) {
+        node.style('display', 'element');
+      } else {
+        node.style('display', 'none');
+      }
+    });
+
+    // Hide edges where either endpoint is hidden
+    cy.edges().forEach(function (edge) {
+      var src = edge.source();
+      var tgt = edge.target();
+      if (src.style('display') === 'none' || tgt.style('display') === 'none') {
+        edge.style('display', 'none');
+      } else {
+        edge.style('display', 'element');
+      }
+    });
+  }
+
+  updateGraphStatsFromCy();
+  updateFilterCounts();
+
+  // Fit visible elements
+  var visible = cy.elements(':visible');
+  if (visible.length > 0) {
+    cy.fit(visible, 50);
+  }
+}
+
+/**
+ * Returns a count of nodes per entity type (total and visible).
+ * @returns {Object} Map of type -> { total: number, visible: number }
+ */
+function getTypeCounts() {
+  var counts = {};
+  Object.keys(ENTITY_STYLES).forEach(function (type) {
+    counts[type] = { total: 0, visible: 0 };
+  });
+
+  if (!cy) return counts;
+
+  cy.nodes().forEach(function (node) {
+    var type = node.data('type');
+    if (counts[type]) {
+      counts[type].total++;
+      if (node.style('display') !== 'none') {
+        counts[type].visible++;
+      }
+    }
+  });
+
+  return counts;
+}
+
+/**
+ * Updates the count badges on filter pill buttons.
+ */
+function updateFilterCounts() {
+  var counts = getTypeCounts();
+  Object.keys(counts).forEach(function (type) {
+    var pill = document.querySelector('.filter-pill[data-type="' + type + '"]');
+    if (pill) {
+      var countEl = pill.querySelector('.count');
+      if (countEl) {
+        countEl.textContent = counts[type].visible;
+      }
+    }
+  });
+
+  // Update "All" pill count with total visible
+  var allPill = document.querySelector('.filter-pill[data-type="all"]');
+  if (allPill) {
+    var allCountEl = allPill.querySelector('.count');
+    if (allCountEl) {
+      var totalVisible = 0;
+      Object.keys(counts).forEach(function (type) { totalVisible += counts[type].visible; });
+      allCountEl.textContent = totalVisible;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Time range state
+// ---------------------------------------------------------------------------
+
+var activeTimeRange = { from: null, to: null };
+
+/**
+ * Sets a time range filter. Nodes outside this range are hidden.
+ * @param {string|null} from - ISO8601 start, or null for no lower bound
+ * @param {string|null} to - ISO8601 end, or null for no upper bound
+ */
+function filterByTimeRange(from, to) {
+  activeTimeRange.from = from || null;
+  activeTimeRange.to = to || null;
+  applyActiveFilters();
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -462,6 +672,14 @@ window.laminarkGraph = {
   removeElements: removeElements,
   fitToView: fitToView,
   applyFilter: applyFilter,
+  filterByType: filterByType,
+  filterByTimeRange: filterByTimeRange,
+  resetFilters: resetFilters,
+  setActiveTypes: setActiveTypes,
+  getTypeCounts: getTypeCounts,
+  updateFilterCounts: updateFilterCounts,
+  hideDetailPanel: hideDetailPanel,
+  selectAndCenterNode: selectAndCenterNode,
   ENTITY_STYLES: ENTITY_STYLES,
   getCy: function () { return cy; },
 };
