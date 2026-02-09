@@ -83,6 +83,7 @@ apiRoutes.get('/graph', (c) => {
   const db = getDb(c);
   const typeFilter = c.req.query('type');
   const sinceFilter = c.req.query('since');
+  const untilFilter = c.req.query('until');
 
   // Build nodes query
   let nodesSql = 'SELECT id, name, type, observation_ids, created_at FROM graph_nodes';
@@ -100,6 +101,11 @@ apiRoutes.get('/graph', (c) => {
   if (sinceFilter) {
     nodeConditions.push('created_at >= ?');
     nodeParams.push(sinceFilter);
+  }
+
+  if (untilFilter) {
+    nodeConditions.push('created_at <= ?');
+    nodeParams.push(untilFilter);
   }
 
   if (nodeConditions.length > 0) {

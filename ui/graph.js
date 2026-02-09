@@ -3,10 +3,21 @@
  *
  * Renders the knowledge graph as an interactive Cytoscape.js force-directed
  * layout. Entities appear as colored/shaped nodes by type. Relationships
- * render as labeled directed edges.
+ * render as labeled directed edges. Viewport culling hides off-screen nodes
+ * for smooth performance at 500+ nodes. Level-of-detail reduces visual
+ * complexity at low zoom levels.
  *
  * @module graph
  */
+
+// ---------------------------------------------------------------------------
+// Debounce utility
+// ---------------------------------------------------------------------------
+
+function debounce(fn, ms) {
+  var timer;
+  return function () { clearTimeout(timer); timer = setTimeout(fn, ms); };
+}
 
 // ---------------------------------------------------------------------------
 // Entity type visual map
@@ -43,6 +54,26 @@ const COSE_DEFAULTS = {
 
 let cy = null;
 var activeEntityTypes = new Set(Object.keys(ENTITY_STYLES)); // All types active initially
+
+// Viewport culling state
+var cullingEnabled = true;
+var isLayoutAnimating = false;
+
+// Level-of-detail state
+var currentLodLevel = 0; // 0 = full, 1 = no labels (zoom < 0.5), 2 = no edges (zoom < 0.3)
+
+// Performance stats overlay state
+var perfOverlayVisible = false;
+var perfOverlayEl = null;
+var perfFrameCount = 0;
+var perfLastFpsTime = 0;
+var perfFps = 0;
+var perfRafId = null;
+
+// Batch update queue for SSE events
+var batchQueue = [];
+var batchFlushTimer = null;
+var BATCH_DELAY_MS = 200;
 
 // ---------------------------------------------------------------------------
 // initGraph
@@ -98,7 +129,32 @@ function initGraph(containerId) {
     }
   });
 
-  console.log('[laminark:graph] Cytoscape initialized');
+  // Viewport culling: hide off-screen nodes for performance
+  var debouncedCull = debounce(cullOffscreen, 100);
+  cy.on('viewport', debouncedCull);
+  cy.on('pan', debouncedCull);
+  cy.on('zoom', debouncedCull);
+
+  // Level-of-detail: simplify rendering at low zoom levels
+  var debouncedLod = debounce(updateLevelOfDetail, 100);
+  cy.on('zoom', debouncedLod);
+
+  // Track layout animation state to disable culling during animation
+  cy.on('layoutstart', function () { isLayoutAnimating = true; });
+  cy.on('layoutstop', function () {
+    isLayoutAnimating = false;
+    cullOffscreen(); // Re-cull after layout settles
+  });
+
+  // Performance stats keyboard shortcut: Ctrl+Shift+P
+  document.addEventListener('keydown', function (e) {
+    if (e.ctrlKey && e.shiftKey && e.key === 'P') {
+      e.preventDefault();
+      togglePerfOverlay();
+    }
+  });
+
+  console.log('[laminark:graph] Cytoscape initialized with viewport culling and LOD');
   return cy;
 }
 
@@ -170,6 +226,14 @@ function buildCytoscapeStyles() {
     },
   });
 
+  // Culled elements (hidden via viewport culling)
+  styles.push({
+    selector: '.culled',
+    style: {
+      'display': 'none',
+    },
+  });
+
   return styles;
 }
 
@@ -196,6 +260,7 @@ async function loadGraphData(filters) {
     var params = new URLSearchParams();
     if (filters && filters.type) params.set('type', filters.type);
     if (filters && filters.since) params.set('since', filters.since);
+    if (filters && filters.until) params.set('until', filters.until);
     var url = '/api/graph' + (params.toString() ? '?' + params.toString() : '');
     try {
       var res = await fetch(url);

@@ -31,6 +31,7 @@ async function fetchGraphData(filters) {
   const params = new URLSearchParams();
   if (filters?.type) params.set('type', filters.type);
   if (filters?.since) params.set('since', filters.since);
+  if (filters?.until) params.set('until', filters.until);
 
   const url = '/api/graph' + (params.toString() ? '?' + params.toString() : '');
 
@@ -328,6 +329,104 @@ function getActiveFilters() {
 }
 
 // ---------------------------------------------------------------------------
+// Time range controls
+// ---------------------------------------------------------------------------
+
+function initTimeRange() {
+  var presetBtns = document.querySelectorAll('.time-preset');
+  var timeFromInput = document.getElementById('time-from');
+  var timeToInput = document.getElementById('time-to');
+  var applyBtn = document.getElementById('time-apply');
+
+  presetBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var preset = btn.getAttribute('data-preset');
+
+      // Update active state
+      presetBtns.forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+
+      // Calculate from/to dates based on preset
+      var now = new Date();
+      var from = null;
+      var to = null;
+
+      if (preset === 'hour') {
+        from = new Date(now.getTime() - 60 * 60 * 1000);
+        to = now;
+      } else if (preset === 'today') {
+        from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        to = now;
+      } else if (preset === 'week') {
+        // Start of this week (Monday)
+        var day = now.getDay();
+        var diff = day === 0 ? 6 : day - 1; // Monday = 0 offset
+        from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diff);
+        to = now;
+      } else if (preset === 'month') {
+        from = new Date(now.getFullYear(), now.getMonth(), 1);
+        to = now;
+      }
+      // preset === 'all' => from = null, to = null
+
+      // Update the date inputs to reflect the preset
+      if (timeFromInput && timeToInput) {
+        timeFromInput.value = from ? toDatetimeLocalString(from) : '';
+        timeToInput.value = to ? toDatetimeLocalString(to) : '';
+      }
+
+      // Apply client-side time range filter (instant for presets)
+      if (window.laminarkGraph && window.laminarkGraph.filterByTimeRange) {
+        window.laminarkGraph.filterByTimeRange(
+          from ? from.toISOString() : null,
+          to ? to.toISOString() : null
+        );
+      }
+    });
+  });
+
+  // Custom date range -- apply button
+  if (applyBtn) {
+    applyBtn.addEventListener('click', function () {
+      // Deactivate preset buttons
+      presetBtns.forEach(function (b) { b.classList.remove('active'); });
+
+      var fromVal = timeFromInput ? timeFromInput.value : '';
+      var toVal = timeToInput ? timeToInput.value : '';
+
+      var from = fromVal ? new Date(fromVal).toISOString() : null;
+      var to = toVal ? new Date(toVal).toISOString() : null;
+
+      // For custom date ranges, re-fetch from API for server-side filtering
+      if (window.laminarkGraph) {
+        var filters = {};
+        if (from) filters.since = from;
+        if (to) filters.until = to;
+
+        // Re-fetch graph data with server-side filtering
+        window.laminarkGraph.loadGraphData(filters).then(function () {
+          // Then also apply client-side time range for combined filtering
+          if (window.laminarkGraph.filterByTimeRange) {
+            window.laminarkGraph.filterByTimeRange(from, to);
+          }
+        });
+      }
+    });
+  }
+}
+
+/**
+ * Converts a Date to a datetime-local input value string.
+ * @param {Date} date
+ * @returns {string}
+ */
+function toDatetimeLocalString(date) {
+  var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+    'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+}
+
+// ---------------------------------------------------------------------------
 // Detail panel
 // ---------------------------------------------------------------------------
 
@@ -499,6 +598,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
   initNavigation();
   initFilters();
+  initTimeRange();
   initDetailPanel();
   connectSSE();
 
