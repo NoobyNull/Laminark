@@ -118,15 +118,16 @@ Plans:
   3. User can type /laminark:resume to see stashed context threads and re-inject a chosen thread back into the conversation
   4. User can ask "where was I?" to see recently abandoned context threads ranked by recency and relevance
   5. Topic detection adapts to the user's natural variance over time -- a scattered session raises the shift threshold, a focused session lowers it
-**Plans**: 6 plans
+**Plans**: 7 plans
 
 Plans:
-- [ ] 06-01-PLAN.md -- Static topic shift detection with cosine distance (TDD)
-- [ ] 06-02-PLAN.md -- Context stash storage layer and StashManager CRUD
-- [ ] 06-03-PLAN.md -- TopicShiftHandler integration and /laminark:stash command
-- [ ] 06-04-PLAN.md -- /laminark:resume command and topic_context MCP tool
-- [ ] 06-05-PLAN.md -- Adaptive EWMA threshold with historical session seeding (TDD)
-- [ ] 06-06-PLAN.md -- Sensitivity configuration and decision logging
+- [x] 06-01-PLAN.md -- Static topic shift detection with cosine distance (TDD)
+- [x] 06-02-PLAN.md -- Context stash storage layer and StashManager CRUD
+- [x] 06-03-PLAN.md -- TopicShiftHandler integration and /laminark:stash command
+- [x] 06-04-PLAN.md -- /laminark:resume command and topic_context MCP tool
+- [x] 06-05-PLAN.md -- Adaptive EWMA threshold with historical session seeding (TDD)
+- [x] 06-06-PLAN.md -- Sensitivity configuration and decision logging
+- [ ] 06-07-PLAN.md -- Gap closure: wire topic detection into embedding loop and add notification delivery
 
 ### Phase 7: Knowledge Graph and Advanced Intelligence
 **Goal**: Observations are connected into a navigable knowledge graph of entities and relationships, with high-quality embeddings from Claude's own reasoning
