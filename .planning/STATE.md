@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 ## Current Position
 
 Phase: 7 of 8 (Knowledge Graph and Advanced Intelligence)
-Plan: 6 of 7 in current phase (07-01, 07-02, 07-03, 07-04, 07-05, 07-06 complete)
-Status: Executing Phase 7
-Last activity: 2026-02-09 — Completed 07-06 MCP Graph Query Tools
+Plan: 7 of 7 in current phase (07-01 through 07-07 complete)
+Status: Phase 7 Complete
+Last activity: 2026-02-09 — Completed 07-07 Background Curation Agent
 
-Progress: [████████████████████████] 95%
+Progress: [█████████████████████████] 97%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 30
+- Total plans completed: 31
 - Average duration: 3min
-- Total execution time: 1.81 hours
+- Total execution time: 1.88 hours
 
 **By Phase:**
 
@@ -33,10 +33,10 @@ Progress: [███████████████████████
 | 04-embedding-engine-and-semantic-search | 4/4 | 11min | 3min |
 | 05-session-context-and-summaries | 3/3 | 9min | 3min |
 | 06-topic-detection-and-context-stashing | 7/7 | 26min | 4min |
-| 07-knowledge-graph-and-advanced-intelligence | 6/7 | 27min | 5min |
+| 07-knowledge-graph-and-advanced-intelligence | 7/7 | 31min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 07-02 (5min), 07-03 (6min), 07-04 (3min), 07-05 (2min), 07-06 (5min)
+- Last 5 plans: 07-03 (6min), 07-04 (3min), 07-05 (2min), 07-06 (5min), 07-07 (4min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -157,6 +157,11 @@ Recent decisions affecting current work:
 - [07-06]: query_graph uses bidirectional traversal (direction: 'both') for comprehensive relationship display
 - [07-06]: Observation excerpts truncated to 200 chars with progressive disclosure: entities -> relationships -> observations
 - [07-06]: Both graph tools registered in src/index.ts following existing registerTool pattern with notificationStore piggybacking
+- [07-07]: Jaccard text similarity threshold 0.85 (lower than cosine 0.95) since text comparison is less precise
+- [07-07]: Greedy clustering requires all-pairs similarity above threshold, not just seed comparison
+- [07-07]: runCuration async (Promise<CurationReport>) for future extensibility, current ops synchronous
+- [07-07]: Staleness sweep checks only recently-updated entities (last 24h) rather than full graph scan
+- [07-07]: Test file at src/graph/__tests__/curation-agent.test.ts following project convention
 
 ### Pending Todos
 
@@ -179,5 +184,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 07-05-PLAN.md -- Relationship detection and graph constraints (27 new tests, 597 total)
+Stopped at: Completed 07-07-PLAN.md -- Background curation agent (17 new tests, 614 total). Phase 7 complete.
 Resume file: None
