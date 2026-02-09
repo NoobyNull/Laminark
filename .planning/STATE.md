@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 ## Current Position
 
 Phase: 7 of 8 (Knowledge Graph and Advanced Intelligence)
-Plan: 4 of 7 in current phase (07-01, 07-02, 07-03, 07-04 complete)
+Plan: 6 of 7 in current phase (07-01, 07-02, 07-03, 07-04, 07-05, 07-06 complete)
 Status: Executing Phase 7
-Last activity: 2026-02-09 — Completed 07-03 Entity extraction pipeline
+Last activity: 2026-02-09 — Completed 07-06 MCP Graph Query Tools
 
-Progress: [██████████████████████] 91%
+Progress: [████████████████████████] 95%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 28
+- Total plans completed: 30
 - Average duration: 3min
-- Total execution time: 1.64 hours
+- Total execution time: 1.81 hours
 
 **By Phase:**
 
@@ -33,10 +33,10 @@ Progress: [██████████████████████] 9
 | 04-embedding-engine-and-semantic-search | 4/4 | 11min | 3min |
 | 05-session-context-and-summaries | 3/3 | 9min | 3min |
 | 06-topic-detection-and-context-stashing | 7/7 | 26min | 4min |
-| 07-knowledge-graph-and-advanced-intelligence | 4/7 | 17min | 4min |
+| 07-knowledge-graph-and-advanced-intelligence | 6/7 | 27min | 5min |
 
 **Recent Trend:**
-- Last 5 plans: 07-01 (3min), 07-02 (5min), 07-03 (6min), 07-04 (3min)
+- Last 5 plans: 07-02 (5min), 07-03 (6min), 07-04 (3min), 07-05 (2min), 07-06 (5min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -148,6 +148,10 @@ Recent decisions affecting current work:
 - [Phase 07-04]: Staleness flags stored in separate staleness_flags table, decoupled from core observations schema
 - [Phase 07-04]: Pattern-based contradiction detection (string matching, not LLM) for deterministic staleness detection
 - [Phase 07-04]: Staleness is advisory only -- flagged observations remain queryable, users decide trust
+- [07-06]: graph_stats collects stats via direct SQL rather than getGraphHealth (constraints module not yet built)
+- [07-06]: query_graph uses bidirectional traversal (direction: 'both') for comprehensive relationship display
+- [07-06]: Observation excerpts truncated to 200 chars with progressive disclosure: entities -> relationships -> observations
+- [07-06]: Both graph tools registered in src/index.ts following existing registerTool pattern with notificationStore piggybacking
 
 ### Pending Todos
 
@@ -170,5 +174,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 07-03-PLAN.md -- Entity extraction pipeline (41 new tests, 558 total)
+Stopped at: Completed 07-06-PLAN.md -- MCP Graph Query Tools (12 new tests, 597 total)
 Resume file: None
