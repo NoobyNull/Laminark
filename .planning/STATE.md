@@ -148,6 +148,11 @@ Recent decisions affecting current work:
 - [Phase 07-04]: Staleness flags stored in separate staleness_flags table, decoupled from core observations schema
 - [Phase 07-04]: Pattern-based contradiction detection (string matching, not LLM) for deterministic staleness detection
 - [Phase 07-04]: Staleness is advisory only -- flagged observations remain queryable, users decide trust
+- [07-05]: Context signal priority: decided_by > solved_by > caused_by > depends_on > part_of > uses (most specific first)
+- [07-05]: Context window expanded 50 chars before/after entity pair for signal detection beyond entity boundaries
+- [07-05]: Removed overly broad context signals (with, from, in) to reduce false positive relationship type overrides
+- [07-05]: Constraints module logs pruning/merging to stderr with [laminark:graph] prefix for observability
+- [07-05]: Test file at src/graph/__tests__/relationship-detector.test.ts covers both relationship detector and constraints modules
 - [07-06]: graph_stats collects stats via direct SQL rather than getGraphHealth (constraints module not yet built)
 - [07-06]: query_graph uses bidirectional traversal (direction: 'both') for comprehensive relationship display
 - [07-06]: Observation excerpts truncated to 200 chars with progressive disclosure: entities -> relationships -> observations
@@ -174,5 +179,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 07-06-PLAN.md -- MCP Graph Query Tools (12 new tests, 597 total)
+Stopped at: Completed 07-05-PLAN.md -- Relationship detection and graph constraints (27 new tests, 597 total)
 Resume file: None
