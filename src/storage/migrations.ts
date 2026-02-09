@@ -23,6 +23,7 @@ export interface Migration {
  *   title+content dual-column indexing.
  * Migration 006: Recreate vec0 table with cosine distance metric (conditional).
  * Migration 007: Context stashes table for topic detection thread snapshots.
+ * Migration 008: Threshold history table for EWMA adaptive threshold seeding.
  */
 export const MIGRATIONS: Migration[] = [
   {
@@ -180,6 +181,24 @@ export const MIGRATIONS: Migration[] = [
 
       CREATE INDEX idx_stashes_session
         ON context_stashes(session_id);
+    `,
+  },
+  {
+    version: 8,
+    name: 'create_threshold_history',
+    up: `
+      CREATE TABLE threshold_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        final_ewma_distance REAL NOT NULL,
+        final_ewma_variance REAL NOT NULL,
+        observation_count INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX idx_threshold_history_project
+        ON threshold_history(project_id, created_at DESC);
     `,
   },
 ];

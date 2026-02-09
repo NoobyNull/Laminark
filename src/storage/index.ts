@@ -8,6 +8,8 @@ export { SearchEngine } from './search.js';
 export { EmbeddingStore } from './embeddings.js';
 export type { EmbeddingSearchResult } from './embeddings.js';
 export { StashManager } from './stash-manager.js';
+export { ThresholdStore } from './threshold-store.js';
+export type { HistoricalSeed } from './threshold-store.js';
 
 // Re-export types that consumers need
 export type {
