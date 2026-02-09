@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 ## Current Position
 
 Phase: 7 of 8 (Knowledge Graph and Advanced Intelligence)
-Plan: 1 of 7 in current phase (07-01 complete)
+Plan: 2 of 7 in current phase (07-01, 07-02 complete)
 Status: Executing Phase 7
-Last activity: 2026-02-09 — Completed 07-01 Graph schema foundation
+Last activity: 2026-02-09 — Completed 07-02 Piggyback embedding strategy and hybrid selector
 
-Progress: [██████████████████████] 89%
+Progress: [██████████████████████] 91%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 25
+- Total plans completed: 26
 - Average duration: 3min
-- Total execution time: 1.41 hours
+- Total execution time: 1.49 hours
 
 **By Phase:**
 
@@ -33,10 +33,10 @@ Progress: [██████████████████████] 8
 | 04-embedding-engine-and-semantic-search | 4/4 | 11min | 3min |
 | 05-session-context-and-summaries | 3/3 | 9min | 3min |
 | 06-topic-detection-and-context-stashing | 7/7 | 26min | 4min |
-| 07-knowledge-graph-and-advanced-intelligence | 1/7 | 3min | 3min |
+| 07-knowledge-graph-and-advanced-intelligence | 2/7 | 8min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 06-05 (3min), 06-06 (5min), 06-07 (5min), 07-01 (3min)
+- Last 5 plans: 06-06 (5min), 06-07 (5min), 07-01 (3min), 07-02 (5min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -136,6 +136,11 @@ Recent decisions affecting current work:
 - [07-01]: upsertNode merges observation_ids (dedup via Set) and metadata (override) on name+type collision
 - [07-01]: insertEdge ON CONFLICT keeps MAX(existing, new) weight -- confidence only goes up through repeated extraction
 - [07-01]: TraversalRow uses column aliases (n_*, e_*) to disambiguate in recursive CTE joins
+- [07-02]: Piggyback files in src/analysis/engines/ (not src/embeddings/) to match existing codebase structure
+- [07-02]: PiggybackEngine implements existing EmbeddingEngine interface (Float32Array|null, 6 methods) not plan's simplified interface
+- [07-02]: LAMINARK_EMBEDDING_MODE env var for strategy selection (local/piggyback/hybrid), default hybrid
+- [07-02]: Signal cache Map with 30s TTL lazy eviction connects hook extractor to embedding strategy
+- [07-02]: Vector blending: 70% ONNX + 30% keyword features with re-normalization to unit length
 
 ### Pending Todos
 
@@ -158,5 +163,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 07-01-PLAN.md -- Graph schema foundation (types, tables, traversal queries)
+Stopped at: Completed 07-02-PLAN.md -- Piggyback embedding strategy and hybrid selector (50 new tests, 489 total)
 Resume file: None
