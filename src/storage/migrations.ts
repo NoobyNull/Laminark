@@ -24,6 +24,7 @@ export interface Migration {
  * Migration 006: Recreate vec0 table with cosine distance metric (conditional).
  * Migration 007: Context stashes table for topic detection thread snapshots.
  * Migration 008: Threshold history table for EWMA adaptive threshold seeding.
+ * Migration 009: Shift decisions table for topic shift decision logging.
  */
 export const MIGRATIONS: Migration[] = [
   {
@@ -199,6 +200,33 @@ export const MIGRATIONS: Migration[] = [
 
       CREATE INDEX idx_threshold_history_project
         ON threshold_history(project_id, created_at DESC);
+    `,
+  },
+  {
+    version: 9,
+    name: 'create_shift_decisions',
+    up: `
+      CREATE TABLE shift_decisions (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        observation_id TEXT,
+        distance REAL NOT NULL,
+        threshold REAL NOT NULL,
+        ewma_distance REAL,
+        ewma_variance REAL,
+        sensitivity_multiplier REAL,
+        shifted INTEGER NOT NULL,
+        confidence REAL,
+        stash_id TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX idx_shift_decisions_session
+        ON shift_decisions(project_id, session_id, created_at DESC);
+
+      CREATE INDEX idx_shift_decisions_shifted
+        ON shift_decisions(shifted, created_at DESC);
     `,
   },
 ];
