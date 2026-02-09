@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 ## Current Position
 
 Phase: 6 of 8 (Topic Detection and Context Stashing)
-Plan: 4 of 6 in current phase (06-01, 06-02, 06-03, 06-04 complete)
+Plan: 5 of 6 in current phase (06-01, 06-02, 06-03, 06-04, 06-05 complete)
 Status: Executing Phase 6
-Last activity: 2026-02-09 — Completed 06-03 topic shift handler and stash command
+Last activity: 2026-02-09 — Completed 06-05 EWMA adaptive threshold
 
-Progress: [███████████████░░░░░] 75%
+Progress: [████████████████░░░░] 79%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 21
+- Total plans completed: 22
 - Average duration: 3min
-- Total execution time: 1.15 hours
+- Total execution time: 1.20 hours
 
 **By Phase:**
 
@@ -32,10 +32,10 @@ Progress: [███████████████░░░░░] 75%
 | 03-hook-integration-and-capture | 3/3 | 11min | 4min |
 | 04-embedding-engine-and-semantic-search | 4/4 | 11min | 3min |
 | 05-session-context-and-summaries | 3/3 | 9min | 3min |
-| 06-topic-detection-and-context-stashing | 4/6 | 13min | 3min |
+| 06-topic-detection-and-context-stashing | 5/6 | 16min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 05-02 (5min), 06-01 (2min), 06-02 (3min), 06-04 (3min), 06-03 (5min)
+- Last 5 plans: 06-01 (2min), 06-02 (3min), 06-04 (3min), 06-03 (5min), 06-05 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -120,6 +120,10 @@ Recent decisions affecting current work:
 - [06-04]: handleResumeCommand uses dependency injection for StashManager rather than direct DB access
 - [06-04]: timeAgo helper shared between resume command and topic_context tool (imported from resume.ts)
 - [06-04]: Progressive disclosure thresholds: full detail for <=3 stashes, summaries for 4-8, compact labels for 9+
+- [06-05]: Migration 008 for threshold_history (007 was already taken by context_stashes)
+- [06-05]: EWMA variance uses post-update mean (standard formulation) for accurate tracking
+- [06-05]: seedFromHistory preserves observationCount -- count tracks session activity independently from statistical seed
+- [06-05]: ThresholdStore follows prepared-statement constructor pattern matching StashManager
 
 ### Pending Todos
 
@@ -142,5 +146,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 06-03-PLAN.md -- topic shift handler and stash command (Phase 6 in progress)
+Stopped at: Completed 06-05-PLAN.md -- EWMA adaptive threshold (Phase 6, 1 plan remaining)
 Resume file: None
