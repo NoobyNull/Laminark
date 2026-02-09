@@ -8,6 +8,7 @@ import { ObservationRepository } from '../../storage/observations.js';
 import { SearchEngine } from '../../storage/search.js';
 import type { EmbeddingStore } from '../../storage/embeddings.js';
 import type { AnalysisWorker } from '../../analysis/worker-bridge.js';
+import type { NotificationStore } from '../../storage/notifications.js';
 import { hybridSearch } from '../../search/hybrid.js';
 import {
   enforceTokenBudget,
@@ -96,6 +97,7 @@ export function registerRecall(
   projectHash: string,
   worker: AnalysisWorker | null = null,
   embeddingStore: EmbeddingStore | null = null,
+  notificationStore: NotificationStore | null = null,
 ): void {
   server.registerTool(
     'recall',

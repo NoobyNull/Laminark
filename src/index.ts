@@ -14,6 +14,14 @@ import { registerTopicContext } from './mcp/tools/topic-context.js';
 import { AnalysisWorker } from './analysis/worker-bridge.js';
 import { EmbeddingStore } from './storage/embeddings.js';
 import { ObservationRepository } from './storage/observations.js';
+import { TopicShiftHandler } from './hooks/topic-shift-handler.js';
+import { TopicShiftDetector } from './intelligence/topic-detector.js';
+import { AdaptiveThresholdManager } from './intelligence/adaptive-threshold.js';
+import { TopicShiftDecisionLogger } from './intelligence/decision-logger.js';
+import { loadTopicDetectionConfig, applyConfig } from './config/topic-detection-config.js';
+import { StashManager } from './storage/stash-manager.js';
+import { ThresholdStore } from './storage/threshold-store.js';
+import { NotificationStore } from './storage/notifications.js';
 
 const db = openDatabase(getDatabaseConfig());
 const projectHash = getProjectHash(process.cwd());
@@ -35,6 +43,40 @@ const workerReady = worker.start().catch(() => {
 
 // Suppress unhandled rejection from workerReady (already handled above)
 void workerReady;
+
+// ---------------------------------------------------------------------------
+// Topic shift detection (runs in background embedding loop)
+// ---------------------------------------------------------------------------
+
+const topicConfig = loadTopicDetectionConfig();
+const detector = new TopicShiftDetector();
+const adaptiveManager = new AdaptiveThresholdManager({
+  sensitivityMultiplier: topicConfig.sensitivityMultiplier,
+  alpha: topicConfig.ewmaAlpha,
+});
+applyConfig(topicConfig, detector, adaptiveManager);
+
+// Seed adaptive threshold from history (cold start handling)
+const thresholdStore = new ThresholdStore(db.db);
+const historicalSeed = thresholdStore.loadHistoricalSeed(projectHash);
+if (historicalSeed) {
+  adaptiveManager.seedFromHistory(historicalSeed.averageDistance, historicalSeed.averageVariance);
+  applyConfig(topicConfig, detector, adaptiveManager);
+}
+
+const stashManager = new StashManager(db.db);
+const decisionLogger = new TopicShiftDecisionLogger(db.db);
+const notificationStore = new NotificationStore(db.db);
+const obsRepoForTopicDetection = new ObservationRepository(db.db, projectHash);
+
+const topicShiftHandler = new TopicShiftHandler({
+  detector,
+  stashManager,
+  observationStore: obsRepoForTopicDetection,
+  config: topicConfig,
+  decisionLogger,
+  adaptiveManager,
+});
 
 // ---------------------------------------------------------------------------
 // Background embedding loop
@@ -61,6 +103,26 @@ async function processUnembedded(): Promise<void> {
         embeddingModel: worker.getEngineName(),
         embeddingVersion: '1',
       });
+
+      // Topic shift detection -- evaluate the newly embedded observation
+      if (topicConfig.enabled) {
+        try {
+          // Build the observation with its newly generated embedding
+          const obsWithEmbedding = { ...obs, embedding };
+          const result = await topicShiftHandler.handleObservation(
+            obsWithEmbedding,
+            obs.sessionId ?? 'unknown',
+            projectHash,
+          );
+          if (result.stashed && result.notification) {
+            notificationStore.add(projectHash, result.notification);
+            debug('embed', 'Topic shift detected, notification queued', { id });
+          }
+        } catch (topicErr) {
+          const msg = topicErr instanceof Error ? topicErr.message : String(topicErr);
+          debug('embed', 'Topic shift detection error (non-fatal)', { error: msg });
+        }
+      }
     }
   }
 }
@@ -78,9 +140,9 @@ const embedTimer = setInterval(() => {
 // ---------------------------------------------------------------------------
 
 const server = createServer();
-registerSaveMemory(server, db.db, projectHash);
-registerRecall(server, db.db, projectHash, worker, embeddingStore);
-registerTopicContext(server, db.db, projectHash);
+registerSaveMemory(server, db.db, projectHash, notificationStore);
+registerRecall(server, db.db, projectHash, worker, embeddingStore, notificationStore);
+registerTopicContext(server, db.db, projectHash, notificationStore);
 
 startServer(server).catch((err) => {
   debug('mcp', 'Fatal: failed to start server', { error: err.message });

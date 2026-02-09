@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { debug } from '../../shared/debug.js';
 import { ObservationRepository } from '../../storage/observations.js';
+import type { NotificationStore } from '../../storage/notifications.js';
 
 /**
  * Generates a title from observation content.
@@ -28,6 +29,7 @@ export function registerSaveMemory(
   server: McpServer,
   db: BetterSqlite3.Database,
   projectHash: string,
+  notificationStore: NotificationStore | null = null,
 ): void {
   server.registerTool(
     'save_memory',

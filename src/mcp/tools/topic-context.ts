@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { debug } from '../../shared/debug.js';
 import { StashManager } from '../../storage/stash-manager.js';
+import type { NotificationStore } from '../../storage/notifications.js';
 import type { ContextStash } from '../../types/stash.js';
 import { timeAgo } from '../../commands/resume.js';
 
@@ -102,6 +103,7 @@ export function registerTopicContext(
   server: McpServer,
   db: BetterSqlite3.Database,
   projectHash: string,
+  notificationStore: NotificationStore | null = null,
 ): void {
   const stashManager = new StashManager(db);
 
