@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 ## Current Position
 
 Phase: 6 of 8 (Topic Detection and Context Stashing) -- COMPLETE
-Plan: 6 of 6 in current phase (06-01, 06-02, 06-03, 06-04, 06-05, 06-06 complete)
-Status: Phase 6 Complete
-Last activity: 2026-02-09 — Completed 06-06 Sensitivity configuration and decision logging
+Plan: 7 of 7 in current phase (06-01, 06-02, 06-03, 06-04, 06-05, 06-06, 06-07 complete)
+Status: Phase 6 Complete (gap closure plan 06-07 done)
+Last activity: 2026-02-09 — Completed 06-07 Topic detection wiring and notification delivery
 
-Progress: [████████████████████] 82%
+Progress: [█████████████████████] 86%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 23
+- Total plans completed: 24
 - Average duration: 3min
-- Total execution time: 1.28 hours
+- Total execution time: 1.36 hours
 
 **By Phase:**
 
@@ -32,10 +32,10 @@ Progress: [████████████████████] 82%
 | 03-hook-integration-and-capture | 3/3 | 11min | 4min |
 | 04-embedding-engine-and-semantic-search | 4/4 | 11min | 3min |
 | 05-session-context-and-summaries | 3/3 | 9min | 3min |
-| 06-topic-detection-and-context-stashing | 6/6 | 21min | 4min |
+| 06-topic-detection-and-context-stashing | 7/7 | 26min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 06-02 (3min), 06-04 (3min), 06-03 (5min), 06-05 (3min), 06-06 (5min)
+- Last 5 plans: 06-04 (3min), 06-03 (5min), 06-05 (3min), 06-06 (5min), 06-07 (5min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -127,6 +127,9 @@ Recent decisions affecting current work:
 - [06-06]: Migration 009 for shift_decisions (008 was already taken by threshold_history)
 - [06-06]: Optional dependency injection in TopicShiftHandlerDeps: config, decisionLogger, adaptiveManager all optional for backward compat
 - [06-06]: Decision logger randomBytes(16) ID generation matches ObservationRepository and StashManager patterns
+- [06-07]: NotificationStore uses CREATE TABLE IF NOT EXISTS inline (no migration) -- transient queue not core data
+- [06-07]: Notification delivery via MCP tool response piggybacking -- consume-on-read pattern, no polling
+- [06-07]: Topic detection errors wrapped in try/catch to never crash the background embedding loop
 
 ### Pending Todos
 
@@ -149,5 +152,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 06-06-PLAN.md -- Phase 6 complete (all 6 plans done, ready for Phase 7)
+Stopped at: Completed 06-07-PLAN.md -- Phase 6 fully complete (all 7 plans including gap closure done, ready for Phase 7)
 Resume file: None
