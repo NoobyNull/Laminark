@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-08)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable.
-**Current focus:** Phase 5 complete - Ready for Phase 6
+**Current focus:** Phase 6 - Topic Detection and Context Stashing
 
 ## Current Position
 
-Phase: 5 of 8 (Session Context and Summaries) -- COMPLETE
-Plan: 3 of 3 in current phase (all complete)
-Status: Phase 5 Complete
-Last activity: 2026-02-09 — Completed 05-02 context injection
+Phase: 6 of 8 (Topic Detection and Context Stashing)
+Plan: 1 of 6 in current phase (06-01 complete)
+Status: Executing Phase 6
+Last activity: 2026-02-09 — Completed 06-01 static topic shift detection
 
-Progress: [████████████░░░░░░░░] 62%
+Progress: [█████████████░░░░░░░] 66%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 17
+- Total plans completed: 18
 - Average duration: 3min
-- Total execution time: 0.93 hours
+- Total execution time: 0.97 hours
 
 **By Phase:**
 
@@ -32,9 +32,10 @@ Progress: [████████████░░░░░░░░] 62%
 | 03-hook-integration-and-capture | 3/3 | 11min | 4min |
 | 04-embedding-engine-and-semantic-search | 4/4 | 11min | 3min |
 | 05-session-context-and-summaries | 3/3 | 9min | 3min |
+| 06-topic-detection-and-context-stashing | 1/6 | 2min | 2min |
 
 **Recent Trend:**
-- Last 5 plans: 04-04 (3min), 05-03 (1min), 05-01 (3min), 05-02 (5min)
+- Last 5 plans: 05-03 (1min), 05-01 (3min), 05-02 (5min), 06-01 (2min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -107,6 +108,9 @@ Recent decisions affecting current work:
 - [05-02]: Progressive disclosure format: compact index with observation IDs and truncated content, not full dumps
 - [05-02]: High-value observations prioritize mcp:save_memory and slash:remember sources via CASE expression
 - [05-02]: SessionStart is the only hook that writes to stdout (synchronous hook -- stdout injected into context window)
+- [06-01]: cosineDistance returns 0 for zero vectors (graceful, no NaN) rather than throwing
+- [06-01]: Confidence formula: min((distance - threshold) / threshold, 1.0) caps at 1.0 for far-past-threshold
+- [06-01]: setThreshold bounded to [0.05, 0.95] to prevent degenerate detection behavior
 
 ### Pending Todos
 
@@ -129,5 +133,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 05-02-PLAN.md -- context injection with progressive disclosure (Phase 5 complete)
+Stopped at: Completed 06-01-PLAN.md -- static topic shift detection with cosineDistance (Phase 6 in progress)
 Resume file: None
