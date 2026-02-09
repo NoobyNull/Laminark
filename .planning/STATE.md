@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 ## Current Position
 
 Phase: 4 of 8 (Embedding Engine and Semantic Search)
-Plan: 2 of 4 in current phase (04-02 complete)
+Plan: 3 of 4 in current phase (04-03 complete)
 Status: Executing Phase 4
-Last activity: 2026-02-09 — Completed 04-02 worker thread bridge and EmbeddingStore
+Last activity: 2026-02-09 — Completed 04-03 hybrid search and worker lifecycle integration
 
-Progress: [████████░░░░░░░░░░░░] 38%
+Progress: [████████░░░░░░░░░░░░] 41%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 12
+- Total plans completed: 13
 - Average duration: 4min
-- Total execution time: 0.70 hours
+- Total execution time: 0.73 hours
 
 **By Phase:**
 
@@ -30,10 +30,10 @@ Progress: [████████░░░░░░░░░░░░] 38%
 | 01-storage-engine | 4/4 | 13min | 3min |
 | 02-mcp-interface-and-search | 3/3 | 12min | 4min |
 | 03-hook-integration-and-capture | 3/3 | 11min | 4min |
-| 04-embedding-engine-and-semantic-search | 2/4 | 6min | 3min |
+| 04-embedding-engine-and-semantic-search | 3/4 | 8min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 03-02 (5min), 03-03 (3min), 04-01 (3min), 04-02 (3min)
+- Last 5 plans: 03-03 (3min), 04-01 (3min), 04-02 (3min), 04-03 (2min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -91,6 +91,9 @@ Recent decisions affecting current work:
 - [04-02]: Worker thread bridge resolves ./worker.js relative to import.meta.url for correct dist/ path resolution
 - [04-02]: Embed request timeouts resolve with null (not reject) for graceful degradation -- callers never need try/catch
 - [04-02]: Float32Array.buffer cast to ArrayBuffer for postMessage transfer list (TypeScript ArrayBufferLike strictness)
+- [04-03]: hybridSearch requires db and projectHash params for ObservationRepository lookups on vector-only results
+- [04-03]: Background embedding interval 5s, 10 observations per batch -- balances responsiveness with resource usage
+- [04-03]: worker.start() fire-and-forget with .catch() -- server starts immediately, model loads lazily on first embed
 
 ### Pending Todos
 
@@ -113,5 +116,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 04-02-PLAN.md worker thread bridge and EmbeddingStore
+Stopped at: Completed 04-03-PLAN.md hybrid search and worker lifecycle integration
 Resume file: None
