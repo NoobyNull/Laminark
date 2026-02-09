@@ -32,6 +32,19 @@
       <button class="filter-pill active" data-type="Person"><span class="color-dot" style="background:#79c0ff"></span>Person <span class="count">0</span></button>
     </div>
 
+    <div id="time-range-bar">
+      <span class="filter-label">Time:</span>
+      <button class="time-preset active" data-preset="all">All time</button>
+      <button class="time-preset" data-preset="hour">Last hour</button>
+      <button class="time-preset" data-preset="today">Today</button>
+      <button class="time-preset" data-preset="week">This week</button>
+      <button class="time-preset" data-preset="month">This month</button>
+      <span class="time-separator">|</span>
+      <label class="time-input-label">From <input type="datetime-local" id="time-from" class="time-input"></label>
+      <label class="time-input-label">To <input type="datetime-local" id="time-to" class="time-input"></label>
+      <button class="time-apply-btn" id="time-apply">Apply</button>
+    </div>
+
     <div id="graph-view" class="view-container active">
       <div id="cy"></div>
       <div id="graph-stats" class="graph-stats">0 nodes, 0 edges</div>

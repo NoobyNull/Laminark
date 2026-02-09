@@ -141,7 +141,7 @@ body {
 /* Main content area */
 #main-content {
   display: grid;
-  grid-template-rows: var(--filter-height) 1fr;
+  grid-template-rows: var(--filter-height) auto 1fr;
   overflow: hidden;
   position: relative;
 }
@@ -211,6 +211,89 @@ body {
 .filter-pill[data-type="Solution"].active { border-color: var(--color-solution); color: var(--color-solution); background: rgba(163, 113, 247, 0.12); }
 .filter-pill[data-type="Tool"].active { border-color: var(--color-tool); color: var(--color-tool); background: rgba(121, 192, 255, 0.12); }
 .filter-pill[data-type="Person"].active { border-color: var(--color-person); color: var(--color-person); background: rgba(247, 120, 186, 0.12); }
+
+/* Time range bar */
+#time-range-bar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.time-preset {
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.time-preset:hover {
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+
+.time-preset.active {
+  background: rgba(88, 166, 255, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.time-separator {
+  color: var(--border);
+  font-size: 14px;
+  user-select: none;
+}
+
+.time-input-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.time-input {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: inherit;
+  color-scheme: dark;
+}
+
+.time-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.time-apply-btn {
+  padding: 3px 10px;
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.time-apply-btn:hover {
+  background: var(--accent-hover);
+}
 
 /* View containers */
 .view-container {

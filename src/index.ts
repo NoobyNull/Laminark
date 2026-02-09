@@ -28,6 +28,8 @@ import { initGraphSchema } from './graph/schema.js';
 import { extractAndPersist } from './graph/entity-extractor.js';
 import { detectAndPersist } from './graph/relationship-detector.js';
 import { CurationAgent } from './graph/curation-agent.js';
+import { broadcast } from './web/routes/sse.js';
+import { createWebServer, startWebServer } from './web/server.js';
 
 const db = openDatabase(getDatabaseConfig());
 initGraphSchema(db.db);
@@ -111,6 +113,17 @@ async function processUnembedded(): Promise<void> {
         embeddingVersion: '1',
       });
 
+      // Broadcast new observation to SSE clients (minimal payload)
+      const truncatedText = obs.content.length > 120
+        ? obs.content.substring(0, 120) + '...'
+        : obs.content;
+      broadcast('new_observation', {
+        id,
+        text: truncatedText,
+        sessionId: obs.sessionId ?? null,
+        createdAt: obs.createdAt,
+      });
+
       // Topic shift detection -- evaluate the newly embedded observation
       if (topicConfig.enabled) {
         try {
@@ -124,6 +137,15 @@ async function processUnembedded(): Promise<void> {
           if (result.stashed && result.notification) {
             notificationStore.add(projectHash, result.notification);
             debug('embed', 'Topic shift detected, notification queued', { id });
+
+            // Broadcast topic shift to SSE clients
+            broadcast('topic_shift', {
+              id: result.notification.substring(0, 32),
+              fromTopic: null,
+              toTopic: null,
+              timestamp: new Date().toISOString(),
+              confidence: null,
+            });
           }
         } catch (topicErr) {
           const msg = topicErr instanceof Error ? topicErr.message : String(topicErr);
@@ -144,6 +166,17 @@ async function processUnembedded(): Promise<void> {
             id,
             entities: nodes.length,
           });
+
+          // Broadcast entity updates to SSE clients
+          for (const node of nodes) {
+            broadcast('entity_updated', {
+              id: node.name,
+              label: node.name,
+              type: node.type,
+              observationCount: 1,
+              createdAt: new Date().toISOString(),
+            });
+          }
         }
       } catch (graphErr) {
         const msg = graphErr instanceof Error ? graphErr.message : String(graphErr);
@@ -178,6 +211,14 @@ startServer(server).catch((err) => {
   db.close();
   process.exit(1);
 });
+
+// ---------------------------------------------------------------------------
+// Web visualization server (runs alongside MCP server)
+// ---------------------------------------------------------------------------
+
+const webPort = parseInt(process.env.LAMINARK_WEB_PORT || '37820', 10);
+const webApp = createWebServer(db.db);
+startWebServer(webApp, webPort);
 
 // ---------------------------------------------------------------------------
 // Background curation agent (graph maintenance)

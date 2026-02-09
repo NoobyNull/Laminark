@@ -3,6 +3,8 @@
  *
  * Maintains a set of connected SSE clients and provides a broadcast
  * function for pushing real-time events to all connected browsers.
+ * Includes a ring buffer for event replay on reconnection via
+ * Last-Event-ID header support.
  *
  * Supported event types:
  *   - connected: initial handshake
@@ -35,16 +37,53 @@ const clients = new Set<SSEClient>();
 let clientIdCounter = 0;
 
 // ---------------------------------------------------------------------------
+// Event ID counter and ring buffer for replay
+// ---------------------------------------------------------------------------
+
+let lastEventId = 0;
+
+interface BufferedEvent {
+  id: number;
+  event: string;
+  data: string;
+}
+
+const RING_BUFFER_SIZE = 100;
+const eventRingBuffer: BufferedEvent[] = [];
+
+/**
+ * Adds an event to the ring buffer, evicting the oldest if full.
+ */
+function pushToRingBuffer(entry: BufferedEvent): void {
+  if (eventRingBuffer.length >= RING_BUFFER_SIZE) {
+    eventRingBuffer.shift();
+  }
+  eventRingBuffer.push(entry);
+}
+
+/**
+ * Returns all events with id > sinceId from the ring buffer.
+ */
+function getEventsSince(sinceId: number): BufferedEvent[] {
+  return eventRingBuffer.filter((e) => e.id > sinceId);
+}
+
+// ---------------------------------------------------------------------------
 // SSE formatting helpers
 // ---------------------------------------------------------------------------
 
-function formatSSE(event: string, data: string): string {
-  return `event: ${event}\ndata: ${data}\n\n`;
+function formatSSE(event: string, data: string, id?: number): string {
+  let msg = '';
+  if (id !== undefined) {
+    msg += `id: ${id}\n`;
+  }
+  msg += `event: ${event}\ndata: ${data}\n\n`;
+  return msg;
 }
 
-function sendToClient(client: SSEClient, event: string, data: string): boolean {
+function sendToClient(client: SSEClient, event: string, data: string, id?: number): boolean {
   try {
-    const message = formatSSE(event, data);
+    const message = formatSSE(event, data, id);
     client.controller.enqueue(new TextEncoder().encode(message));
     return true;
   } catch {
@@ -64,9 +103,13 @@ export const sseRoutes = new Hono();
  *
  * Server-Sent Events endpoint. Keeps the connection alive with heartbeats
  * and receives broadcast events for live UI updates.
+ *
+ * Supports Last-Event-ID header for replay of missed events on reconnection.
  */
 sseRoutes.get('/sse', (c: Context) => {
   const clientId = String(++clientIdCounter);
+  const lastEventIdHeader = c.req.header('Last-Event-ID');
+  const replayFromId = lastEventIdHeader ? parseInt(lastEventIdHeader, 10) : 0;
 
   let client: SSEClient;
 
@@ -92,6 +135,17 @@ sseRoutes.get('/sse', (c: Context) => {
         timestamp: Date.now(),
         clientId,
       }));
+
+      // Replay missed events if client is reconnecting with Last-Event-ID
+      if (replayFromId > 0) {
+        const missed = getEventsSince(replayFromId);
+        for (const entry of missed) {
+          sendToClient(client, entry.event, entry.data, entry.id);
+        }
+        if (missed.length > 0) {
+          debug('db', 'SSE replayed missed events', { clientId, count: missed.length, sinceId: replayFromId });
+        }
+      }
     },
     cancel() {
       // Client disconnected
@@ -120,6 +174,10 @@ sseRoutes.get('/sse', (c: Context) => {
 /**
  * Broadcasts an event to all connected SSE clients.
  *
+ * Each broadcast increments a monotonic event ID that is included in the
+ * SSE `id:` field. Events are stored in an in-memory ring buffer (last 100)
+ * so reconnecting clients can replay missed events via Last-Event-ID.
+ *
  * Automatically removes disconnected clients that fail to receive
  * the message.
  *
@@ -127,13 +185,18 @@ sseRoutes.get('/sse', (c: Context) => {
  * @param data - Data object to serialize as JSON
  */
 export function broadcast(event: string, data: object): void {
+  const eventId = ++lastEventId;
+  const json = JSON.stringify(data);
+
+  // Store in ring buffer for replay
+  pushToRingBuffer({ id: eventId, event, data: json });
+
   if (clients.size === 0) return;
 
-  const json = JSON.stringify(data);
   const dead: SSEClient[] = [];
 
   for (const client of clients) {
-    const ok = sendToClient(client, event, json);
+    const ok = sendToClient(client, event, json, eventId);
     if (!ok) {
       dead.push(client);
     }

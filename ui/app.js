@@ -87,19 +87,72 @@ async function fetchNodeDetails(id) {
 }
 
 // ---------------------------------------------------------------------------
-// SSE connection with auto-reconnect
+// SSE connection with auto-reconnect and heartbeat watchdog
 // ---------------------------------------------------------------------------
 
 let eventSource = null;
 let reconnectDelay = 3000;
 const MAX_RECONNECT_DELAY = 30000;
+const HEARTBEAT_TIMEOUT_MS = 60000; // 60s with no heartbeat triggers reconnect
+let lastEventTime = 0;
+let heartbeatWatchdog = null;
 
 function updateSSEStatus(status) {
-  const indicator = document.getElementById('sse-status');
+  var indicator = document.getElementById('sse-status');
   if (indicator) {
     indicator.className = 'status-indicator ' + status;
-    indicator.title = 'SSE: ' + status;
+    updateSSETooltip(indicator, status);
   }
+}
+
+function updateSSETooltip(indicator, status) {
+  var base = 'SSE: ' + status;
+  if (lastEventTime > 0) {
+    var ago = Math.round((Date.now() - lastEventTime) / 1000);
+    var agoText = ago < 60 ? ago + 's ago' : Math.round(ago / 60) + 'min ago';
+    indicator.title = base + ' (last event: ' + agoText + ')';
+  } else {
+    indicator.title = base;
+  }
+}
+
+function recordEventReceived() {
+  lastEventTime = Date.now();
+  resetHeartbeatWatchdog();
+}
+
+function resetHeartbeatWatchdog() {
+  if (heartbeatWatchdog) clearTimeout(heartbeatWatchdog);
+  heartbeatWatchdog = setTimeout(function () {
+    console.warn('[laminark] No heartbeat for ' + (HEARTBEAT_TIMEOUT_MS / 1000) + 's, forcing SSE reconnect');
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+    updateSSEStatus('disconnected');
+    reconnectWithCatchup();
+  }, HEARTBEAT_TIMEOUT_MS);
+}
+
+/**
+ * Reconnect SSE and fetch fresh data from REST API to catch up on missed events.
+ */
+function reconnectWithCatchup() {
+  setTimeout(function () {
+    console.log('[laminark] Reconnecting SSE with data catch-up');
+    connectSSE();
+
+    // Belt-and-suspenders: fetch fresh data from REST API to catch up
+    if (window.laminarkGraph && window.laminarkState.graphInitialized) {
+      var filters = getActiveFilters();
+      window.laminarkGraph.loadGraphData(filters ? { type: filters.join(',') } : undefined);
+    }
+    if (window.laminarkTimeline && window.laminarkState.timelineInitialized) {
+      window.laminarkTimeline.loadTimelineData();
+    }
+
+    reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+  }, reconnectDelay);
 }
 
 function connectSSE() {
@@ -111,35 +164,42 @@ function connectSSE() {
     console.log('[laminark] SSE connected:', JSON.parse(e.data));
     updateSSEStatus('connected');
     reconnectDelay = 3000; // Reset backoff on successful connection
+    recordEventReceived();
   });
 
   eventSource.addEventListener('heartbeat', function (_e) {
     // Heartbeat received -- connection is alive
     updateSSEStatus('connected');
+    recordEventReceived();
   });
 
   eventSource.addEventListener('new_observation', function (e) {
-    const data = JSON.parse(e.data);
+    var data = JSON.parse(e.data);
+    recordEventReceived();
     document.dispatchEvent(new CustomEvent('laminark:new_observation', { detail: data }));
   });
 
   eventSource.addEventListener('entity_updated', function (e) {
-    const data = JSON.parse(e.data);
+    var data = JSON.parse(e.data);
+    recordEventReceived();
     document.dispatchEvent(new CustomEvent('laminark:entity_updated', { detail: data }));
   });
 
   eventSource.addEventListener('topic_shift', function (e) {
-    const data = JSON.parse(e.data);
+    var data = JSON.parse(e.data);
+    recordEventReceived();
     document.dispatchEvent(new CustomEvent('laminark:topic_shift', { detail: data }));
   });
 
   eventSource.addEventListener('session_start', function (e) {
-    const data = JSON.parse(e.data);
+    var data = JSON.parse(e.data);
+    recordEventReceived();
     document.dispatchEvent(new CustomEvent('laminark:session_start', { detail: data }));
   });
 
   eventSource.addEventListener('session_end', function (e) {
-    const data = JSON.parse(e.data);
+    var data = JSON.parse(e.data);
+    recordEventReceived();
     document.dispatchEvent(new CustomEvent('laminark:session_end', { detail: data }));
   });
 
@@ -149,11 +209,8 @@ function connectSSE() {
     eventSource.close();
     eventSource = null;
 
-    setTimeout(function () {
-      connectSSE();
-      // Exponential backoff
-      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
-    }, reconnectDelay);
+    if (heartbeatWatchdog) clearTimeout(heartbeatWatchdog);
+    reconnectWithCatchup();
   };
 }
 
@@ -179,9 +236,13 @@ function initNavigation() {
         v.classList.toggle('active', v.id === targetView);
       });
 
-      // Show/hide filter bar (only for graph view)
+      // Show/hide filter bar and time range bar (only for graph view)
       if (filterBar) {
         filterBar.style.display = targetView === 'graph-view' ? '' : 'none';
+      }
+      var timeRangeBar = document.getElementById('time-range-bar');
+      if (timeRangeBar) {
+        timeRangeBar.style.display = targetView === 'graph-view' ? '' : 'none';
       }
 
       // Lazy initialization: only init each view when first activated
