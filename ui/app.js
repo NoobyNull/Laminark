@@ -330,8 +330,44 @@ document.addEventListener('DOMContentLoaded', async function () {
     observations: timelineData.observations.length,
   });
 
+  // Initialize and load the knowledge graph
+  if (window.laminarkGraph) {
+    window.laminarkGraph.initGraph('cy');
+    await window.laminarkGraph.loadGraphData();
+  }
+
   // Render timeline
   renderTimeline(timelineData);
+
+  // Listen for SSE-dispatched events for graph updates
+  document.addEventListener('laminark:entity_updated', function (e) {
+    if (!window.laminarkGraph) return;
+    var data = e.detail;
+    if (data && data.id) {
+      window.laminarkGraph.addNode({
+        id: data.id,
+        label: data.label || data.name,
+        type: data.type,
+        observationCount: data.observationCount || 0,
+        createdAt: data.createdAt,
+      });
+    }
+  });
+
+  document.addEventListener('laminark:new_observation', function () {
+    // Refresh observation counts by reloading graph data
+    if (window.laminarkGraph) {
+      var filters = getActiveFilters();
+      window.laminarkGraph.loadGraphData(filters ? { type: filters.join(',') } : undefined);
+    }
+  });
+
+  // Filter change handler for graph
+  document.addEventListener('laminark:filter_change', function (e) {
+    if (!window.laminarkGraph) return;
+    var types = e.detail ? e.detail.types : null;
+    window.laminarkGraph.applyFilter(types);
+  });
 });
 
 // ---------------------------------------------------------------------------
