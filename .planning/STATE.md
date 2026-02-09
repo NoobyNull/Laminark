@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-08)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable.
-**Current focus:** Phase 5 in progress - Session Context and Summaries
+**Current focus:** Phase 5 complete - Ready for Phase 6
 
 ## Current Position
 
-Phase: 5 of 8 (Session Context and Summaries)
-Plan: 3 of 3 in current phase (05-01, 05-03 complete, 05-02 remaining)
-Status: Phase 5 - Plan 1 Complete
-Last activity: 2026-02-09 — Completed 05-01 session summarizer
+Phase: 5 of 8 (Session Context and Summaries) -- COMPLETE
+Plan: 3 of 3 in current phase (all complete)
+Status: Phase 5 Complete
+Last activity: 2026-02-09 — Completed 05-02 context injection
 
-Progress: [██████████░░░░░░░░░░] 55%
+Progress: [████████████░░░░░░░░] 62%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 16
+- Total plans completed: 17
 - Average duration: 3min
-- Total execution time: 0.85 hours
+- Total execution time: 0.93 hours
 
 **By Phase:**
 
@@ -31,10 +31,10 @@ Progress: [██████████░░░░░░░░░░] 55%
 | 02-mcp-interface-and-search | 3/3 | 12min | 4min |
 | 03-hook-integration-and-capture | 3/3 | 11min | 4min |
 | 04-embedding-engine-and-semantic-search | 4/4 | 11min | 3min |
-| 05-session-context-and-summaries | 2/3 | 4min | 2min |
+| 05-session-context-and-summaries | 3/3 | 9min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 04-03 (2min), 04-04 (3min), 05-03 (1min), 05-01 (3min)
+- Last 5 plans: 04-04 (3min), 05-03 (1min), 05-01 (3min), 05-02 (5min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -103,6 +103,10 @@ Recent decisions affecting current work:
 - [05-01]: Progressive truncation: files trimmed first, then activities, decisions preserved longest
 - [05-03]: Source "slash:remember" distinguishes explicit user saves from programmatic saves for priority ranking
 - [05-03]: Slash commands are markdown instruction files -- no backend code, they delegate to existing MCP tools
+- [05-02]: Direct DB integration for SessionStart context injection -- no shell script or HTTP endpoint, matches handler.ts architecture
+- [05-02]: Progressive disclosure format: compact index with observation IDs and truncated content, not full dumps
+- [05-02]: High-value observations prioritize mcp:save_memory and slash:remember sources via CASE expression
+- [05-02]: SessionStart is the only hook that writes to stdout (synchronous hook -- stdout injected into context window)
 
 ### Pending Todos
 
@@ -125,5 +129,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 05-01-PLAN.md -- session summarizer with Stop hook integration
+Stopped at: Completed 05-02-PLAN.md -- context injection with progressive disclosure (Phase 5 complete)
 Resume file: None
