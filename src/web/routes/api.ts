@@ -170,6 +170,8 @@ apiRoutes.get('/timeline', (c) => {
   const to = c.req.query('to');
   const limitStr = c.req.query('limit');
   const limit = limitStr ? Math.min(parseInt(limitStr, 10) || 500, 2000) : 500;
+  const offsetStr = c.req.query('offset');
+  const offset = offsetStr ? Math.max(parseInt(offsetStr, 10) || 0, 0) : 0;
 
   // Sessions
   let sessions: Array<{ id: string; startedAt: string; endedAt: string | null; observationCount: number; summary: string | null }> = [];
@@ -190,7 +192,8 @@ apiRoutes.get('/timeline', (c) => {
     if (sessionConds.length > 0) {
       sessionsSql += ' WHERE ' + sessionConds.join(' AND ');
     }
-    sessionsSql += ' ORDER BY started_at DESC LIMIT 50';
+    sessionsSql += ' ORDER BY started_at DESC LIMIT 50 OFFSET ?';
+    sessionParams.push(offset);
 
     const sessionRows = db.prepare(sessionsSql).all(...sessionParams) as SessionRow[];
 
@@ -231,8 +234,9 @@ apiRoutes.get('/timeline', (c) => {
       obsParams.push(to);
     }
 
-    obsSql += ' ORDER BY created_at DESC LIMIT ?';
+    obsSql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
     obsParams.push(limit);
+    obsParams.push(offset);
 
     const obsRows = db.prepare(obsSql).all(...obsParams) as ObservationRow[];
 
