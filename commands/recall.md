@@ -11,7 +11,7 @@ Search Laminark memories by description or topic.
 When the user invokes this command:
 
 1. Take the text provided after the command as the search query
-2. Call the `search` MCP tool with:
+2. Call the `recall` MCP tool with:
    - `query`: The user's search description
    - `limit`: 10 (show top 10 results)
 3. Present the results to the user in a readable format:
@@ -35,16 +35,16 @@ Found {N} relevant memories:
 
 ...
 
-_Use the search tool for more specific queries, or get_observations for full details on any memory._
+_Use the recall tool with a different query for more specific results, or with action="view" and ids for full details on any memory._
 
 ## Examples
 
 User: /laminark:recall authentication decisions
-Action: Call search with query="authentication decisions"
+Action: Call recall with query="authentication decisions"
 Response: Show top results about auth-related memories with scores and snippets
 
 User: /laminark:recall what database did we choose
-Action: Call search with query="what database did we choose"
+Action: Call recall with query="what database did we choose"
 Response: Show results mentioning database selection decisions
 
 ## Notes
@@ -52,4 +52,4 @@ Response: Show results mentioning database selection decisions
 - Results use hybrid search (keyword + semantic) for best matching
 - If no results are found, suggest the user try different search terms or check if they have saved any memories yet
 - If no query is provided after the command, ask the user what they'd like to search for
-- For detailed view of any result, Claude can use the get_observations MCP tool with the observation ID
+- For detailed view of any result, Claude can use the recall MCP tool with action="view" and the observation IDs

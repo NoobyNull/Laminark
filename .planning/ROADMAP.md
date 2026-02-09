@@ -127,7 +127,7 @@ Plans:
 - [x] 06-04-PLAN.md -- /laminark:resume command and topic_context MCP tool
 - [x] 06-05-PLAN.md -- Adaptive EWMA threshold with historical session seeding (TDD)
 - [x] 06-06-PLAN.md -- Sensitivity configuration and decision logging
-- [ ] 06-07-PLAN.md -- Gap closure: wire topic detection into embedding loop and add notification delivery
+- [x] 06-07-PLAN.md -- Gap closure: wire topic detection into embedding loop and add notification delivery
 
 ### Phase 7: Knowledge Graph and Advanced Intelligence
 **Goal**: Observations are connected into a navigable knowledge graph of entities and relationships, with high-quality embeddings from Claude's own reasoning
@@ -149,7 +149,7 @@ Plans:
 - [x] 07-05-PLAN.md -- Relationship detection and graph constraint enforcement (max degree, dedup)
 - [x] 07-06-PLAN.md -- MCP query_graph and graph_stats tools for Claude graph access
 - [x] 07-07-PLAN.md -- Curation agent for observation merging and graph maintenance
-- [ ] 07-08-PLAN.md -- Gap closure: wire entity extraction, relationship detection, and curation agent into live flow
+- [x] 07-08-PLAN.md -- Gap closure: wire entity extraction, relationship detection, and curation agent into live flow
 
 ### Phase 8: Web Visualization
 **Goal**: Users can visually explore their memory graph and session timeline in an interactive browser UI
@@ -164,11 +164,11 @@ Plans:
 **Plans**: 5 plans
 
 Plans:
-- [ ] 08-01-PLAN.md -- Hono web server with static SPA serving, REST API for graph/timeline data, and SSE endpoint
-- [ ] 08-02-PLAN.md -- Cytoscape knowledge graph with force-directed layout and entity type styling
-- [ ] 08-03-PLAN.md -- Graph interaction: node click details, entity type filtering, time range zoom
-- [ ] 08-04-PLAN.md -- Timeline view with session cards, observation entries, and topic shift markers
-- [ ] 08-05-PLAN.md -- Live SSE updates end-to-end and viewport culling for 500+ node performance
+- [x] 08-01-PLAN.md -- Hono web server with static SPA serving, REST API for graph/timeline data, and SSE endpoint
+- [x] 08-02-PLAN.md -- Cytoscape knowledge graph with force-directed layout and entity type styling
+- [x] 08-03-PLAN.md -- Graph interaction: node click details, entity type filtering, time range zoom
+- [x] 08-04-PLAN.md -- Timeline view with session cards, observation entries, and topic shift markers
+- [x] 08-05-PLAN.md -- Live SSE updates end-to-end and viewport culling for 500+ node performance
 
 ## Progress
 
