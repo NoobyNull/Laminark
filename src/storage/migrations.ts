@@ -22,6 +22,7 @@ export interface Migration {
  * Migration 005: Add title column to observations and rebuild FTS5 with
  *   title+content dual-column indexing.
  * Migration 006: Recreate vec0 table with cosine distance metric (conditional).
+ * Migration 007: Context stashes table for topic detection thread snapshots.
  */
 export const MIGRATIONS: Migration[] = [
   {
@@ -155,6 +156,30 @@ export const MIGRATIONS: Migration[] = [
         observation_id TEXT PRIMARY KEY,
         embedding float[384] distance_metric=cosine
       );
+    `,
+  },
+  {
+    version: 7,
+    name: 'create_context_stashes',
+    up: `
+      CREATE TABLE context_stashes (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        topic_label TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        observation_snapshots TEXT NOT NULL,
+        observation_ids TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'stashed',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        resumed_at TEXT
+      );
+
+      CREATE INDEX idx_stashes_project_status_created
+        ON context_stashes(project_id, status, created_at DESC);
+
+      CREATE INDEX idx_stashes_session
+        ON context_stashes(session_id);
     `,
   },
 ];
