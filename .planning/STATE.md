@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-08)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable.
-**Current focus:** Phase 4 complete - ready for Phase 5 (Topic Detection)
+**Current focus:** Phase 5 in progress - Session Context and Summaries
 
 ## Current Position
 
-Phase: 4 of 8 (Embedding Engine and Semantic Search) -- COMPLETE
-Plan: 4 of 4 in current phase (04-04 complete)
-Status: Phase 4 Complete
-Last activity: 2026-02-09 — Completed 04-04 acceptance tests for embedding pipeline
+Phase: 5 of 8 (Session Context and Summaries)
+Plan: 3 of 3 in current phase (05-03 complete)
+Status: Phase 5 - Plan 3 Complete
+Last activity: 2026-02-09 — Completed 05-03 remember/recall slash commands
 
-Progress: [█████████░░░░░░░░░░░] 45%
+Progress: [██████████░░░░░░░░░░] 53%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 14
+- Total plans completed: 15
 - Average duration: 3min
-- Total execution time: 0.78 hours
+- Total execution time: 0.80 hours
 
 **By Phase:**
 
@@ -31,9 +31,10 @@ Progress: [█████████░░░░░░░░░░░] 45%
 | 02-mcp-interface-and-search | 3/3 | 12min | 4min |
 | 03-hook-integration-and-capture | 3/3 | 11min | 4min |
 | 04-embedding-engine-and-semantic-search | 4/4 | 11min | 3min |
+| 05-session-context-and-summaries | 1/3 | 1min | 1min |
 
 **Recent Trend:**
-- Last 5 plans: 04-01 (3min), 04-02 (3min), 04-03 (2min), 04-04 (3min)
+- Last 5 plans: 04-02 (3min), 04-03 (2min), 04-04 (3min), 05-03 (1min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -97,6 +98,8 @@ Recent decisions affecting current work:
 - [04-04]: Vec0 tests use if (!hasVecSupport) return guard rather than describe.skipIf for clarity
 - [04-04]: Mock factories for SearchEngine/EmbeddingStore/AnalysisWorker keep hybrid search tests unit-level
 - [04-04]: All 5 Phase 4 SCs proven by 41 new tests (286 total)
+- [05-03]: Source "slash:remember" distinguishes explicit user saves from programmatic saves for priority ranking
+- [05-03]: Slash commands are markdown instruction files -- no backend code, they delegate to existing MCP tools
 
 ### Pending Todos
 
@@ -119,5 +122,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 04-04-PLAN.md -- Phase 4 complete, ready for Phase 5
+Stopped at: Completed 05-03-PLAN.md
 Resume file: None
