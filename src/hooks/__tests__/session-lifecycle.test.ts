@@ -27,7 +27,7 @@ describe('handleSessionStart', () => {
   });
 
   it('creates a session record in the database', () => {
-    handleSessionStart(
+    const context = handleSessionStart(
       {
         session_id: 'sess-start-1',
         cwd: '/tmp/project',
@@ -36,6 +36,8 @@ describe('handleSessionStart', () => {
         model: 'claude-sonnet-4-5-20250929',
       },
       sessionRepo,
+      laminarkDb.db,
+      projectHash,
     );
 
     const session = sessionRepo.getById('sess-start-1');
@@ -43,19 +45,24 @@ describe('handleSessionStart', () => {
     expect(session!.id).toBe('sess-start-1');
     expect(session!.startedAt).toBeDefined();
     expect(session!.endedAt).toBeNull();
+    // First session should return welcome message
+    expect(context).toContain('[Laminark]');
   });
 
   it('skips when session_id is missing', () => {
-    handleSessionStart(
+    const context = handleSessionStart(
       {
         cwd: '/tmp/project',
         hook_event_name: 'SessionStart',
       },
       sessionRepo,
+      laminarkDb.db,
+      projectHash,
     );
 
     const sessions = sessionRepo.getLatest(10);
     expect(sessions).toHaveLength(0);
+    expect(context).toBeNull();
   });
 });
 
@@ -155,6 +162,8 @@ describe('session lifecycle integration', () => {
         source: 'startup',
       },
       sessionRepo,
+      laminarkDb.db,
+      projectHash,
     );
 
     const started = sessionRepo.getById('lifecycle-1');

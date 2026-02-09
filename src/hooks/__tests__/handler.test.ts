@@ -300,6 +300,8 @@ describe('handler session lifecycle', () => {
         hook_event_name: 'SessionStart',
       },
       sessionRepo,
+      laminarkDb.db,
+      projectHash,
     );
 
     const started = sessionRepo.getById('handler-sess-1');

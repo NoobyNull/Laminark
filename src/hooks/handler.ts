@@ -16,7 +16,8 @@ import { debug } from '../shared/debug.js';
  * dispatches to the appropriate handler based on hook_event_name, and exits 0.
  *
  * CRITICAL CONSTRAINTS:
- * - NEVER writes to stdout (stdout output is interpreted by Claude Code)
+ * - Only SessionStart writes to stdout (synchronous hook -- stdout is injected into Claude's context window)
+ * - All other hooks NEVER write to stdout (stdout output is interpreted by Claude Code)
  * - ALWAYS exits 0 (non-zero exit codes surface as errors to Claude)
  * - Opens its own database connection (WAL mode handles concurrent access with MCP server)
  * - Imports only storage modules -- NO @modelcontextprotocol/sdk (cold start overhead)
@@ -140,9 +141,14 @@ async function main(): Promise<void> {
       case 'PostToolUseFailure':
         processPostToolUseFiltered(input, obsRepo);
         break;
-      case 'SessionStart':
-        handleSessionStart(input, sessionRepo);
+      case 'SessionStart': {
+        const context = handleSessionStart(input, sessionRepo, laminarkDb.db, projectHash);
+        // SessionStart is synchronous -- stdout is injected into Claude's context window
+        if (context) {
+          process.stdout.write(context);
+        }
         break;
+      }
       case 'SessionEnd':
         handleSessionEnd(input, sessionRepo);
         break;

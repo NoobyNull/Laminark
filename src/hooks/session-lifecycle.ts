@@ -1,29 +1,56 @@
+import type BetterSqlite3 from 'better-sqlite3';
+
 import type { ObservationRepository } from '../storage/observations.js';
 import type { SessionRepository } from '../storage/sessions.js';
 import { generateSessionSummary } from '../curation/summarizer.js';
+import { assembleSessionContext } from '../context/injection.js';
 import { debug } from '../shared/debug.js';
 
 /**
  * Handles a SessionStart hook event.
  *
- * Creates a new session record in the database with the session_id
- * from the hook payload. Must be FAST (under 100ms) -- no context
- * injection (that is Phase 5's responsibility).
+ * Creates a new session record in the database, then assembles context
+ * from prior sessions and observations for injection into Claude's
+ * context window.
+ *
+ * This hook is SYNCHRONOUS -- stdout is injected into Claude's context.
+ * Must complete within 2 seconds (performance budget for sync hooks).
+ * Expected execution: <100ms (session create + 2-3 SELECT queries).
+ *
+ * @returns Context string to write to stdout, or null if no context available
  */
 export function handleSessionStart(
   input: Record<string, unknown>,
   sessionRepo: SessionRepository,
-): void {
+  db: BetterSqlite3.Database,
+  projectHash: string,
+): string | null {
   const sessionId = input.session_id as string | undefined;
 
   if (!sessionId) {
     debug('session', 'SessionStart missing session_id, skipping');
-    return;
+    return null;
   }
 
   sessionRepo.create(sessionId);
-
   debug('session', 'Session started', { sessionId });
+
+  // Assemble context from prior sessions and observations
+  const startTime = Date.now();
+  const context = assembleSessionContext(db, projectHash);
+  const elapsed = Date.now() - startTime;
+
+  if (elapsed > 500) {
+    debug('session', 'Context assembly slow', { elapsed, sessionId });
+  }
+
+  debug('session', 'Context assembled for injection', {
+    sessionId,
+    contextLength: context.length,
+    elapsed,
+  });
+
+  return context;
 }
 
 /**
