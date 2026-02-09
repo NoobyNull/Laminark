@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-08)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable.
-**Current focus:** Phase 3 Complete - Ready for Phase 4
+**Current focus:** Phase 4 in progress - Embedding Engine and Semantic Search
 
 ## Current Position
 
-Phase: 3 of 8 (Hook Integration and Capture) -- COMPLETE
-Plan: 3 of 3 in current phase (03-03 complete)
-Status: Phase 3 Complete
-Last activity: 2026-02-08 — Completed 03-03 hook integration and capture pipeline
+Phase: 4 of 8 (Embedding Engine and Semantic Search)
+Plan: 1 of 4 in current phase (04-01 complete)
+Status: Executing Phase 4
+Last activity: 2026-02-09 — Completed 04-01 embedding engine foundation
 
-Progress: [████████░░░░░░░░░░░░] 30%
+Progress: [████████░░░░░░░░░░░░] 34%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 10
+- Total plans completed: 11
 - Average duration: 4min
-- Total execution time: 0.6 hours
+- Total execution time: 0.65 hours
 
 **By Phase:**
 
@@ -30,9 +30,10 @@ Progress: [████████░░░░░░░░░░░░] 30%
 | 01-storage-engine | 4/4 | 13min | 3min |
 | 02-mcp-interface-and-search | 3/3 | 12min | 4min |
 | 03-hook-integration-and-capture | 3/3 | 11min | 4min |
+| 04-embedding-engine-and-semantic-search | 1/4 | 3min | 3min |
 
 **Recent Trend:**
-- Last 5 plans: 02-03 (3min), 03-01 (3min), 03-02 (5min), 03-03 (3min)
+- Last 5 plans: 03-01 (3min), 03-02 (5min), 03-03 (3min), 04-01 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -83,6 +84,10 @@ Recent decisions affecting current work:
 - [03-03]: Handler orchestrates pipeline (processPostToolUseFiltered) -- extract -> file exclusion -> privacy redaction -> admission filter -> store
 - [03-03]: LAMINARK_DATA_DIR env var added to getConfigDir() for test isolation without mocking
 - [03-03]: Privacy filter runs before admission filter to prevent secret content in debug logs
+- [04-01]: EmbeddingEngine interface with 6 methods -- all consumers depend on interface, never concrete engines
+- [04-01]: LocalOnnxEngine uses dynamic import('@huggingface/transformers') for zero startup cost (DQ-04)
+- [04-01]: Float32Array.from(output.data) for ONNX pipeline output -- ArrayLike<number> not ArrayBuffer
+- [04-01]: Migration 006 recreates vec0 table with distance_metric=cosine for normalized BGE embeddings
 
 ### Pending Todos
 
@@ -104,6 +109,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-08
-Stopped at: Completed 03-03-PLAN.md hook integration and capture pipeline (Phase 3 complete)
+Last session: 2026-02-09
+Stopped at: Completed 04-01-PLAN.md embedding engine foundation
 Resume file: None
