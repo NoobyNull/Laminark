@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 ## Current Position
 
 Phase: 5 of 8 (Session Context and Summaries)
-Plan: 3 of 3 in current phase (05-03 complete)
-Status: Phase 5 - Plan 3 Complete
-Last activity: 2026-02-09 — Completed 05-03 remember/recall slash commands
+Plan: 3 of 3 in current phase (05-01, 05-03 complete, 05-02 remaining)
+Status: Phase 5 - Plan 1 Complete
+Last activity: 2026-02-09 — Completed 05-01 session summarizer
 
-Progress: [██████████░░░░░░░░░░] 53%
+Progress: [██████████░░░░░░░░░░] 55%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 15
+- Total plans completed: 16
 - Average duration: 3min
-- Total execution time: 0.80 hours
+- Total execution time: 0.85 hours
 
 **By Phase:**
 
@@ -31,10 +31,10 @@ Progress: [██████████░░░░░░░░░░] 53%
 | 02-mcp-interface-and-search | 3/3 | 12min | 4min |
 | 03-hook-integration-and-capture | 3/3 | 11min | 4min |
 | 04-embedding-engine-and-semantic-search | 4/4 | 11min | 3min |
-| 05-session-context-and-summaries | 1/3 | 1min | 1min |
+| 05-session-context-and-summaries | 2/3 | 4min | 2min |
 
 **Recent Trend:**
-- Last 5 plans: 04-02 (3min), 04-03 (2min), 04-04 (3min), 05-03 (1min)
+- Last 5 plans: 04-03 (2min), 04-04 (3min), 05-03 (1min), 05-01 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -98,6 +98,9 @@ Recent decisions affecting current work:
 - [04-04]: Vec0 tests use if (!hasVecSupport) return guard rather than describe.skipIf for clarity
 - [04-04]: Mock factories for SearchEngine/EmbeddingStore/AnalysisWorker keep hybrid search tests unit-level
 - [04-04]: All 5 Phase 4 SCs proven by 41 new tests (286 total)
+- [05-01]: Direct DB integration for Stop hook summary generation -- matches handler.ts architecture, no HTTP intermediary
+- [05-01]: Heuristic text summarizer (no LLM) for fast deterministic summaries under 500 tokens
+- [05-01]: Progressive truncation: files trimmed first, then activities, decisions preserved longest
 - [05-03]: Source "slash:remember" distinguishes explicit user saves from programmatic saves for priority ranking
 - [05-03]: Slash commands are markdown instruction files -- no backend code, they delegate to existing MCP tools
 
@@ -122,5 +125,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 05-03-PLAN.md
+Stopped at: Completed 05-01-PLAN.md -- session summarizer with Stop hook integration
 Resume file: None
