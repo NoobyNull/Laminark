@@ -24,8 +24,13 @@ import { loadTopicDetectionConfig, applyConfig } from './config/topic-detection-
 import { StashManager } from './storage/stash-manager.js';
 import { ThresholdStore } from './storage/threshold-store.js';
 import { NotificationStore } from './storage/notifications.js';
+import { initGraphSchema } from './graph/schema.js';
+import { extractAndPersist } from './graph/entity-extractor.js';
+import { detectAndPersist } from './graph/relationship-detector.js';
+import { CurationAgent } from './graph/curation-agent.js';
 
 const db = openDatabase(getDatabaseConfig());
+initGraphSchema(db.db);
 const projectHash = getProjectHash(process.cwd());
 
 // ---------------------------------------------------------------------------
@@ -125,6 +130,25 @@ async function processUnembedded(): Promise<void> {
           debug('embed', 'Topic shift detection error (non-fatal)', { error: msg });
         }
       }
+
+      // Knowledge graph -- extract entities and detect relationships
+      try {
+        const nodes = extractAndPersist(db.db, text, String(id));
+        if (nodes.length > 0) {
+          const entityPairs = nodes.map(n => ({
+            name: n.name,
+            type: n.type,
+          }));
+          detectAndPersist(db.db, text, entityPairs);
+          debug('embed', 'Graph updated', {
+            id,
+            entities: nodes.length,
+          });
+        }
+      } catch (graphErr) {
+        const msg = graphErr instanceof Error ? graphErr.message : String(graphErr);
+        debug('embed', 'Graph extraction error (non-fatal)', { error: msg });
+      }
     }
   }
 }
@@ -156,17 +180,36 @@ startServer(server).catch((err) => {
 });
 
 // ---------------------------------------------------------------------------
+// Background curation agent (graph maintenance)
+// ---------------------------------------------------------------------------
+
+const curationAgent = new CurationAgent(db.db, {
+  intervalMs: 5 * 60 * 1000, // 5 minutes
+  onComplete: (report) => {
+    debug('db', 'Curation complete', {
+      merged: report.observationsMerged,
+      deduped: report.entitiesDeduplicated,
+      stale: report.stalenessFlagsAdded,
+      pruned: report.lowValuePruned,
+    });
+  },
+});
+curationAgent.start();
+
+// ---------------------------------------------------------------------------
 // Shutdown handlers
 // ---------------------------------------------------------------------------
 
 process.on('SIGINT', () => {
   clearInterval(embedTimer);
+  curationAgent.stop();
   worker.shutdown().catch(() => {});
   db.close();
   process.exit(0);
 });
 process.on('SIGTERM', () => {
   clearInterval(embedTimer);
+  curationAgent.stop();
   worker.shutdown().catch(() => {});
   db.close();
   process.exit(0);
@@ -174,6 +217,7 @@ process.on('SIGTERM', () => {
 process.on('uncaughtException', (err) => {
   debug('mcp', 'Uncaught exception', { error: err.message });
   clearInterval(embedTimer);
+  curationAgent.stop();
   worker.shutdown().catch(() => {});
   db.close();
   process.exit(1);
