@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 ## Current Position
 
 Phase: 7 of 8 (Knowledge Graph and Advanced Intelligence)
-Plan: 4 of 7 in current phase (07-01, 07-02, 07-04 complete)
+Plan: 4 of 7 in current phase (07-01, 07-02, 07-03, 07-04 complete)
 Status: Executing Phase 7
-Last activity: 2026-02-09 — Completed 07-04 Temporal awareness and staleness detection
+Last activity: 2026-02-09 — Completed 07-03 Entity extraction pipeline
 
 Progress: [██████████████████████] 91%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 26
+- Total plans completed: 28
 - Average duration: 3min
-- Total execution time: 1.49 hours
+- Total execution time: 1.64 hours
 
 **By Phase:**
 
@@ -33,14 +33,13 @@ Progress: [██████████████████████] 9
 | 04-embedding-engine-and-semantic-search | 4/4 | 11min | 3min |
 | 05-session-context-and-summaries | 3/3 | 9min | 3min |
 | 06-topic-detection-and-context-stashing | 7/7 | 26min | 4min |
-| 07-knowledge-graph-and-advanced-intelligence | 2/7 | 8min | 4min |
+| 07-knowledge-graph-and-advanced-intelligence | 4/7 | 17min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 06-06 (5min), 06-07 (5min), 07-01 (3min), 07-02 (5min)
+- Last 5 plans: 07-01 (3min), 07-02 (5min), 07-03 (6min), 07-04 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
-| Phase 07 P04 | 3min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -142,6 +141,10 @@ Recent decisions affecting current work:
 - [07-02]: LAMINARK_EMBEDDING_MODE env var for strategy selection (local/piggyback/hybrid), default hybrid
 - [07-02]: Signal cache Map with 30s TTL lazy eviction connects hook extractor to embedding strategy
 - [07-02]: Vector blending: 70% ONNX + 30% keyword features with re-normalization to unit length
+- [07-03]: Same-type-only overlap resolution: different entity types coexist on overlapping text spans (Decision containing Tool name)
+- [07-03]: Person rule two-stage matching: case-insensitive verb regex then case-sensitive capitalized name extraction
+- [07-03]: Confidence tiers: File(0.95) > Tool(0.9) > Project(0.8) > Decision(0.7) > Problem/Solution(0.65) > Person(0.6)
+- [07-03]: Test files in src/graph/__tests__/ following project convention, not tests/ directory
 - [Phase 07-04]: Staleness flags stored in separate staleness_flags table, decoupled from core observations schema
 - [Phase 07-04]: Pattern-based contradiction detection (string matching, not LLM) for deterministic staleness detection
 - [Phase 07-04]: Staleness is advisory only -- flagged observations remain queryable, users decide trust
@@ -167,5 +170,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 07-04-PLAN.md -- Temporal awareness and staleness detection (28 new tests)
+Stopped at: Completed 07-03-PLAN.md -- Entity extraction pipeline (41 new tests, 558 total)
 Resume file: None
