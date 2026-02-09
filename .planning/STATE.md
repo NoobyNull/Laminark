@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-08)
 ## Current Position
 
 Phase: 7 of 8 (Knowledge Graph and Advanced Intelligence)
-Plan: 7 of 7 in current phase (07-01 through 07-07 complete)
-Status: Phase 7 Complete
-Last activity: 2026-02-09 — Completed 07-07 Background Curation Agent
+Plan: 8 of 8 in current phase (07-01 through 07-08 complete)
+Status: Phase 7 Complete (including gap closure)
+Last activity: 2026-02-09 — Completed 07-08 Graph Wiring and Curation Agent Integration
 
 Progress: [█████████████████████████] 97%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 31
+- Total plans completed: 32
 - Average duration: 3min
-- Total execution time: 1.88 hours
+- Total execution time: 1.93 hours
 
 **By Phase:**
 
@@ -33,10 +33,10 @@ Progress: [███████████████████████
 | 04-embedding-engine-and-semantic-search | 4/4 | 11min | 3min |
 | 05-session-context-and-summaries | 3/3 | 9min | 3min |
 | 06-topic-detection-and-context-stashing | 7/7 | 26min | 4min |
-| 07-knowledge-graph-and-advanced-intelligence | 7/7 | 31min | 4min |
+| 07-knowledge-graph-and-advanced-intelligence | 8/8 | 34min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 07-03 (6min), 07-04 (3min), 07-05 (2min), 07-06 (5min), 07-07 (4min)
+- Last 5 plans: 07-04 (3min), 07-05 (2min), 07-06 (5min), 07-07 (4min), 07-08 (3min)
 - Trend: Consistent
 
 *Updated after each plan completion*
@@ -162,6 +162,9 @@ Recent decisions affecting current work:
 - [07-07]: runCuration async (Promise<CurationReport>) for future extensibility, current ops synchronous
 - [07-07]: Staleness sweep checks only recently-updated entities (last 24h) rather than full graph scan
 - [07-07]: Test file at src/graph/__tests__/curation-agent.test.ts following project convention
+- [07-08]: extractAndPersist returns GraphNode[] -- wiring uses nodes directly, not extraction result wrapper
+- [07-08]: Integration tests at src/graph/__tests__/ (not tests/integration/) to match vitest src/**/*.test.ts config
+- [07-08]: Graph errors wrapped non-fatally in embedding loop to never crash background processing
 
 ### Pending Todos
 
@@ -184,5 +187,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed 07-07-PLAN.md -- Background curation agent (17 new tests, 614 total). Phase 7 complete.
+Stopped at: Completed 07-08-PLAN.md -- Graph wiring and curation agent integration (8 new tests, 622 total). Phase 7 gap closure complete.
 Resume file: None
