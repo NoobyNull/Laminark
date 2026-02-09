@@ -1,140 +1,132 @@
 ---
 phase: 07-knowledge-graph-and-advanced-intelligence
-verified: 2026-02-08T21:45:00Z
-status: gaps_found
-score: 3/5
-gaps:
-  - truth: "Entities (Project, File, Decision, Problem, Solution, Tool, Person) are automatically extracted from observations and stored as graph nodes"
-    status: failed
-    reason: "Entity extraction pipeline exists but is NOT wired into observation capture flow"
-    artifacts:
-      - path: "src/graph/entity-extractor.ts"
-        issue: "extractAndPersist() exists and tested, but never called from hooks or analysis worker"
-      - path: "src/index.ts"
-        issue: "processUnembedded() does not call entity extraction after embedding"
-    missing:
-      - "Wire extractAndPersist() into processUnembedded() in src/index.ts after embedding succeeds"
-      - "Wire extractAndPersist() into hook capture flow for immediate extraction"
-  - truth: "Typed relationships (uses, depends_on, decided_by, related_to, part_of, caused_by, solved_by) connect entities as graph edges"
-    status: failed
-    reason: "Relationship detection pipeline exists but is NOT wired into observation capture flow"
-    artifacts:
-      - path: "src/graph/relationship-detector.ts"
-        issue: "detectAndPersist() exists and tested, but never called from hooks or analysis worker"
-      - path: "src/index.ts"
-        issue: "processUnembedded() does not call relationship detection after entity extraction"
-    missing:
-      - "Wire detectAndPersist() into processUnembedded() in src/index.ts after extractAndPersist() succeeds"
-      - "Pass extracted entities from extractAndPersist() to detectAndPersist() to create edges"
-  - truth: "Curation agent periodically merges similar observations and generates consolidated summaries during quiet periods"
-    status: failed
-    reason: "Curation agent exists but is NOT instantiated or started in the main server lifecycle"
-    artifacts:
-      - path: "src/graph/curation-agent.ts"
-        issue: "CurationAgent class and runCuration() exist, but never instantiated in src/index.ts"
-      - path: "src/index.ts"
-        issue: "No CurationAgent instantiation, no start() call, no quiet period trigger"
-    missing:
-      - "Instantiate CurationAgent in src/index.ts with background interval (5 minutes)"
-      - "Call agent.start() after server initialization"
-      - "Call agent.stop() in shutdown handlers"
-      - "Optionally: trigger onSessionEnd() from session stop hook"
+verified: 2026-02-09T15:00:00Z
+status: passed
+score: 5/5
+re_verification:
+  previous_status: gaps_found
+  previous_score: 3/5
+  gaps_closed:
+    - "SC1: Entity extraction now wired into processUnembedded"
+    - "SC2: Relationship detection now wired after entity extraction"
+    - "SC5: CurationAgent instantiated and running in server lifecycle"
+  gaps_remaining: []
+  regressions: []
 ---
 
-# Phase 7: Knowledge Graph and Advanced Intelligence Verification Report
+# Phase 7: Knowledge Graph and Advanced Intelligence Re-Verification Report
 
 **Phase Goal:** Observations are connected into a navigable knowledge graph of entities and relationships, with high-quality embeddings from Claude's own reasoning.
 
-**Verified:** 2026-02-08T21:45:00Z
+**Verified:** 2026-02-09T15:00:00Z
 
-**Status:** gaps_found
+**Status:** passed
 
-**Re-verification:** No — initial verification
+**Re-verification:** Yes — after gap closure plan 07-08
+
+## Re-Verification Summary
+
+**Previous verification (2026-02-08):** 3/5 truths verified (gaps_found)
+
+**Current verification (2026-02-09):** 5/5 truths verified (passed)
+
+**Gap closure plan 07-08 successfully closed all 3 gaps:**
+
+1. **SC1 (Entity extraction)** — CLOSED via commit `aafefa9`
+   - extractAndPersist() now called in processUnembedded() after embedding (line 136)
+   - Non-fatal error wrapping prevents crashes
+   - 8 integration tests verify graph_nodes population
+
+2. **SC2 (Relationship detection)** — CLOSED via commit `aafefa9`
+   - detectAndPersist() now called after extractAndPersist() with extracted entity pairs (line 142)
+   - Only runs when entities found (nodes.length > 0)
+   - Integration tests verify graph_edges creation
+
+3. **SC5 (Curation agent)** — CLOSED via commit `aafefa9`
+   - CurationAgent instantiated with 5-minute interval (line 186)
+   - agent.start() called after server setup (line 197)
+   - agent.stop() called in all 3 shutdown handlers (SIGINT, SIGTERM, uncaughtException)
+   - Integration tests verify lifecycle works
+
+**Zero regressions:** All 622 tests passing (8 new integration tests added via commit `4e0797e`)
 
 ## Goal Achievement
 
 ### Observable Truths
 
-| #   | Truth                                                                                                                                                      | Status       | Evidence                                                                                                                                |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Entities (Project, File, Decision, Problem, Solution, Tool, Person) are automatically extracted from observations and stored as graph nodes              | ✗ FAILED     | Pipeline exists (extractAndPersist in entity-extractor.ts) but NOT called from hooks or analysis worker. Only used in tests.           |
-| 2   | Typed relationships (uses, depends_on, decided_by, related_to, part_of, caused_by, solved_by) connect entities as graph edges                            | ✗ FAILED     | Pipeline exists (detectAndPersist in relationship-detector.ts) but NOT called from hooks or analysis worker. Only used in tests.       |
-| 3   | Claude can query the knowledge graph via MCP tool (e.g., "what files does this decision affect?" returns traversal results)                              | ✓ VERIFIED   | query_graph MCP tool registered in src/index.ts:148, uses traverseFrom() for graph traversal                                           |
-| 4   | Graph enforces entity type taxonomy and caps node degree at 50 edges, preventing unnavigable hairball growth                                             | ✓ VERIFIED   | Type checks in schema, enforceMaxDegree() in constraints.ts, MAX_NODE_DEGREE constant. Constraint enforcement exists but not triggered |
-| 5   | Curation agent periodically merges similar observations and generates consolidated summaries during quiet periods                                         | ✗ FAILED     | Agent exists (CurationAgent class) but NOT instantiated or started in src/index.ts. No periodic execution, no quiet period trigger.    |
+| #   | Truth                                                                                                                                                  | Status       | Evidence                                                                                                                                                      |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Entities (Project, File, Decision, Problem, Solution, Tool, Person) are automatically extracted from observations and stored as graph nodes          | ✓ VERIFIED   | extractAndPersist() wired at src/index.ts:136, called after each embedding. Integration tests prove graph_nodes populated. No anti-patterns.                |
+| 2   | Typed relationships (uses, depends_on, decided_by, related_to, part_of, caused_by, solved_by) connect entities as graph edges                        | ✓ VERIFIED   | detectAndPersist() wired at src/index.ts:142, called with extracted entity pairs. Integration tests prove graph_edges created. No anti-patterns.            |
+| 3   | Claude can query the knowledge graph via MCP tool (e.g., "what files does this decision affect?" returns traversal results)                          | ✓ VERIFIED   | query_graph MCP tool registered in src/index.ts:172, uses traverseFrom() for recursive graph traversal. No regressions.                                      |
+| 4   | Graph enforces entity type taxonomy and caps node degree at 50 edges, preventing unnavigable hairball growth                                         | ✓ VERIFIED   | CHECK constraints in 001-graph-tables.ts enforce 7 entity types & 7 relationship types. enforceMaxDegree() called in relationship-detector & curation-agent. |
+| 5   | Curation agent periodically merges similar observations and generates consolidated summaries during quiet periods                                     | ✓ VERIFIED   | CurationAgent instantiated with 5-min interval at src/index.ts:186, started at line 197, stopped in all shutdown handlers. Integration tests prove lifecycle.|
 
-**Score:** 3/5 truths verified
+**Score:** 5/5 truths verified (was 3/5)
 
 ### Required Artifacts
 
+All artifacts from previous verification remain substantive and wired. New wiring verified:
+
 | Artifact                                  | Expected                                                                  | Status      | Details                                                                                 |
 | ----------------------------------------- | ------------------------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------- |
-| `src/graph/types.ts`                      | Entity/relationship types, GraphNode/GraphEdge interfaces                 | ✓ VERIFIED  | All 7 entity types, 7 relationship types, type guards, MAX_NODE_DEGREE=50              |
-| `src/graph/schema.ts`                     | Graph schema, traverseFrom, upsertNode, insertEdge                        | ✓ VERIFIED  | initGraphSchema, traverseFrom (recursive CTE), upsertNode, insertEdge, query builders  |
-| `src/graph/migrations/001-graph-tables.ts`| Graph tables DDL with constraints                                         | ✓ VERIFIED  | graph_nodes and graph_edges tables with CHECK constraints, indexes, foreign keys       |
-| `src/graph/entity-extractor.ts`           | extractEntities, extractAndPersist                                        | ⚠️ ORPHANED | Exists and tested (41 tests pass) but never called from main flow                      |
-| `src/graph/extraction-rules.ts`           | 7 entity extraction rules (filePathRule, toolRule, etc.)                  | ✓ VERIFIED  | All 7 rules implemented, curated KNOWN_TOOLS list (~80 tools)                          |
-| `src/graph/relationship-detector.ts`      | detectRelationships, detectAndPersist                                     | ⚠️ ORPHANED | Exists and tested (27 tests pass) but never called from main flow                      |
-| `src/graph/constraints.ts`                | enforceMaxDegree, mergeEntities, findDuplicateEntities                    | ⚠️ ORPHANED | Exists and tested but constraint enforcement not triggered automatically                |
-| `src/graph/temporal.ts`                   | Time-range queries, recency scoring, staleness detection                  | ✓ VERIFIED  | getObservationsByTimeRange, calculateRecencyScore, detectStaleness                      |
-| `src/graph/staleness.ts`                  | detectStaleness, flagStaleObservation                                     | ⚠️ ORPHANED | Exists but not called from curation agent (which is not running)                        |
-| `src/graph/curation-agent.ts`             | CurationAgent, runCuration                                                | ⚠️ ORPHANED | Exists and tested (17 tests pass) but NOT instantiated or started in src/index.ts      |
-| `src/graph/observation-merger.ts`         | findMergeableClusters, mergeObservationCluster                            | ⚠️ ORPHANED | Exists but only called from curation agent (which is not running)                       |
-| `src/mcp/tools/query-graph.ts`            | query_graph MCP tool                                                      | ✓ WIRED     | Registered in src/index.ts:148, implements graph traversal and observation excerpts     |
-| `src/mcp/tools/graph-stats.ts`            | graph_stats MCP tool                                                      | ✓ WIRED     | Registered in src/index.ts:149, provides node/edge counts, degree stats, duplicate detection |
-| `src/analysis/engines/piggyback.ts`       | PiggybackEngine with semantic signal extraction                           | ✓ VERIFIED  | Implements EmbeddingEngine interface, signal cache, 70/30 blending                      |
-| `src/analysis/hybrid-selector.ts`         | 3-mode embedding strategy selector                                        | ✓ VERIFIED  | createEmbeddingStrategy factory, LAMINARK_EMBEDDING_MODE env var                        |
+| `src/index.ts` (graph wiring)             | Imports, initGraphSchema, extractAndPersist, detectAndPersist calls       | ✓ WIRED     | Lines 27-30 (imports), 33 (initGraphSchema), 136-151 (extraction/detection pipeline)   |
+| `src/index.ts` (curation agent)           | CurationAgent instantiation, start, stop in shutdown handlers             | ✓ WIRED     | Lines 186-197 (instantiation/start), 205/212/220 (stop in 3 shutdown handlers)         |
+| `src/graph/entity-extractor.ts`           | extractEntities, extractAndPersist                                        | ✓ WIRED     | Called from processUnembedded, no longer orphaned                                       |
+| `src/graph/relationship-detector.ts`      | detectRelationships, detectAndPersist                                     | ✓ WIRED     | Called after entity extraction, no longer orphaned                                      |
+| `src/graph/curation-agent.ts`             | CurationAgent, runCuration                                                | ✓ WIRED     | Instantiated and started in server lifecycle, no longer orphaned                        |
+| `src/graph/__tests__/graph-wiring-integration.test.ts` | Integration tests proving end-to-end graph wiring            | ✓ VERIFIED  | 8 new tests (extraction, relationships, curation lifecycle, full pipeline), all passing |
 
 ### Key Link Verification
 
+All previously broken links are now WIRED:
+
 | From                                | To                                    | Via                                                  | Status       | Details                                                                           |
 | ----------------------------------- | ------------------------------------- | ---------------------------------------------------- | ------------ | --------------------------------------------------------------------------------- |
-| `src/graph/schema.ts`               | `src/graph/types.ts`                  | imports EntityType, RelationshipType                 | ✓ WIRED      | Type-safe queries confirmed                                                       |
-| `src/graph/schema.ts`               | SQLite database                       | better-sqlite3 db.exec, db.prepare                   | ✓ WIRED      | DDL and queries verified via tests                                                |
-| `src/mcp/tools/query-graph.ts`      | `src/graph/schema.ts`                 | calls initGraphSchema, traverseFrom, getNodeByNameAndType | ✓ WIRED  | MCP tool uses graph traversal                                                     |
-| `src/mcp/tools/graph-stats.ts`      | `src/graph/schema.ts`                 | calls initGraphSchema, direct SQL for stats          | ✓ WIRED      | MCP tool provides graph health dashboard                                          |
-| `src/index.ts` processUnembedded    | `src/graph/entity-extractor.ts`       | should call extractAndPersist after embedding        | ✗ NOT_WIRED  | NO import, NO call. Entity extraction never happens.                              |
-| `src/index.ts` processUnembedded    | `src/graph/relationship-detector.ts`  | should call detectAndPersist after entity extraction | ✗ NOT_WIRED  | NO import, NO call. Relationship detection never happens.                         |
-| `src/index.ts` server lifecycle     | `src/graph/curation-agent.ts`         | should instantiate CurationAgent, call start/stop    | ✗ NOT_WIRED  | NO import, NO instantiation. Curation never runs.                                 |
-| `src/graph/curation-agent.ts`       | `src/graph/observation-merger.ts`     | runCuration calls findMergeableClusters, merge       | ✓ WIRED      | Agent orchestrates merging correctly (but agent not running)                      |
-| `src/graph/curation-agent.ts`       | `src/graph/constraints.ts`            | runCuration calls findDuplicateEntities, mergeEntities | ✓ WIRED    | Agent orchestrates dedup correctly (but agent not running)                        |
-| `src/graph/curation-agent.ts`       | `src/graph/staleness.ts`              | runCuration calls detectStaleness, flagStaleObservation | ✓ WIRED   | Agent orchestrates staleness detection (but agent not running)                    |
+| `src/index.ts` processUnembedded    | `src/graph/entity-extractor.ts`       | calls extractAndPersist after embedding (line 136)   | ✓ WIRED      | Non-fatal try/catch, debug logging on success                                     |
+| `src/index.ts` processUnembedded    | `src/graph/relationship-detector.ts`  | calls detectAndPersist with entity pairs (line 142)  | ✓ WIRED      | Only called when nodes.length > 0, uses extracted entity pairs                    |
+| `src/index.ts` server lifecycle     | `src/graph/curation-agent.ts`         | instantiates CurationAgent (186), starts (197)       | ✓ WIRED      | 5-minute interval, onComplete callback with debug logging                         |
+| Shutdown handlers (SIGINT/SIGTERM/uncaughtException) | `src/graph/curation-agent.ts` | calls curationAgent.stop() before db.close() | ✓ WIRED | All 3 handlers at lines 205, 212, 220 |
+
+All previously verified links remain wired (MCP tools, graph schema, etc.) — zero regressions.
+
+### Requirements Coverage
+
+All Phase 7 success criteria now SATISFIED:
+
+| Requirement | Status       | Evidence                                               |
+| ----------- | ------------ | ------------------------------------------------------ |
+| SC1: Entity extraction automatic | ✓ SATISFIED | extractAndPersist() wired, integration tests pass      |
+| SC2: Relationship detection automatic | ✓ SATISFIED | detectAndPersist() wired, integration tests pass   |
+| SC3: MCP graph query tools | ✓ SATISFIED | query_graph and graph_stats registered, no regressions |
+| SC4: Type taxonomy & degree caps | ✓ SATISFIED | CHECK constraints enforced, enforceMaxDegree() wired   |
+| SC5: Curation agent periodic maintenance | ✓ SATISFIED | CurationAgent lifecycle complete, integration tests pass |
 
 ### Anti-Patterns Found
 
-| File               | Line | Pattern                              | Severity | Impact                                                                          |
-| ------------------ | ---- | ------------------------------------ | -------- | ------------------------------------------------------------------------------- |
-| src/index.ts       | 87-130 | Observation processing without entity extraction | 🛑 Blocker | Knowledge graph remains empty — observations are embedded but entities never extracted |
-| src/index.ts       | 87-130 | Observation processing without relationship detection | 🛑 Blocker | Graph edges never created — no relationships between entities |
-| src/index.ts       | 143-156 | Server lifecycle without curation agent | 🛑 Blocker | No periodic graph maintenance — duplicates accumulate, stale observations never flagged |
+None. All previously identified blockers resolved:
+
+| Previous Anti-Pattern | Resolution |
+| --------------------- | ---------- |
+| src/index.ts processUnembedded without entity extraction | ✓ FIXED: extractAndPersist() wired at line 136 |
+| src/index.ts processUnembedded without relationship detection | ✓ FIXED: detectAndPersist() wired at line 142 |
+| src/index.ts server lifecycle without curation agent | ✓ FIXED: CurationAgent instantiated (186), started (197), stopped in shutdown (205/212/220) |
+
+**Current scan:** No TODOs, FIXMEs, placeholders, or console.log-only implementations in graph modules.
 
 ### Human Verification Required
 
-None — all automated checks completed. The gaps are clear: wiring is missing, not functionality.
+None — all automated checks passed.
 
-### Gaps Summary
-
-Phase 7 implemented a **comprehensive knowledge graph infrastructure** with:
-- ✓ Complete graph schema (nodes, edges, constraints, indexes)
-- ✓ Entity extraction for all 7 types (tested, 41 tests passing)
-- ✓ Relationship detection for all 7 types (tested, 27 tests passing)
-- ✓ MCP query tools for Claude (query_graph, graph_stats)
-- ✓ Curation agent with merging, dedup, staleness detection (tested, 17 tests passing)
-- ✓ 614 total tests passing across all modules
-
-**However, the graph infrastructure is completely orphaned.** All the extraction, relationship detection, and curation logic exists and is well-tested, but **nothing wires these modules into the actual observation processing flow.**
-
-**Three critical integrations are missing:**
-
-1. **Entity extraction not triggered** — `extractAndPersist()` should be called in `processUnembedded()` after embedding succeeds, but it's not. The knowledge graph remains empty because no entities are ever extracted from observations.
-
-2. **Relationship detection not triggered** — `detectAndPersist()` should be called after entity extraction to create edges between co-occurring entities, but it's not. Even if entities were extracted, they would have no connections.
-
-3. **Curation agent not running** — `CurationAgent` should be instantiated and started in the main server lifecycle, but it's not. No periodic maintenance means duplicates accumulate, stale observations never get flagged, and low-value noise never gets pruned.
-
-**Result:** The knowledge graph tooling is read-only (Claude can query an empty graph) but write functionality is completely disconnected. Observations flow through the system, get embedded, but never populate the graph.
+The knowledge graph infrastructure is now fully operational:
+- Entity extraction runs automatically after each embedding
+- Relationship detection runs automatically after entity extraction
+- Graph query tools available to Claude via MCP
+- Type constraints enforced at database level
+- Node degree caps enforced programmatically
+- Curation agent running on 5-minute interval for graph maintenance
 
 ---
 
-_Verified: 2026-02-08T21:45:00Z_
+_Verified: 2026-02-09T15:00:00Z_
 _Verifier: Claude (gsd-verifier)_
