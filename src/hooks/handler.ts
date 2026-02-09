@@ -3,7 +3,7 @@ import { getDatabaseConfig, getProjectHash } from '../shared/config.js';
 import { ObservationRepository } from '../storage/observations.js';
 import { SessionRepository } from '../storage/sessions.js';
 import { extractObservation } from './capture.js';
-import { handleSessionStart, handleSessionEnd } from './session-lifecycle.js';
+import { handleSessionStart, handleSessionEnd, handleStop } from './session-lifecycle.js';
 import { redactSensitiveContent, isExcludedFile } from './privacy-filter.js';
 import { shouldAdmit } from './admission-filter.js';
 import { debug } from '../shared/debug.js';
@@ -147,9 +147,7 @@ async function main(): Promise<void> {
         handleSessionEnd(input, sessionRepo);
         break;
       case 'Stop':
-        // Stop has no tool data (per research open question #2).
-        // Do NOT create observations. Log for future Phase 5 session summary triggers.
-        debug('hook', 'Stop event received', { sessionId: input.session_id });
+        handleStop(input, obsRepo, sessionRepo);
         break;
       default:
         debug('hook', 'Unknown hook event', { eventName });
