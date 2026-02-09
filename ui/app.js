@@ -635,17 +635,20 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
   }
 
-  // Listen for SSE-dispatched events for graph updates
+  // Listen for SSE-dispatched events for graph updates (batched for performance)
   document.addEventListener('laminark:entity_updated', function (e) {
     if (!window.laminarkGraph) return;
     var data = e.detail;
     if (data && data.id) {
-      window.laminarkGraph.addNode({
-        id: data.id,
-        label: data.label || data.name,
-        type: data.type,
-        observationCount: data.observationCount || 0,
-        createdAt: data.createdAt,
+      window.laminarkGraph.queueBatchUpdate({
+        type: 'addNode',
+        data: {
+          id: data.id,
+          label: data.label || data.name,
+          type: data.type,
+          observationCount: data.observationCount || 0,
+          createdAt: data.createdAt,
+        },
       });
     }
   });

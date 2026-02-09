@@ -726,6 +726,272 @@ function filterByTimeRange(from, to) {
 }
 
 // ---------------------------------------------------------------------------
+// Viewport culling
+// ---------------------------------------------------------------------------
+
+/**
+ * Hides elements that are outside the visible viewport plus a buffer zone.
+ * Respects filter state: nodes hidden by filters stay hidden regardless.
+ */
+function cullOffscreen() {
+  if (!cy || !cullingEnabled || isLayoutAnimating) return;
+
+  var ext = cy.extent();
+  var bufferX = ext.w * 0.2;
+  var bufferY = ext.h * 0.2;
+  var viewRect = {
+    x1: ext.x1 - bufferX,
+    y1: ext.y1 - bufferY,
+    x2: ext.x2 + bufferX,
+    y2: ext.y2 + bufferY,
+  };
+
+  cy.nodes().forEach(function (node) {
+    // Skip nodes hidden by entity type or time range filters
+    if (node.style('display') === 'none' && !node.hasClass('culled')) return;
+
+    var pos = node.position();
+    var inView = pos.x >= viewRect.x1 && pos.x <= viewRect.x2 &&
+                 pos.y >= viewRect.y1 && pos.y <= viewRect.y2;
+
+    if (inView) {
+      node.removeClass('culled');
+    } else {
+      node.addClass('culled');
+    }
+  });
+
+  // Cull edges where BOTH endpoints are culled
+  cy.edges().forEach(function (edge) {
+    var src = edge.source();
+    var tgt = edge.target();
+    if (src.hasClass('culled') && tgt.hasClass('culled')) {
+      edge.addClass('culled');
+    } else {
+      edge.removeClass('culled');
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Level-of-detail (LOD)
+// ---------------------------------------------------------------------------
+
+/**
+ * Adjusts visual detail based on zoom level:
+ * - zoom >= 0.5: full detail (labels + edges + shapes)
+ * - zoom < 0.5: hide labels for cleaner view
+ * - zoom < 0.3: hide edges entirely, show only nodes as simple circles
+ */
+function updateLevelOfDetail() {
+  if (!cy) return;
+
+  var zoom = cy.zoom();
+  var newLevel;
+
+  if (zoom < 0.3) {
+    newLevel = 2; // Minimal: no labels, no edges
+  } else if (zoom < 0.5) {
+    newLevel = 1; // Reduced: no labels
+  } else {
+    newLevel = 0; // Full detail
+  }
+
+  if (newLevel === currentLodLevel) return;
+  currentLodLevel = newLevel;
+
+  if (newLevel === 0) {
+    // Full detail: restore labels and edges
+    cy.style()
+      .selector('node').style('label', 'data(label)').update();
+    cy.style()
+      .selector('edge').style('label', 'data(type)').style('display', 'element').update();
+    console.log('[laminark:graph] LOD: full detail');
+  } else if (newLevel === 1) {
+    // Reduced: hide labels but keep edges
+    cy.style()
+      .selector('node').style('label', '').update();
+    cy.style()
+      .selector('edge').style('label', '').style('display', 'element').update();
+    console.log('[laminark:graph] LOD: no labels (zoom < 0.5)');
+  } else {
+    // Minimal: hide labels and edges, simplify node shapes
+    cy.style()
+      .selector('node').style('label', '').update();
+    cy.style()
+      .selector('edge').style('display', 'none').update();
+    console.log('[laminark:graph] LOD: minimal (zoom < 0.3)');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Performance stats overlay
+// ---------------------------------------------------------------------------
+
+/**
+ * Toggles the performance overlay showing visible/total nodes, FPS, and culling status.
+ * Keyboard shortcut: Ctrl+Shift+P
+ */
+function togglePerfOverlay() {
+  perfOverlayVisible = !perfOverlayVisible;
+
+  if (perfOverlayVisible) {
+    showPerfOverlay();
+  } else {
+    hidePerfOverlay();
+  }
+}
+
+function showPerfOverlay() {
+  if (!cy) return;
+  var container = cy.container();
+  if (!container) return;
+
+  if (!perfOverlayEl) {
+    perfOverlayEl = document.createElement('div');
+    perfOverlayEl.className = 'perf-overlay';
+    container.appendChild(perfOverlayEl);
+  }
+
+  perfOverlayEl.style.display = '';
+  perfLastFpsTime = performance.now();
+  perfFrameCount = 0;
+  updatePerfOverlay();
+}
+
+function hidePerfOverlay() {
+  if (perfOverlayEl) {
+    perfOverlayEl.style.display = 'none';
+  }
+  if (perfRafId) {
+    cancelAnimationFrame(perfRafId);
+    perfRafId = null;
+  }
+}
+
+function updatePerfOverlay() {
+  if (!perfOverlayVisible || !cy || !perfOverlayEl) return;
+
+  perfFrameCount++;
+  var now = performance.now();
+  var elapsed = now - perfLastFpsTime;
+
+  if (elapsed >= 1000) {
+    perfFps = Math.round((perfFrameCount * 1000) / elapsed);
+    perfFrameCount = 0;
+    perfLastFpsTime = now;
+  }
+
+  var totalNodes = cy.nodes().length;
+  var culledNodes = cy.nodes('.culled').length;
+  var visibleNodes = totalNodes - culledNodes;
+  var totalEdges = cy.edges().length;
+  var zoom = cy.zoom().toFixed(2);
+  var lodText = currentLodLevel === 0 ? 'Full' : currentLodLevel === 1 ? 'No labels' : 'Minimal';
+
+  perfOverlayEl.textContent =
+    'Nodes: ' + visibleNodes + '/' + totalNodes +
+    ' | Culled: ' + culledNodes +
+    ' | Edges: ' + totalEdges +
+    ' | FPS: ' + perfFps +
+    ' | Zoom: ' + zoom +
+    ' | LOD: ' + lodText;
+
+  perfRafId = requestAnimationFrame(updatePerfOverlay);
+}
+
+// ---------------------------------------------------------------------------
+// Batch update optimization for SSE events
+// ---------------------------------------------------------------------------
+
+/**
+ * Queues a graph update from an SSE event. Events are collected for
+ * BATCH_DELAY_MS and then flushed together with a single layout run.
+ * @param {Object} update - { type: 'addNode'|'addEdge', data: Object }
+ */
+function queueBatchUpdate(update) {
+  batchQueue.push(update);
+
+  if (batchFlushTimer) clearTimeout(batchFlushTimer);
+  batchFlushTimer = setTimeout(flushBatchUpdates, BATCH_DELAY_MS);
+}
+
+/**
+ * Flushes all queued graph updates, applying them in batch with a
+ * single layout run to prevent layout thrashing.
+ */
+function flushBatchUpdates() {
+  if (!cy || batchQueue.length === 0) return;
+
+  var nodes = [];
+  var edges = [];
+
+  batchQueue.forEach(function (update) {
+    if (update.type === 'addNode') {
+      var existing = cy.getElementById(update.data.id);
+      if (existing.length > 0) {
+        existing.data(update.data);
+      } else {
+        nodes.push({
+          group: 'nodes',
+          data: {
+            id: update.data.id,
+            label: update.data.label,
+            type: update.data.type,
+            observationCount: update.data.observationCount || 0,
+            createdAt: update.data.createdAt,
+          },
+        });
+      }
+    } else if (update.type === 'addEdge') {
+      if (cy.getElementById(update.data.id).length === 0 &&
+          cy.getElementById(update.data.source).length > 0 &&
+          cy.getElementById(update.data.target).length > 0) {
+        edges.push({
+          group: 'edges',
+          data: {
+            id: update.data.id,
+            source: update.data.source,
+            target: update.data.target,
+            type: update.data.type,
+            label: update.data.label || update.data.type,
+          },
+        });
+      }
+    }
+  });
+
+  batchQueue = [];
+  batchFlushTimer = null;
+
+  // Add all new elements at once
+  var newEles = nodes.concat(edges);
+  if (newEles.length > 0) {
+    cy.add(newEles);
+
+    // Run a single local layout for new nodes
+    if (nodes.length > 0) {
+      var newNodeCollection = cy.collection();
+      nodes.forEach(function (n) {
+        var el = cy.getElementById(n.data.id);
+        if (el.length > 0) newNodeCollection = newNodeCollection.add(el);
+      });
+      var neighborhood = newNodeCollection.neighborhood().add(newNodeCollection);
+      neighborhood.layout(Object.assign({}, COSE_DEFAULTS, {
+        animate: true,
+        animationDuration: 300,
+        fit: false,
+      })).run();
+    }
+
+    hideEmptyState();
+    console.log('[laminark:graph] Batch update: added ' + nodes.length + ' nodes, ' + edges.length + ' edges');
+  }
+
+  updateGraphStatsFromCy();
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -745,6 +1011,8 @@ window.laminarkGraph = {
   updateFilterCounts: updateFilterCounts,
   hideDetailPanel: hideDetailPanel,
   selectAndCenterNode: selectAndCenterNode,
+  queueBatchUpdate: queueBatchUpdate,
+  togglePerfOverlay: togglePerfOverlay,
   ENTITY_STYLES: ENTITY_STYLES,
   getCy: function () { return cy; },
 };

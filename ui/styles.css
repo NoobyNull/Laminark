@@ -918,3 +918,22 @@ body {
   padding: 24px;
   z-index: 2;
 }
+
+/* Performance overlay (Ctrl+Shift+P) */
+.perf-overlay {
+  position: absolute;
+  top: 48px;
+  right: 16px;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 11px;
+  color: #7ee787;
+  background: rgba(13, 17, 23, 0.85);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 6;
+  pointer-events: none;
+  white-space: nowrap;
+}
