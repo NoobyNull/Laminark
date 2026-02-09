@@ -145,4 +145,30 @@ export class SessionRepository {
       | undefined;
     return row ? rowToSession(row) : null;
   }
+
+  /**
+   * Updates the summary column on an existing session row.
+   * Sets updated_at (via ended_at preservation) to track when the summary was written.
+   *
+   * Used by the curation module after compressing session observations.
+   */
+  updateSessionSummary(sessionId: string, summary: string): void {
+    const result = this.db
+      .prepare(
+        `UPDATE sessions SET summary = ? WHERE id = ? AND project_hash = ?`,
+      )
+      .run(summary, sessionId, this.projectHash);
+
+    if (result.changes === 0) {
+      debug('session', 'Session not found for summary update', {
+        sessionId,
+      });
+      return;
+    }
+
+    debug('session', 'Session summary updated', {
+      sessionId,
+      summaryLength: summary.length,
+    });
+  }
 }
