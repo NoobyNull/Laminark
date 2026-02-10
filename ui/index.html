@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Laminark - Memory Visualization</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://unpkg.com/cytoscape@3.33/dist/cytoscape.min.js"></script>
+</head>
+<body>
+  <nav id="nav-bar">
+    <div class="nav-brand">Laminark</div>
+    <div class="nav-tabs">
+      <button class="nav-tab active" data-view="graph-view">Knowledge Graph</button>
+      <button class="nav-tab" data-view="timeline-view">Timeline</button>
+    </div>
+    <div class="nav-status">
+      <span id="sse-status" class="status-indicator disconnected" title="SSE connection status"></span>
+    </div>
+  </nav>
+
+  <main id="main-content">
+    <div id="filter-bar">
+      <span class="filter-label">Filter:</span>
+      <button class="filter-pill active" data-type="all">All <span class="count">0</span></button>
+      <button class="filter-pill active" data-type="Project"><span class="color-dot" style="background:#58a6ff"></span>Project <span class="count">0</span></button>
+      <button class="filter-pill active" data-type="File"><span class="color-dot" style="background:#7ee787"></span>File <span class="count">0</span></button>
+      <button class="filter-pill active" data-type="Decision"><span class="color-dot" style="background:#d2a8ff"></span>Decision <span class="count">0</span></button>
+      <button class="filter-pill active" data-type="Problem"><span class="color-dot" style="background:#f85149"></span>Problem <span class="count">0</span></button>
+      <button class="filter-pill active" data-type="Solution"><span class="color-dot" style="background:#3fb950"></span>Solution <span class="count">0</span></button>
+      <button class="filter-pill active" data-type="Tool"><span class="color-dot" style="background:#f0883e"></span>Tool <span class="count">0</span></button>
+      <button class="filter-pill active" data-type="Person"><span class="color-dot" style="background:#79c0ff"></span>Person <span class="count">0</span></button>
+    </div>
+
+    <div id="time-range-bar">
+      <span class="filter-label">Time:</span>
+      <button class="time-preset active" data-preset="all">All time</button>
+      <button class="time-preset" data-preset="hour">Last hour</button>
+      <button class="time-preset" data-preset="today">Today</button>
+      <button class="time-preset" data-preset="week">This week</button>
+      <button class="time-preset" data-preset="month">This month</button>
+      <span class="time-separator">|</span>
+      <label class="time-input-label">From <input type="datetime-local" id="time-from" class="time-input"></label>
+      <label class="time-input-label">To <input type="datetime-local" id="time-to" class="time-input"></label>
+      <button class="time-apply-btn" id="time-apply">Apply</button>
+    </div>
+
+    <div id="graph-view" class="view-container active">
+      <div id="cy"></div>
+      <div id="graph-stats" class="graph-stats">0 nodes, 0 edges</div>
+      <button id="fit-btn" class="fit-btn" title="Fit to view" onclick="window.laminarkGraph && window.laminarkGraph.fitToView()">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M2 2h4v1.5H3.5V6H2V2zm8 0h4v4h-1.5V3.5H10V2zM2 10h1.5v2.5H6V14H2v-4zm10.5 2.5V10H14v4h-4v-1.5h2.5z"/>
+        </svg>
+      </button>
+      <div class="graph-legend" id="graph-legend">
+        <div class="graph-legend-title">Entity Types</div>
+        <div class="graph-legend-item"><span class="legend-color" style="background:#58a6ff; border-radius:3px;"></span> Project</div>
+        <div class="graph-legend-item"><span class="legend-color" style="background:#7ee787; border-radius:2px;"></span> File</div>
+        <div class="graph-legend-item"><span class="legend-color" style="background:#d2a8ff; border-radius:0; transform:rotate(45deg); width:9px; height:9px;"></span> Decision</div>
+        <div class="graph-legend-item"><span class="legend-color legend-triangle" style="background:transparent; border-left:6px solid transparent; border-right:6px solid transparent; border-bottom:11px solid #f85149; border-radius:0; width:0; height:0;"></span> Problem</div>
+        <div class="graph-legend-item"><span class="legend-color" style="background:#3fb950; clip-path:polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);"></span> Solution</div>
+        <div class="graph-legend-item"><span class="legend-color" style="background:#f0883e; clip-path:polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);"></span> Tool</div>
+        <div class="graph-legend-item"><span class="legend-color" style="background:#79c0ff; border-radius:50%;"></span> Person</div>
+      </div>
+    </div>
+
+    <div id="timeline-view" class="view-container">
+      <div id="timeline-content">
+        <p class="empty-state">Loading timeline data...</p>
+      </div>
+      <button class="jump-today-btn" title="Jump to latest">Today</button>
+    </div>
+  </main>
+
+  <aside id="detail-panel" class="hidden">
+    <div class="panel-header">
+      <h3 id="detail-title">Node Details</h3>
+      <button id="detail-close" aria-label="Close detail panel">&times;</button>
+    </div>
+    <div id="detail-body">
+      <p class="empty-state">Click a node to view details</p>
+    </div>
+  </aside>
+
+  <script src="/app.js"></script>
+  <script src="/graph.js"></script>
+  <script src="/timeline.js"></script>
+</body>
+</html>

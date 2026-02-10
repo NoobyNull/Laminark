@@ -12,10 +12,10 @@ Laminark delivers persistent adaptive memory for Claude Code in 8 phases followi
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Storage Engine** - Rock-solid SQLite foundation with WAL, concurrency, and crash recovery
-- [ ] **Phase 2: MCP Interface and Search** - Claude-facing tools with keyword search and progressive disclosure
-- [ ] **Phase 3: Hook Integration and Capture** - Automatic observation capture via Claude Code hooks
-- [ ] **Phase 4: Embedding Engine and Semantic Search** - Vector embeddings with pluggable strategy and hybrid search
+- [x] **Phase 1: Storage Engine** - Rock-solid SQLite foundation with WAL, concurrency, and crash recovery
+- [x] **Phase 2: MCP Interface and Search** - Claude-facing tools with keyword search and progressive disclosure
+- [x] **Phase 3: Hook Integration and Capture** - Automatic observation capture via Claude Code hooks
+- [x] **Phase 4: Embedding Engine and Semantic Search** - Vector embeddings with pluggable strategy and hybrid search
 - [ ] **Phase 5: Session Context and Summaries** - Context continuity across sessions with progressive disclosure
 - [ ] **Phase 6: Topic Detection and Context Stashing** - Adaptive topic shift detection with automatic context preservation
 - [ ] **Phase 7: Knowledge Graph and Advanced Intelligence** - Entity extraction, relationship mapping, and Claude piggyback embeddings
@@ -36,10 +36,10 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 4 plans
 
 Plans:
-- [ ] 01-01-PLAN.md -- @laminark/memory package scaffolding, TypeScript toolchain, core types with Zod schemas, and config utilities
-- [ ] 01-02-PLAN.md -- SQLite database initialization with WAL mode, PRAGMA sequence, FTS5 external content with stable integer rowid, and migration system
-- [ ] 01-03-PLAN.md -- Observation CRUD, session lifecycle, and FTS5 keyword search with BM25 ranking and project scoping
-- [ ] 01-04-PLAN.md -- Acceptance tests proving all 5 success criteria: concurrency, crash recovery, persistence, project isolation, schema completeness (TDD)
+- [x] 01-01-PLAN.md -- @laminark/memory package scaffolding, TypeScript toolchain, core types with Zod schemas, and config utilities
+- [x] 01-02-PLAN.md -- SQLite database initialization with WAL mode, PRAGMA sequence, FTS5 external content with stable integer rowid, and migration system
+- [x] 01-03-PLAN.md -- Observation CRUD, session lifecycle, and FTS5 keyword search with BM25 ranking and project scoping
+- [x] 01-04-PLAN.md -- Acceptance tests proving all 5 success criteria: concurrency, crash recovery, persistence, project isolation, schema completeness (TDD)
 
 ### Phase 2: MCP Interface and Search
 **Goal**: Claude can search, save, and manage memories through MCP tools with keyword search that respects token budgets
@@ -51,13 +51,12 @@ Plans:
   3. Claude can call forget tool to soft-delete a memory, which disappears from search but is recoverable
   4. Search results use 3-layer progressive disclosure (compact index, then timeline, then full details) and never exceed 2000 tokens
   5. All 5-7 MCP tools are discoverable and callable from Claude Code
-**Plans**: 4 plans
+**Plans**: 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md -- MCP server scaffold with stdio transport and FTS5 keyword search tool
-- [ ] 02-02-PLAN.md -- save_memory, forget, and get_observations CRUD tools
-- [ ] 02-03-PLAN.md -- Timeline tool and token budget enforcement (2000 token cap)
-- [ ] 02-04-PLAN.md -- Plugin manifest (.mcp.json) and Claude Code integration verification
+- [x] 02-01-PLAN.md -- Schema migration 005 (title column + FTS5 rebuild), MCP server scaffold with stdio transport, save_memory tool with auto-title, and token budget utility
+- [x] 02-02-PLAN.md -- Unified recall tool with search/view/purge/restore actions, 3-level progressive disclosure, token budget enforcement, and BM25 title weighting
+- [x] 02-03-PLAN.md -- Plugin manifest (.mcp.json) and integration tests proving all 5 Phase 2 success criteria
 
 ### Phase 3: Hook Integration and Capture
 **Goal**: Observations are automatically captured from Claude's tool usage without any user intervention
@@ -68,13 +67,12 @@ Plans:
   2. Session start and end events are tracked with unique session IDs in the database
   3. Low-signal noise (raw build output, large file dumps, repetitive linter warnings) is filtered out and never stored
   4. Sensitive content matching configured patterns (like .env file contents, API keys) is excluded from capture
-**Plans**: 4 plans
+**Plans**: 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md -- Hook dispatcher scripts and ingest receiver HTTP endpoint with normalizer
-- [ ] 03-02-PLAN.md -- Observation admission filter with noise detection and relevance scoring
-- [ ] 03-03-PLAN.md -- Privacy filter for sensitive content redaction with configurable patterns
-- [ ] 03-04-PLAN.md -- hooks.json configuration, pipeline orchestrator, and end-to-end capture testing
+- [x] 03-01-PLAN.md -- Hook handler entry point, observation capture from PostToolUse, session lifecycle, and dual-entry-point build config
+- [x] 03-02-PLAN.md -- Admission filter with noise detection and privacy filter with sensitive content redaction (TDD)
+- [x] 03-03-PLAN.md -- hooks.json plugin configuration, filter pipeline wiring, and end-to-end integration tests
 
 ### Phase 4: Embedding Engine and Semantic Search
 **Goal**: Observations gain semantic meaning through vector embeddings enabling "search by concept" alongside keyword search
@@ -89,11 +87,10 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 04-01: Pluggable embedding strategy interface with local ONNX default implementation
-- [ ] 04-02: Worker thread setup for non-blocking embedding generation
-- [ ] 04-03: sqlite-vec integration for vector similarity search
-- [ ] 04-04: Hybrid search with reciprocal rank fusion (FTS5 + vector)
-- [ ] 04-05: Graceful degradation and lazy model loading
+- [x] 04-01-PLAN.md -- EmbeddingEngine interface, LocalOnnxEngine (BGE Small q8), KeywordOnlyEngine fallback, and migration 006 (cosine distance)
+- [x] 04-02-PLAN.md -- Worker thread bridge for non-blocking embedding, EmbeddingStore for sqlite-vec vec0 operations, and tsdown worker entry point
+- [x] 04-03-PLAN.md -- Hybrid search with reciprocal rank fusion (FTS5 + vector), MCP server worker lifecycle, and background embedding loop
+- [x] 04-04-PLAN.md -- Acceptance tests proving all 5 success criteria: semantic search, hybrid ranking, non-blocking, graceful degradation, zero latency
 
 ### Phase 5: Session Context and Summaries
 **Goal**: Claude starts every session already knowing what happened last time, and users can explicitly save and search memories via slash commands
@@ -107,9 +104,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 05-01-PLAN.md -- Session summary generation at Stop hook (compress session observations)
-- [ ] 05-02-PLAN.md -- SessionStart context injection with progressive disclosure index
-- [ ] 05-03-PLAN.md -- /laminark:remember and /laminark:recall slash command implementations
+- [x] 05-01-PLAN.md -- Session summary generation at Stop hook (compress session observations)
+- [x] 05-02-PLAN.md -- SessionStart context injection with progressive disclosure index
+- [x] 05-03-PLAN.md -- /laminark:remember and /laminark:recall slash command implementations
 
 ### Phase 6: Topic Detection and Context Stashing
 **Goal**: When the user jumps to a new topic, the system preserves their previous context thread and lets them return to it
@@ -121,15 +118,16 @@ Plans:
   3. User can type /laminark:resume to see stashed context threads and re-inject a chosen thread back into the conversation
   4. User can ask "where was I?" to see recently abandoned context threads ranked by recency and relevance
   5. Topic detection adapts to the user's natural variance over time -- a scattered session raises the shift threshold, a focused session lowers it
-**Plans**: 6 plans
+**Plans**: 7 plans
 
 Plans:
-- [ ] 06-01-PLAN.md -- Static topic shift detection with cosine distance (TDD)
-- [ ] 06-02-PLAN.md -- Context stash storage layer and StashManager CRUD
-- [ ] 06-03-PLAN.md -- TopicShiftHandler integration and /laminark:stash command
-- [ ] 06-04-PLAN.md -- /laminark:resume command and topic_context MCP tool
-- [ ] 06-05-PLAN.md -- Adaptive EWMA threshold with historical session seeding (TDD)
-- [ ] 06-06-PLAN.md -- Sensitivity configuration and decision logging
+- [x] 06-01-PLAN.md -- Static topic shift detection with cosine distance (TDD)
+- [x] 06-02-PLAN.md -- Context stash storage layer and StashManager CRUD
+- [x] 06-03-PLAN.md -- TopicShiftHandler integration and /laminark:stash command
+- [x] 06-04-PLAN.md -- /laminark:resume command and topic_context MCP tool
+- [x] 06-05-PLAN.md -- Adaptive EWMA threshold with historical session seeding (TDD)
+- [x] 06-06-PLAN.md -- Sensitivity configuration and decision logging
+- [x] 06-07-PLAN.md -- Gap closure: wire topic detection into embedding loop and add notification delivery
 
 ### Phase 7: Knowledge Graph and Advanced Intelligence
 **Goal**: Observations are connected into a navigable knowledge graph of entities and relationships, with high-quality embeddings from Claude's own reasoning
@@ -141,16 +139,17 @@ Plans:
   3. Claude can query the knowledge graph via MCP tool (e.g., "what files does this decision affect?" returns traversal results)
   4. Graph enforces entity type taxonomy and caps node degree at 50 edges, preventing unnavigable hairball growth
   5. Curation agent periodically merges similar observations and generates consolidated summaries during quiet periods
-**Plans**: 7 plans
+**Plans**: 8 plans
 
 Plans:
-- [ ] 07-01-PLAN.md -- Graph storage schema, type taxonomy, and recursive CTE traversal queries
-- [ ] 07-02-PLAN.md -- Claude piggyback embedding strategy and hybrid selector
-- [ ] 07-03-PLAN.md -- Entity extraction rules and pipeline for all 7 entity types
-- [ ] 07-04-PLAN.md -- Temporal awareness and observation staleness detection
-- [ ] 07-05-PLAN.md -- Relationship detection and graph constraint enforcement (max degree, dedup)
-- [ ] 07-06-PLAN.md -- MCP query_graph and graph_stats tools for Claude graph access
-- [ ] 07-07-PLAN.md -- Curation agent for observation merging and graph maintenance
+- [x] 07-01-PLAN.md -- Graph storage schema, type taxonomy, and recursive CTE traversal queries
+- [x] 07-02-PLAN.md -- Claude piggyback embedding strategy and hybrid selector
+- [x] 07-03-PLAN.md -- Entity extraction rules and pipeline for all 7 entity types
+- [x] 07-04-PLAN.md -- Temporal awareness and observation staleness detection
+- [x] 07-05-PLAN.md -- Relationship detection and graph constraint enforcement (max degree, dedup)
+- [x] 07-06-PLAN.md -- MCP query_graph and graph_stats tools for Claude graph access
+- [x] 07-07-PLAN.md -- Curation agent for observation merging and graph maintenance
+- [x] 07-08-PLAN.md -- Gap closure: wire entity extraction, relationship detection, and curation agent into live flow
 
 ### Phase 8: Web Visualization
 **Goal**: Users can visually explore their memory graph and session timeline in an interactive browser UI
@@ -165,11 +164,11 @@ Plans:
 **Plans**: 5 plans
 
 Plans:
-- [ ] 08-01-PLAN.md -- Hono web server with static SPA serving, REST API for graph/timeline data, and SSE endpoint
-- [ ] 08-02-PLAN.md -- Cytoscape knowledge graph with force-directed layout and entity type styling
-- [ ] 08-03-PLAN.md -- Graph interaction: node click details, entity type filtering, time range zoom
-- [ ] 08-04-PLAN.md -- Timeline view with session cards, observation entries, and topic shift markers
-- [ ] 08-05-PLAN.md -- Live SSE updates end-to-end and viewport culling for 500+ node performance
+- [x] 08-01-PLAN.md -- Hono web server with static SPA serving, REST API for graph/timeline data, and SSE endpoint
+- [x] 08-02-PLAN.md -- Cytoscape knowledge graph with force-directed layout and entity type styling
+- [x] 08-03-PLAN.md -- Graph interaction: node click details, entity type filtering, time range zoom
+- [x] 08-04-PLAN.md -- Timeline view with session cards, observation entries, and topic shift markers
+- [x] 08-05-PLAN.md -- Live SSE updates end-to-end and viewport culling for 500+ node performance
 
 ## Progress
 
@@ -178,11 +177,11 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Storage Engine | 0/4 | Planned | - |
-| 2. MCP Interface and Search | 0/4 | Planned | - |
-| 3. Hook Integration and Capture | 0/4 | Planned | - |
-| 4. Embedding Engine and Semantic Search | 0/4 | Planned | - |
-| 5. Session Context and Summaries | 0/3 | Planned | - |
-| 6. Topic Detection and Context Stashing | 0/6 | Planned | - |
-| 7. Knowledge Graph and Advanced Intelligence | 0/7 | Planned | - |
-| 8. Web Visualization | 0/5 | Planned | - |
+| 1. Storage Engine | 4/4 | Complete | 2026-02-08 |
+| 2. MCP Interface and Search | 3/3 | Complete | 2026-02-08 |
+| 3. Hook Integration and Capture | 3/3 | Complete | 2026-02-08 |
+| 4. Embedding Engine and Semantic Search | 4/4 | Complete | 2026-02-08 |
+| 5. Session Context and Summaries | 3/3 | Complete | 2026-02-08 |
+| 6. Topic Detection and Context Stashing | 7/7 | Complete | 2026-02-08 |
+| 7. Knowledge Graph and Advanced Intelligence | 8/8 | Complete | 2026-02-08 |
+| 8. Web Visualization | 5/5 | Complete | 2026-02-08 |

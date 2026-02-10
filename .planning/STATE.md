@@ -5,33 +5,40 @@
 See: .planning/PROJECT.md (updated 2026-02-08)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable.
-**Current focus:** Phase 1 - Storage Engine
+**Current focus:** Phase 8 - Web Visualization
 
 ## Current Position
 
-Phase: 1 of 8 (Storage Engine)
-Plan: 0 of 4 in current phase
-Status: Ready to plan
-Last activity: 2026-02-08 — Roadmap created with 8 phases, 51 requirements mapped
+Phase: 8 of 8 (Web Visualization)
+Plan: 5 of 5 in current phase (08-05 complete)
+Status: All phases complete
+Last activity: 2026-02-09 — Completed 08-05 Live Updates and Performance
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█████████████████████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0
-- Average duration: -
-- Total execution time: 0 hours
+- Total plans completed: 37
+- Average duration: 3min
+- Total execution time: 2.21 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 01-storage-engine | 4/4 | 13min | 3min |
+| 02-mcp-interface-and-search | 3/3 | 12min | 4min |
+| 03-hook-integration-and-capture | 3/3 | 11min | 4min |
+| 04-embedding-engine-and-semantic-search | 4/4 | 11min | 3min |
+| 05-session-context-and-summaries | 3/3 | 9min | 3min |
+| 06-topic-detection-and-context-stashing | 7/7 | 26min | 4min |
+| 07-knowledge-graph-and-advanced-intelligence | 8/8 | 34min | 4min |
+| 08-web-visualization | 5/5 | 25min | 5min |
 
 **Recent Trend:**
-- Last 5 plans: -
-- Trend: -
+- Last 5 plans: 08-02 (3min), 08-04 (5min), 08-03 (5min), 08-05 (6min)
+- Trend: Consistent
 
 *Updated after each plan completion*
 
@@ -45,20 +52,164 @@ Recent decisions affecting current work:
 - [Roadmap]: 8-phase structure derived from 51 requirements following storage -> interface -> capture -> intelligence -> visualization dependency chain
 - [Roadmap]: Research suggests starting with simple static topic threshold before adding EWMA adaptivity (Phase 6)
 - [Roadmap]: Knowledge graph deferred to Phase 7 to ensure schema stability before visualization in Phase 8
+- [01-01]: tsdown outputOptions.entryFileNames set to [name].js to produce dist/index.js matching package.json bin entry
+- [01-01]: ObservationRow includes explicit integer rowid for FTS5 content_rowid compatibility
+- [01-01]: Single database at ~/.laminark/data.db with project_hash scoping (user locked decision confirmed)
+- [01-02]: PRAGMAs set in strict order: WAL first, then busy_timeout, synchronous NORMAL, cache_size, foreign_keys, temp_store, wal_autocheckpoint
+- [01-02]: FTS5 content_rowid references explicit INTEGER PRIMARY KEY AUTOINCREMENT per research critical finding
+- [01-02]: Migration 004 (vec0) conditionally applied based on sqlite-vec availability
+- [01-03]: Constructor-bound projectHash ensures every query is project-scoped -- callers cannot accidentally query wrong project
+- [01-03]: ORDER BY includes rowid DESC as tiebreaker for deterministic ordering within same-second timestamps
+- [01-03]: FTS5 query sanitization strips operators and special characters to prevent syntax errors
+- [01-03]: BM25 score exposed as Math.abs(rank) since bm25() returns negative values
+- [01-04]: tsx added as devDependency for child_process.fork() TypeScript support in multi-process tests
+- [01-04]: Crash simulation uses separate crash-writer.ts forked as child process for true process-level WAL recovery testing
+- [01-04]: All 5 Phase 1 success criteria proven by 12 acceptance tests (78 total)
+- [quick-1]: Debug logging via stderr (process.stderr.write) to keep stdout clean for MCP protocol
+- [quick-1]: Cached isDebugEnabled() boolean for zero-cost no-op path when debug disabled
+- [quick-1]: Debug categories: db, obs, search, session -- use debug(category, message, data?) pattern
+- [02-01]: Used z.input instead of z.infer for ObservationInsert -- Zod v4 z.infer produces output type where defaulted fields are required
+- [02-01]: FTS5 snippet column index 1 (content) after title column added at FTS5 position 0
+- [02-01]: registerTool() used for MCP tool registration (not deprecated server.tool())
+- [02-01]: MCP tool pattern: export registerXxx(server, db, projectHash) from src/mcp/tools/
+- [02-01]: Token budget: 2000 default, 4000 full view, ~4 chars/token estimation
+- [02-02]: BM25 weights 2.0 (title) / 1.0 (content) for title-biased relevance ranking
+- [02-02]: Single unified recall tool with action parameter (view/purge/restore) -- not separate tools
+- [02-02]: Purge/restore require explicit IDs -- no blind bulk operations on search results
+- [02-03]: .mcp.json uses top-level server name key (plugin-bundled format, not mcpServers wrapper)
+- [02-03]: Integration tests exercise storage layer directly -- MCP SDK is trusted dependency, test our logic on top
+- [03-01]: Stop events log only (no observation) -- Stop has no tool_name/tool_input per hook spec
+- [03-01]: processPostToolUse is synchronous -- better-sqlite3 is inherently synchronous, no awaits needed
+- [03-02]: API key patterns applied before env_variable with negative lookahead to prevent double-match on redacted values
+- [03-02]: Write/Edit tools unconditionally admitted via HIGH_SIGNAL_TOOLS set -- content patterns only apply to Bash/Read
+- [03-02]: Laminark self-referential MCP tools (mcp__laminark__*) rejected in admission filter
+- [03-02]: Privacy patterns cached per-process with _resetPatternCache() escape hatch for testing
+- [03-01]: Self-referential filter: skip tools with mcp__laminark__ prefix to prevent recursive capture
+- [03-03]: Handler orchestrates pipeline (processPostToolUseFiltered) -- extract -> file exclusion -> privacy redaction -> admission filter -> store
+- [03-03]: LAMINARK_DATA_DIR env var added to getConfigDir() for test isolation without mocking
+- [03-03]: Privacy filter runs before admission filter to prevent secret content in debug logs
+- [04-01]: EmbeddingEngine interface with 6 methods -- all consumers depend on interface, never concrete engines
+- [04-01]: LocalOnnxEngine uses dynamic import('@huggingface/transformers') for zero startup cost (DQ-04)
+- [04-01]: Float32Array.from(output.data) for ONNX pipeline output -- ArrayLike<number> not ArrayBuffer
+- [04-01]: Migration 006 recreates vec0 table with distance_metric=cosine for normalized BGE embeddings
+- [04-02]: Worker thread bridge resolves ./worker.js relative to import.meta.url for correct dist/ path resolution
+- [04-02]: Embed request timeouts resolve with null (not reject) for graceful degradation -- callers never need try/catch
+- [04-02]: Float32Array.buffer cast to ArrayBuffer for postMessage transfer list (TypeScript ArrayBufferLike strictness)
+- [04-03]: hybridSearch requires db and projectHash params for ObservationRepository lookups on vector-only results
+- [04-03]: Background embedding interval 5s, 10 observations per batch -- balances responsiveness with resource usage
+- [04-03]: worker.start() fire-and-forget with .catch() -- server starts immediately, model loads lazily on first embed
+- [04-04]: Vec0 tests use if (!hasVecSupport) return guard rather than describe.skipIf for clarity
+- [04-04]: Mock factories for SearchEngine/EmbeddingStore/AnalysisWorker keep hybrid search tests unit-level
+- [04-04]: All 5 Phase 4 SCs proven by 41 new tests (286 total)
+- [05-01]: Direct DB integration for Stop hook summary generation -- matches handler.ts architecture, no HTTP intermediary
+- [05-01]: Heuristic text summarizer (no LLM) for fast deterministic summaries under 500 tokens
+- [05-01]: Progressive truncation: files trimmed first, then activities, decisions preserved longest
+- [05-03]: Source "slash:remember" distinguishes explicit user saves from programmatic saves for priority ranking
+- [05-03]: Slash commands are markdown instruction files -- no backend code, they delegate to existing MCP tools
+- [05-02]: Direct DB integration for SessionStart context injection -- no shell script or HTTP endpoint, matches handler.ts architecture
+- [05-02]: Progressive disclosure format: compact index with observation IDs and truncated content, not full dumps
+- [05-02]: High-value observations prioritize mcp:save_memory and slash:remember sources via CASE expression
+- [05-02]: SessionStart is the only hook that writes to stdout (synchronous hook -- stdout injected into context window)
+- [06-01]: cosineDistance returns 0 for zero vectors (graceful, no NaN) rather than throwing
+- [06-01]: Confidence formula: min((distance - threshold) / threshold, 1.0) caps at 1.0 for far-past-threshold
+- [06-01]: setThreshold bounded to [0.05, 0.95] to prevent degenerate detection behavior
+- [06-02]: StashManager takes db only (no projectHash constructor binding) -- stashes are project-scoped via data in createStash/listStashes params
+- [06-02]: Observation snapshots stored as JSON TEXT blobs for self-contained stash records
+- [06-02]: randomBytes(16).toString('hex') for stash IDs, matching ObservationRepository pattern
+- [06-03]: TopicShiftHandler converts Float32Array embedding to number[] for cosineDistance compatibility
+- [06-03]: Topic label extracted from oldest observation (last in DESC list) first 50 chars
+- [06-03]: Stash slash command follows dual pattern: TypeScript handler + markdown instruction file
+- [06-04]: handleResumeCommand uses dependency injection for StashManager rather than direct DB access
+- [06-04]: timeAgo helper shared between resume command and topic_context tool (imported from resume.ts)
+- [06-04]: Progressive disclosure thresholds: full detail for <=3 stashes, summaries for 4-8, compact labels for 9+
+- [06-05]: Migration 008 for threshold_history (007 was already taken by context_stashes)
+- [06-05]: EWMA variance uses post-update mean (standard formulation) for accurate tracking
+- [06-05]: seedFromHistory preserves observationCount -- count tracks session activity independently from statistical seed
+- [06-05]: ThresholdStore follows prepared-statement constructor pattern matching StashManager
+- [06-06]: Migration 009 for shift_decisions (008 was already taken by threshold_history)
+- [06-06]: Optional dependency injection in TopicShiftHandlerDeps: config, decisionLogger, adaptiveManager all optional for backward compat
+- [06-06]: Decision logger randomBytes(16) ID generation matches ObservationRepository and StashManager patterns
+- [06-07]: NotificationStore uses CREATE TABLE IF NOT EXISTS inline (no migration) -- transient queue not core data
+- [06-07]: Notification delivery via MCP tool response piggybacking -- consume-on-read pattern, no polling
+- [06-07]: Topic detection errors wrapped in try/catch to never crash the background embedding loop
+- [07-01]: Graph schema in src/graph/ as self-contained module, separate from src/storage/ migration system
+- [07-01]: Graph tables use CREATE IF NOT EXISTS (idempotent init) instead of versioned migration tracking
+- [07-01]: upsertNode merges observation_ids (dedup via Set) and metadata (override) on name+type collision
+- [07-01]: insertEdge ON CONFLICT keeps MAX(existing, new) weight -- confidence only goes up through repeated extraction
+- [07-01]: TraversalRow uses column aliases (n_*, e_*) to disambiguate in recursive CTE joins
+- [07-02]: Piggyback files in src/analysis/engines/ (not src/embeddings/) to match existing codebase structure
+- [07-02]: PiggybackEngine implements existing EmbeddingEngine interface (Float32Array|null, 6 methods) not plan's simplified interface
+- [07-02]: LAMINARK_EMBEDDING_MODE env var for strategy selection (local/piggyback/hybrid), default hybrid
+- [07-02]: Signal cache Map with 30s TTL lazy eviction connects hook extractor to embedding strategy
+- [07-02]: Vector blending: 70% ONNX + 30% keyword features with re-normalization to unit length
+- [07-03]: Same-type-only overlap resolution: different entity types coexist on overlapping text spans (Decision containing Tool name)
+- [07-03]: Person rule two-stage matching: case-insensitive verb regex then case-sensitive capitalized name extraction
+- [07-03]: Confidence tiers: File(0.95) > Tool(0.9) > Project(0.8) > Decision(0.7) > Problem/Solution(0.65) > Person(0.6)
+- [07-03]: Test files in src/graph/__tests__/ following project convention, not tests/ directory
+- [Phase 07-04]: Staleness flags stored in separate staleness_flags table, decoupled from core observations schema
+- [Phase 07-04]: Pattern-based contradiction detection (string matching, not LLM) for deterministic staleness detection
+- [Phase 07-04]: Staleness is advisory only -- flagged observations remain queryable, users decide trust
+- [07-05]: Context signal priority: decided_by > solved_by > caused_by > depends_on > part_of > uses (most specific first)
+- [07-05]: Context window expanded 50 chars before/after entity pair for signal detection beyond entity boundaries
+- [07-05]: Removed overly broad context signals (with, from, in) to reduce false positive relationship type overrides
+- [07-05]: Constraints module logs pruning/merging to stderr with [laminark:graph] prefix for observability
+- [07-05]: Test file at src/graph/__tests__/relationship-detector.test.ts covers both relationship detector and constraints modules
+- [07-06]: graph_stats collects stats via direct SQL rather than getGraphHealth (constraints module not yet built)
+- [07-06]: query_graph uses bidirectional traversal (direction: 'both') for comprehensive relationship display
+- [07-06]: Observation excerpts truncated to 200 chars with progressive disclosure: entities -> relationships -> observations
+- [07-06]: Both graph tools registered in src/index.ts following existing registerTool pattern with notificationStore piggybacking
+- [07-07]: Jaccard text similarity threshold 0.85 (lower than cosine 0.95) since text comparison is less precise
+- [07-07]: Greedy clustering requires all-pairs similarity above threshold, not just seed comparison
+- [07-07]: runCuration async (Promise<CurationReport>) for future extensibility, current ops synchronous
+- [07-07]: Staleness sweep checks only recently-updated entities (last 24h) rather than full graph scan
+- [07-07]: Test file at src/graph/__tests__/curation-agent.test.ts following project convention
+- [07-08]: extractAndPersist returns GraphNode[] -- wiring uses nodes directly, not extraction result wrapper
+- [07-08]: Integration tests at src/graph/__tests__/ (not tests/integration/) to match vitest src/**/*.test.ts config
+- [07-08]: Graph errors wrapped non-fatally in embedding loop to never crash background processing
+- [08-01]: hono and @hono/node-server installed as direct dependencies (previously transitive via MCP SDK)
+- [08-01]: SSE uses ReadableStream API with TextEncoder for manual event formatting (not Hono SSE helper)
+- [08-01]: Database instance passed through Hono context middleware (c.set/c.get pattern)
+- [08-01]: API endpoints use try/catch with empty fallbacks for tables that may not exist yet
+- [08-01]: CDN fallback for Cytoscape.js until local bundling in later plans
+- [08-02]: Cytoscape node colors follow plan spec (distinct from CSS custom properties in 08-01) for maximum visual contrast
+- [08-02]: Graph module uses window.laminarkGraph export pattern matching app.js window.laminarkApp convention
+- [08-02]: Entity type filtering uses display:none/element toggling to preserve layout positions
+- [08-02]: Local neighborhood relayout on addNode to avoid full graph re-layout disruption
+- [08-04]: Offset parameter added to /api/timeline for pagination (deviation Rule 3 -- required for infinite scroll)
+- [08-04]: Lazy tab initialization: graph and timeline only init when their tab is first activated
+- [08-04]: DocumentFragment used for batch DOM insertion to reduce layout thrashing on large timelines
+- [08-04]: IntersectionObserver on sentinel element for infinite scroll rather than scroll event listener
+- [08-04]: Session cards use vanilla DOM createElement instead of innerHTML for XSS safety
+- [08-03]: DOM createElement-based detail panel rendering (not innerHTML) for XSS safety with observation text
+- [08-03]: Client-side time filtering for presets (instant), server-side re-fetch for custom date ranges
+- [08-03]: Set-based entity type filter state with combined type+time range applyActiveFilters
+- [08-05]: Web server started alongside MCP server from src/index.ts for SSE broadcast in same process
+- [08-05]: Ring buffer of 100 events for SSE replay via Last-Event-ID header on reconnection
+- [08-05]: Heartbeat watchdog at 60s triggers forced reconnect plus REST API data catch-up
+- [08-05]: Viewport culling with 20% buffer zone and .culled CSS class for display:none
+- [08-05]: LOD tiers: full detail >= 0.5x zoom, no labels < 0.5x, no edges < 0.3x
+- [08-05]: Batch delay 200ms for SSE event collection before single layout flush
 
 ### Pending Todos
 
 - [database] Add cross-project memory sharing between Claude instances
+- ~~[general] Add debug logging for all interactions~~ -- DONE (quick-1)
 
 ### Blockers/Concerns
 
-- Phase 3 (Hooks): Claude Code hooks API must be verified against current SDK version during planning
-- Phase 4 (Embeddings): @huggingface/transformers replaces archived fastembed-js -- integration needs validation
+- ~~Phase 3 (Hooks): Claude Code hooks API must be verified against current SDK version during planning~~ -- DONE (Phase 3 complete)
+- ~~Phase 4 (Embeddings): @huggingface/transformers replaces archived fastembed-js -- integration needs validation~~ -- DONE (Phase 4 complete)
 - Phase 6 (Topic Detection): EWMA parameter tuning is novel territory, expect iteration
 - Phase 7 (Knowledge Graph): Entity extraction from casual conversation text is noisy, start conservative
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 1 | Add debug logging infrastructure with LAMINARK_DEBUG env var and config.json support | 2026-02-08 | aa7666c | [1-add-debug-logging-infrastructure-with-la](./quick/1-add-debug-logging-infrastructure-with-la/) |
+
 ## Session Continuity
 
-Last session: 2026-02-08
-Stopped at: Roadmap creation complete, ready to plan Phase 1
+Last session: 2026-02-09
+Stopped at: Completed 08-05-PLAN.md -- Live SSE updates, viewport culling, LOD, and batch updates. All 8 phases complete.
 Resume file: None

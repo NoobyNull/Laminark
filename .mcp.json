@@ -1,0 +1,7 @@
+{
+  "laminark": {
+    "command": "npx",
+    "args": ["tsx", "src/index.ts"],
+    "env": {}
+  }
+}
