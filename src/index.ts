@@ -16,6 +16,7 @@ import { registerSaveMemory } from './mcp/tools/save-memory.js';
 import { registerTopicContext } from './mcp/tools/topic-context.js';
 import { registerQueryGraph } from './mcp/tools/query-graph.js';
 import { registerGraphStats } from './mcp/tools/graph-stats.js';
+import { registerStatus } from './mcp/tools/status.js';
 import { AnalysisWorker } from './analysis/worker-bridge.js';
 import { EmbeddingStore } from './storage/embeddings.js';
 import { ObservationRepository } from './storage/observations.js';
@@ -220,6 +221,7 @@ registerRecall(server, db.db, projectHash, worker, embeddingStore, notificationS
 registerTopicContext(server, db.db, projectHash, notificationStore);
 registerQueryGraph(server, db.db, projectHash, notificationStore);
 registerGraphStats(server, db.db, projectHash, notificationStore);
+registerStatus(server, db.db, projectHash, process.cwd(), db.hasVectorSupport, () => worker.isReady(), notificationStore);
 
 startServer(server).catch((err) => {
   debug('mcp', 'Fatal: failed to start server', { error: err.message });

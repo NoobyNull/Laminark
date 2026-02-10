@@ -671,13 +671,13 @@ function formatTimelineGroup(date, items) {
 function formatFullItem(obs) {
 	return `--- ${shortId(obs.id)} | ${obs.title ?? "untitled"} | ${obs.createdAt} ---\n${obs.content}`;
 }
-function prependNotifications$3(notificationStore, projectHash, responseText) {
+function prependNotifications$4(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$3(text) {
+function textResponse$4(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -715,7 +715,7 @@ function registerRecall(server, db, projectHash, worker = null, embeddingStore =
 			include_purged: z.boolean().default(false).describe("Include soft-deleted items in results (needed for restore)")
 		}
 	}, async (args) => {
-		const withNotifications = (text) => textResponse$3(prependNotifications$3(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$4(prependNotifications$4(notificationStore, projectHash, text));
 		try {
 			const repo = new ObservationRepository(db, projectHash);
 			const searchEngine = new SearchEngine(db, projectHash);
@@ -756,7 +756,7 @@ function registerRecall(server, db, projectHash, worker = null, embeddingStore =
 			if (observations.length === 0) return withNotifications(`No memories found matching '${args.query ?? args.title ?? args.id ?? ""}'. Try broader search terms or check the ID.`);
 			if (args.action === "view") {
 				const originalText = formatViewResponse(observations, searchResults, args.detail, args.id !== void 0).content[0].text;
-				return textResponse$3(prependNotifications$3(notificationStore, projectHash, originalText));
+				return textResponse$4(prependNotifications$4(notificationStore, projectHash, originalText));
 			}
 			if (args.action === "purge") {
 				const targetIds = args.ids ?? (args.id ? [args.id] : []);
@@ -850,7 +850,7 @@ function formatViewResponse(observations, searchResults, detail, isSingleIdLooku
 	}
 	let footer = `---\n${observations.length} result(s) | ~${tokenEstimate} tokens | detail: ${detail}`;
 	if (truncated) footer += " | truncated (use id for full view)";
-	return textResponse$3(`${body}\n${footer}`);
+	return textResponse$4(`${body}\n${footer}`);
 }
 function buildScoreMap(searchResults) {
 	const map = /* @__PURE__ */ new Map();
@@ -990,13 +990,13 @@ function formatStashes(stashes) {
 	if (stashes.length <= 8) return formatDetail(stashes);
 	return formatCompact(stashes);
 }
-function prependNotifications$2(notificationStore, projectHash, responseText) {
+function prependNotifications$3(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$2(text) {
+function textResponse$3(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1018,7 +1018,7 @@ function registerTopicContext(server, db, projectHash, notificationStore = null)
 			limit: z.number().int().min(1).max(20).default(5).describe("Max threads to return")
 		}
 	}, async (args) => {
-		const withNotifications = (text) => textResponse$2(prependNotifications$2(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$3(prependNotifications$3(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "topic_context: request", {
 				query: args.query,
@@ -1037,7 +1037,7 @@ function registerTopicContext(server, db, projectHash, notificationStore = null)
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "topic_context: error", { error: message });
-			return textResponse$2(`Error retrieving context threads: ${message}`);
+			return textResponse$3(`Error retrieving context threads: ${message}`);
 		}
 	});
 }
@@ -1406,13 +1406,13 @@ function formatAge(isoDate) {
 	const months = Math.floor(days / 30);
 	return `${months} month${months !== 1 ? "s" : ""} ago`;
 }
-function prependNotifications$1(notificationStore, projectHash, responseText) {
+function prependNotifications$2(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$1(text) {
+function textResponse$2(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1446,7 +1446,7 @@ function registerQueryGraph(server, db, projectHash, notificationStore = null) {
 			limit: z.number().int().min(1).max(50).default(20).describe("Max root entities to return (default: 20, max: 50)")
 		}
 	}, async (args) => {
-		const withNotifications = (text) => textResponse$1(prependNotifications$1(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$2(prependNotifications$2(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "query_graph: request", {
 				query: args.query,
@@ -1798,13 +1798,13 @@ function formatStats(stats) {
 	}
 	return lines.join("\n");
 }
-function prependNotifications(notificationStore, projectHash, responseText) {
+function prependNotifications$1(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse(text) {
+function textResponse$1(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1832,11 +1832,123 @@ function registerGraphStats(server, db, projectHash, notificationStore = null) {
 				nodes: stats.total_nodes,
 				edges: stats.total_edges
 			});
-			return textResponse(prependNotifications(notificationStore, projectHash, formatted));
+			return textResponse$1(prependNotifications$1(notificationStore, projectHash, formatted));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "graph_stats: error", { error: message });
-			return textResponse(`Graph stats error: ${message}`);
+			return textResponse$1(`Graph stats error: ${message}`);
+		}
+	});
+}
+
+//#endregion
+//#region src/mcp/tools/status.ts
+function collectStatus(db, projectHash, projectPath, hasVectorSupport, workerReady) {
+	const totalObs = db.prepare("SELECT COUNT(*) as cnt FROM observations WHERE project_hash = ? AND deleted_at IS NULL").get(projectHash).cnt;
+	const embeddedObs = db.prepare("SELECT COUNT(*) as cnt FROM observations WHERE project_hash = ? AND deleted_at IS NULL AND embedding_model IS NOT NULL").get(projectHash).cnt;
+	const deletedObs = db.prepare("SELECT COUNT(*) as cnt FROM observations WHERE project_hash = ? AND deleted_at IS NOT NULL").get(projectHash).cnt;
+	const sessions = db.prepare("SELECT COUNT(DISTINCT session_id) as cnt FROM observations WHERE project_hash = ? AND session_id IS NOT NULL AND deleted_at IS NULL").get(projectHash).cnt;
+	let stashes = 0;
+	try {
+		stashes = db.prepare("SELECT COUNT(*) as cnt FROM context_stashes WHERE project_hash = ? AND status = 'stashed'").get(projectHash).cnt;
+	} catch {}
+	const totalChars = db.prepare("SELECT COALESCE(SUM(LENGTH(content)), 0) as chars FROM observations WHERE project_hash = ? AND deleted_at IS NULL").get(projectHash).chars;
+	let graphNodes = 0;
+	let graphEdges = 0;
+	try {
+		graphNodes = db.prepare("SELECT COUNT(*) as cnt FROM graph_nodes").get().cnt;
+		graphEdges = db.prepare("SELECT COUNT(*) as cnt FROM graph_edges").get().cnt;
+	} catch {}
+	return {
+		project: {
+			path: projectPath,
+			hash: projectHash
+		},
+		database: { path: getDbPath() },
+		capabilities: {
+			vectorSearch: hasVectorSupport,
+			embeddingWorker: workerReady
+		},
+		memories: {
+			total: totalObs,
+			embedded: embeddedObs,
+			deleted: deletedObs,
+			sessions,
+			stashes
+		},
+		tokens: { estimatedTotal: estimateTokens(String("x").repeat(totalChars)) },
+		graph: {
+			nodes: graphNodes,
+			edges: graphEdges
+		},
+		uptime: Math.floor(process.uptime())
+	};
+}
+function formatUptime(seconds) {
+	const h = Math.floor(seconds / 3600);
+	const m = Math.floor(seconds % 3600 / 60);
+	const s = seconds % 60;
+	if (h > 0) return `${h}h ${m}m`;
+	if (m > 0) return `${m}m ${s}s`;
+	return `${s}s`;
+}
+function formatStatus(status) {
+	const lines = [];
+	lines.push("## Laminark Status");
+	lines.push("");
+	lines.push("### Connection");
+	lines.push(`Project: ${status.project.path}`);
+	lines.push(`Project hash: ${status.project.hash}`);
+	lines.push(`Database: ${status.database.path}`);
+	lines.push(`Uptime: ${formatUptime(status.uptime)}`);
+	lines.push("");
+	lines.push("### Capabilities");
+	lines.push(`Vector search: ${status.capabilities.vectorSearch ? "active" : "unavailable (keyword-only)"}`);
+	lines.push(`Embedding worker: ${status.capabilities.embeddingWorker ? "ready" : "degraded"}`);
+	lines.push("");
+	lines.push("### Memories");
+	lines.push(`Observations: ${status.memories.total} (${status.memories.embedded} embedded, ${status.memories.deleted} deleted)`);
+	lines.push(`Sessions: ${status.memories.sessions}`);
+	lines.push(`Stashed threads: ${status.memories.stashes}`);
+	lines.push("");
+	lines.push("### Tokens");
+	lines.push(`Estimated total: ~${status.tokens.estimatedTotal.toLocaleString()} tokens across all memories`);
+	lines.push("");
+	lines.push("### Knowledge Graph");
+	lines.push(`Nodes: ${status.graph.nodes} | Edges: ${status.graph.edges}`);
+	return lines.join("\n");
+}
+function prependNotifications(notificationStore, projectHash, responseText) {
+	if (!notificationStore) return responseText;
+	const pending = notificationStore.consumePending(projectHash);
+	if (pending.length === 0) return responseText;
+	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
+}
+function textResponse(text) {
+	return { content: [{
+		type: "text",
+		text
+	}] };
+}
+function registerStatus(server, db, projectHash, projectPath, hasVectorSupport, isWorkerReady, notificationStore = null) {
+	server.registerTool("status", {
+		title: "Laminark Status",
+		description: "Show Laminark system status: connection info, memory count, token estimates, and capabilities.",
+		inputSchema: {}
+	}, async () => {
+		try {
+			debug("mcp", "status: request");
+			const status = collectStatus(db, projectHash, projectPath, hasVectorSupport, isWorkerReady());
+			const formatted = formatStatus(status);
+			debug("mcp", "status: returning", {
+				memories: status.memories.total,
+				tokens: status.tokens.estimatedTotal
+			});
+			return textResponse(prependNotifications(notificationStore, projectHash, formatted));
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Unknown error";
+			debug("mcp", "status: error", { error: message });
+			return textResponse(`Status error: ${message}`);
 		}
 	});
 }
@@ -4587,6 +4699,7 @@ registerRecall(server, db.db, projectHash, worker, embeddingStore, notificationS
 registerTopicContext(server, db.db, projectHash, notificationStore);
 registerQueryGraph(server, db.db, projectHash, notificationStore);
 registerGraphStats(server, db.db, projectHash, notificationStore);
+registerStatus(server, db.db, projectHash, process.cwd(), db.hasVectorSupport, () => worker.isReady(), notificationStore);
 startServer(server).catch((err) => {
 	debug("mcp", "Fatal: failed to start server", { error: err.message });
 	clearInterval(embedTimer);
