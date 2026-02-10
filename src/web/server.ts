@@ -109,24 +109,56 @@ export function createWebServer(db: BetterSqlite3.Database, uiRoot: string, defa
 }
 
 /**
+ * Maximum number of alternate ports to try when the primary port is in use.
+ */
+const MAX_PORT_RETRIES = 10;
+
+/**
  * Starts the Hono web server on the specified port.
+ *
+ * If the port is already in use (EADDRINUSE), tries incrementing ports up to
+ * MAX_PORT_RETRIES times. If all ports fail, logs a warning and continues
+ * without the web server -- the MCP server is the primary function and must
+ * not be killed by a web server port conflict.
  *
  * @param app - Configured Hono app from createWebServer()
  * @param port - Port number (default: 37820)
- * @returns The Node.js HTTP server instance
+ * @returns The Node.js HTTP server instance, or null if all ports failed
  */
 export function startWebServer(
   app: Hono<AppEnv>,
   port: number = 37820,
-): ReturnType<typeof serve> {
+): ReturnType<typeof serve> | null {
   debug('db', `Starting web server on port ${port}`);
 
-  const server = serve({
-    fetch: app.fetch,
-    port,
-  });
+  function tryListen(attemptPort: number, retries: number): ReturnType<typeof serve> | null {
+    const server = serve({
+      fetch: app.fetch,
+      port: attemptPort,
+    });
 
-  debug('db', `Web server listening on http://localhost:${port}`);
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE' && retries > 0) {
+        server.close();
+        const nextPort = attemptPort + 1;
+        debug('db', `Port ${attemptPort} in use, trying ${nextPort}`);
+        tryListen(nextPort, retries - 1);
+      } else if (err.code === 'EADDRINUSE') {
+        server.close();
+        debug('db', `Web server disabled: all ports ${port}-${attemptPort} in use`);
+      } else {
+        debug('db', `Web server error: ${err.message}`);
+      }
+    });
 
-  return server;
+    server.on('listening', () => {
+      const addr = server.address();
+      const actualPort = typeof addr === 'object' && addr ? addr.port : attemptPort;
+      debug('db', `Web server listening on http://localhost:${actualPort}`);
+    });
+
+    return server;
+  }
+
+  return tryListen(port, MAX_PORT_RETRIES);
 }

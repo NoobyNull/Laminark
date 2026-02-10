@@ -67,9 +67,11 @@ export class AnalysisWorker {
     if (workerPath) {
       this.workerPath = workerPath;
     } else {
-      // Resolve worker.js relative to this file's location in dist/
+      // Resolve worker.js relative to the running file's location.
+      // When bundled, this file is inlined into dist/index.js so import.meta.url
+      // points to dist/. The worker entry is built to dist/analysis/worker.js.
       const thisDir = dirname(fileURLToPath(import.meta.url));
-      this.workerPath = join(thisDir, 'worker.js');
+      this.workerPath = join(thisDir, 'analysis', 'worker.js');
     }
   }
 
