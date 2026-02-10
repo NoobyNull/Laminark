@@ -351,16 +351,16 @@ describe('SC-5: tool discoverability', () => {
     }).not.toThrow();
   });
 
-  it('.mcp.json exists and is valid', () => {
-    // Read .mcp.json from project root
-    const manifestPath = join(__dirname, '..', '..', '..', '.mcp.json');
-    const raw = readFileSync(manifestPath, 'utf8');
-    const manifest = JSON.parse(raw);
+  it('hooks.json exists and is valid', () => {
+    // Read hooks.json from project root
+    const hooksPath = join(__dirname, '..', '..', '..', 'hooks', 'hooks.json');
+    const raw = readFileSync(hooksPath, 'utf8');
+    const hooks = JSON.parse(raw);
 
     // Verify structure
-    expect(manifest).toHaveProperty('mcpServers');
-    expect(manifest.mcpServers).toHaveProperty('laminark');
-    expect(manifest.mcpServers.laminark.command).toBe('bash');
-    expect(manifest.mcpServers.laminark.args).toContain('${CLAUDE_PLUGIN_ROOT}/dist/index.js');
+    expect(hooks).toHaveProperty('hooks');
+    expect(hooks.hooks).toHaveProperty('PostToolUse');
+    expect(hooks.hooks).toHaveProperty('SessionStart');
+    expect(hooks.hooks).toHaveProperty('SessionEnd');
   });
 });

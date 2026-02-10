@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "laminark": {
-      "command": "bash",
-      "args": ["./scripts/ensure-deps.sh", "node", "./dist/index.js"]
-    }
-  }
-}
