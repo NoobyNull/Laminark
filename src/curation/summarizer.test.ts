@@ -187,16 +187,16 @@ describe('generateSessionSummary', () => {
 
   it('generates a summary for a session with observations', () => {
     sessionRepo.create('active-session');
-    obsRepo.create({
+    obsRepo.createClassified({
       content: 'Edited src/index.ts to add new MCP tool registration',
       source: 'hook:Write',
       sessionId: 'active-session',
-    });
-    obsRepo.create({
+    }, 'discovery');
+    obsRepo.createClassified({
       content: 'Decided to use registerTool pattern for MCP tools',
       source: 'hook:Bash',
       sessionId: 'active-session',
-    });
+    }, 'discovery');
 
     const result = generateSessionSummary('active-session', obsRepo, sessionRepo);
 
@@ -216,16 +216,16 @@ describe('generateSessionSummary', () => {
     sessionRepo.create('session-a');
     sessionRepo.create('session-b');
 
-    obsRepo.create({
+    obsRepo.createClassified({
       content: 'This belongs to session A',
       source: 'hook:Bash',
       sessionId: 'session-a',
-    });
-    obsRepo.create({
+    }, 'discovery');
+    obsRepo.createClassified({
       content: 'This belongs to session B',
       source: 'hook:Bash',
       sessionId: 'session-b',
-    });
+    }, 'discovery');
 
     const result = generateSessionSummary('session-a', obsRepo, sessionRepo);
 

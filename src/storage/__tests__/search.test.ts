@@ -37,28 +37,28 @@ describe('SearchEngine', () => {
     const repoB = new ObservationRepository(ldb.db, 'bbb');
 
     // Project A observations
-    repoA.create({
+    repoA.createClassified({
       content:
         'Implementing user authentication with JWT tokens and refresh rotation',
-    });
-    repoA.create({
+    }, 'discovery');
+    repoA.createClassified({
       content:
         'Database schema design for the observations table with FTS5 indexing',
-    });
-    repoA.create({
+    }, 'discovery');
+    repoA.createClassified({
       content:
         'Running database migration scripts to set up the initial schema',
-    });
+    }, 'discovery');
 
     // Project B observations
-    repoB.create({
+    repoB.createClassified({
       content:
         'Authentication middleware handles token validation and refresh flows',
-    });
-    repoB.create({
+    }, 'discovery');
+    repoB.createClassified({
       content:
         'Setting up the testing framework with vitest and coverage reporting',
-    });
+    }, 'discovery');
   }
 
   it('searchKeyword finds results scoped to project A', () => {
@@ -123,9 +123,9 @@ describe('SearchEngine', () => {
 
   it('soft-deleted observations excluded from search', () => {
     const repo = new ObservationRepository(ldb.db, 'aaa');
-    const obs = repo.create({
+    const obs = repo.createClassified({
       content: 'This is about authentication patterns for APIs',
-    });
+    }, 'discovery');
 
     const search = new SearchEngine(ldb.db, 'aaa');
 
@@ -143,10 +143,10 @@ describe('SearchEngine', () => {
 
   it('results include snippet with <mark> tags', () => {
     const repo = new ObservationRepository(ldb.db, 'aaa');
-    repo.create({
+    repo.createClassified({
       content:
         'The authentication system uses JWT tokens with refresh rotation for security',
-    });
+    }, 'discovery');
 
     const search = new SearchEngine(ldb.db, 'aaa');
     const results = search.searchKeyword('authentication');
@@ -160,7 +160,7 @@ describe('SearchEngine', () => {
 
   it('results include matchType fts and score', () => {
     const repo = new ObservationRepository(ldb.db, 'aaa');
-    repo.create({ content: 'Testing the search result structure' });
+    repo.createClassified({ content: 'Testing the search result structure' }, 'discovery');
 
     const search = new SearchEngine(ldb.db, 'aaa');
     const results = search.searchKeyword('search');
@@ -173,9 +173,9 @@ describe('SearchEngine', () => {
 
   it('prefix search matches partial words', () => {
     const repo = new ObservationRepository(ldb.db, 'aaa');
-    repo.create({
+    repo.createClassified({
       content: 'Authentication module with JWT validation',
-    });
+    }, 'discovery');
 
     const search = new SearchEngine(ldb.db, 'aaa');
     const results = search.searchByPrefix('authen');
@@ -229,7 +229,7 @@ describe('SearchEngine', () => {
   it('searchKeyword respects limit', () => {
     const repo = new ObservationRepository(ldb.db, 'aaa');
     for (let i = 0; i < 5; i++) {
-      repo.create({ content: `Observation about authentication topic ${i}` });
+      repo.createClassified({ content: `Observation about authentication topic ${i}` }, 'discovery');
     }
 
     const search = new SearchEngine(ldb.db, 'aaa');
@@ -239,14 +239,14 @@ describe('SearchEngine', () => {
 
   it('searchKeyword respects sessionId filter', () => {
     const repo = new ObservationRepository(ldb.db, 'aaa');
-    repo.create({
+    repo.createClassified({
       content: 'Authentication in session A',
       sessionId: 'sess-a',
-    });
-    repo.create({
+    }, 'discovery');
+    repo.createClassified({
       content: 'Authentication in session B',
       sessionId: 'sess-b',
-    });
+    }, 'discovery');
 
     const search = new SearchEngine(ldb.db, 'aaa');
     const results = search.searchKeyword('authentication', {

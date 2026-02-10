@@ -104,7 +104,7 @@ describe('hook handler end-to-end integration', () => {
     const db = openTestDb();
     try {
       const obsRepo = new ObservationRepository(db.db, projectHash);
-      const observations = obsRepo.list({ limit: 10 });
+      const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
 
       expect(observations).toHaveLength(1);
       expect(observations[0].source).toBe('hook:Write');
@@ -138,7 +138,7 @@ describe('hook handler end-to-end integration', () => {
     const db = openTestDb();
     try {
       const obsRepo = new ObservationRepository(db.db, projectHash);
-      const observations = obsRepo.list({ limit: 10 });
+      const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
 
       expect(observations).toHaveLength(0);
     } finally {
@@ -170,7 +170,7 @@ describe('hook handler end-to-end integration', () => {
     const db = openTestDb();
     try {
       const obsRepo = new ObservationRepository(db.db, projectHash);
-      const observations = obsRepo.list({ limit: 10 });
+      const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
 
       expect(observations).toHaveLength(1);
       expect(observations[0].content).toContain('[REDACTED:api_key]');
@@ -275,7 +275,7 @@ describe('hook handler end-to-end integration', () => {
     const db = openTestDb();
     try {
       const obsRepo = new ObservationRepository(db.db, projectHash);
-      const observations = obsRepo.list({ limit: 10 });
+      const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
       expect(observations).toHaveLength(0);
     } finally {
       db.close();
@@ -299,7 +299,7 @@ describe('hook handler end-to-end integration', () => {
     const db = openTestDb();
     try {
       const obsRepo = new ObservationRepository(db.db, projectHash);
-      const observations = obsRepo.list({ limit: 10 });
+      const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
       expect(observations).toHaveLength(0);
     } finally {
       db.close();
@@ -329,7 +329,7 @@ describe('hook handler end-to-end integration', () => {
     const db = openTestDb();
     try {
       const obsRepo = new ObservationRepository(db.db, projectHash);
-      const observations = obsRepo.list({ limit: 10 });
+      const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
 
       expect(observations).toHaveLength(1);
       expect(observations[0].source).toBe('hook:Write');
@@ -358,7 +358,7 @@ describe('hook handler end-to-end integration', () => {
     const db = openTestDb();
     try {
       const obsRepo = new ObservationRepository(db.db, projectHash);
-      const observations = obsRepo.list({ limit: 10 });
+      const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
       expect(observations).toHaveLength(0);
     } finally {
       db.close();

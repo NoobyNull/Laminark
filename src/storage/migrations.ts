@@ -27,6 +27,7 @@ export interface Migration {
  * Migration 009: Shift decisions table for topic shift decision logging.
  * Migration 010: Project metadata table for project selector UI.
  * Migration 011: Add project_hash to graph tables and backfill from observations.
+ * Migration 012: Add classification and classified_at columns for LLM-based observation classification.
  */
 export const MIGRATIONS: Migration[] = [
   {
@@ -292,6 +293,16 @@ export const MIGRATIONS: Migration[] = [
         db.exec('CREATE INDEX IF NOT EXISTS idx_graph_edges_project ON graph_edges(project_hash)');
       }
     },
+  },
+  {
+    version: 12,
+    name: 'add_observation_classification',
+    up: `
+      ALTER TABLE observations ADD COLUMN classification TEXT;
+      ALTER TABLE observations ADD COLUMN classified_at TEXT;
+      CREATE INDEX idx_observations_classification
+        ON observations(classification) WHERE classification IS NOT NULL;
+    `,
   },
 ];
 

@@ -7,6 +7,7 @@ import { z } from "zod";
  * Uses camelCase for idiomatic TypeScript.
  * embedding is Float32Array (converted from Buffer during mapping).
  */
+type ObservationClassification = 'discovery' | 'problem' | 'solution' | 'noise';
 interface Observation {
   rowid: number;
   id: string;
@@ -18,6 +19,8 @@ interface Observation {
   embedding: Float32Array | null;
   embeddingModel: string | null;
   embeddingVersion: string | null;
+  classification: ObservationClassification | null;
+  classifiedAt: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
@@ -94,6 +97,7 @@ declare class ObservationRepository {
     offset?: number;
     sessionId?: string;
     since?: string;
+    includeUnclassified?: boolean;
   }): Observation[];
   /**
    * Updates an observation's content, embedding fields, or both.
@@ -111,6 +115,26 @@ declare class ObservationRepository {
    * Returns true if the observation was found and restored.
    */
   restore(id: string): boolean;
+  /**
+   * Updates the classification of an observation.
+   * Sets classified_at to current time. Returns true if found and updated.
+   */
+  updateClassification(id: string, classification: ObservationClassification): boolean;
+  /**
+   * Creates an observation with an initial classification (bypasses classifier).
+   * Used for explicit user saves that should be immediately visible.
+   */
+  createClassified(input: ObservationInsert, classification: ObservationClassification): Observation;
+  /**
+   * Fetches unclassified observations for the background classifier.
+   * Returns observations ordered by created_at ASC (oldest first).
+   */
+  listUnclassified(limit?: number): Observation[];
+  /**
+   * Fetches observations surrounding a given timestamp for classification context.
+   * Returns observations regardless of classification status.
+   */
+  listContext(aroundTime: string, windowSize?: number): Observation[];
   /**
    * Counts non-deleted observations for this project.
    */
@@ -139,4 +163,4 @@ declare class ObservationRepository {
 }
 //#endregion
 export { SearchResult as a, ObservationInsert as i, DatabaseConfig as n, Session as o, Observation as r, ObservationRepository as t };
-//# sourceMappingURL=observations-RiHueE9T.d.mts.map
+//# sourceMappingURL=observations-B62-p18e.d.mts.map

@@ -230,7 +230,7 @@ describe('processPostToolUse', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(1);
     expect(observations[0].source).toBe('hook:Write');
     expect(observations[0].content).toContain('[Write] Created /src/app.ts');
@@ -253,7 +253,7 @@ describe('processPostToolUse', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(1);
     expect(observations[0].source).toBe('hook:Edit');
     expect(observations[0].content).toContain('[Edit] Modified /src/utils.ts');
@@ -271,7 +271,7 @@ describe('processPostToolUse', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(0);
   });
 
@@ -287,7 +287,7 @@ describe('processPostToolUse', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(0);
   });
 
@@ -301,7 +301,7 @@ describe('processPostToolUse', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(0);
   });
 
@@ -318,7 +318,7 @@ describe('processPostToolUse', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(1);
     expect(observations[0].source).toBe('hook:Bash');
   });
@@ -335,7 +335,7 @@ describe('processPostToolUse', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(1);
     expect(observations[0].source).toBe('hook:mcp__github__create_issue');
   });

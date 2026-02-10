@@ -47,7 +47,7 @@ describe('Persistence: Cross-session data survival', () => {
     ldb = openDatabase(config);
     const repo2 = new ObservationRepository(ldb.db, PROJECT_HASH);
 
-    const all = repo2.list({ limit: 10 });
+    const all = repo2.list({ limit: 10, includeUnclassified: true });
     expect(all.length).toBe(5);
 
     // Verify each observation matches what was written
@@ -71,18 +71,18 @@ describe('Persistence: Cross-session data survival', () => {
     ldb = openDatabase(config);
     const repo1 = new ObservationRepository(ldb.db, PROJECT_HASH);
 
-    repo1.create({
+    repo1.createClassified({
       content: 'The quantum entanglement experiment yielded surprising results',
       source: 'test',
-    });
-    repo1.create({
+    }, 'discovery');
+    repo1.createClassified({
       content: 'Classical mechanics provides a good approximation at low speeds',
       source: 'test',
-    });
-    repo1.create({
+    }, 'discovery');
+    repo1.createClassified({
       content: 'Quantum computing uses superposition for parallel computation',
       source: 'test',
-    });
+    }, 'discovery');
 
     ldb.close();
     ldb = null;
@@ -129,12 +129,12 @@ describe('Project Isolation: Cross-project data separation', () => {
 
     // Write to project A
     const repoA = new ObservationRepository(ldb.db, PROJECT_A);
-    repoA.create({ content: 'Project A secret data', source: 'project-a' });
-    repoA.create({ content: 'More project A information', source: 'project-a' });
+    repoA.createClassified({ content: 'Project A secret data', source: 'project-a' }, 'discovery');
+    repoA.createClassified({ content: 'More project A information', source: 'project-a' }, 'discovery');
 
     // Query from project B -- zero results
     const repoB = new ObservationRepository(ldb.db, PROJECT_B);
-    const bObservations = repoB.list({ limit: 100 });
+    const bObservations = repoB.list({ limit: 100, includeUnclassified: true });
     expect(bObservations.length).toBe(0);
 
     // Search from project B -- zero results
@@ -159,22 +159,22 @@ describe('Project Isolation: Cross-project data separation', () => {
 
     // Write to project A
     const repoA = new ObservationRepository(ldb.db, PROJECT_A);
-    repoA.create({ content: 'Alpha project data', source: 'project-a' });
-    repoA.create({ content: 'Alpha additional notes', source: 'project-a' });
+    repoA.createClassified({ content: 'Alpha project data', source: 'project-a' }, 'discovery');
+    repoA.createClassified({ content: 'Alpha additional notes', source: 'project-a' }, 'discovery');
 
     // Write to project B
     const repoB = new ObservationRepository(ldb.db, PROJECT_B);
-    repoB.create({ content: 'Beta project data', source: 'project-b' });
+    repoB.createClassified({ content: 'Beta project data', source: 'project-b' }, 'discovery');
 
     // Project A sees only its data
-    const aList = repoA.list({ limit: 100 });
+    const aList = repoA.list({ limit: 100, includeUnclassified: true });
     expect(aList.length).toBe(2);
     for (const obs of aList) {
       expect(obs.projectHash).toBe(PROJECT_A);
     }
 
     // Project B sees only its data
-    const bList = repoB.list({ limit: 100 });
+    const bList = repoB.list({ limit: 100, includeUnclassified: true });
     expect(bList.length).toBe(1);
     expect(bList[0].projectHash).toBe(PROJECT_B);
 
@@ -195,8 +195,8 @@ describe('Project Isolation: Cross-project data separation', () => {
     const repoA1 = new ObservationRepository(ldb.db, PROJECT_A);
     const repoB1 = new ObservationRepository(ldb.db, PROJECT_B);
 
-    repoA1.create({ content: 'Alpha persistent secret', source: 'a' });
-    repoB1.create({ content: 'Beta persistent secret', source: 'b' });
+    repoA1.createClassified({ content: 'Alpha persistent secret', source: 'a' }, 'discovery');
+    repoB1.createClassified({ content: 'Beta persistent secret', source: 'b' }, 'discovery');
 
     ldb.close();
     ldb = null;
@@ -206,8 +206,8 @@ describe('Project Isolation: Cross-project data separation', () => {
     const repoA2 = new ObservationRepository(ldb.db, PROJECT_A);
     const repoB2 = new ObservationRepository(ldb.db, PROJECT_B);
 
-    const aList = repoA2.list({ limit: 100 });
-    const bList = repoB2.list({ limit: 100 });
+    const aList = repoA2.list({ limit: 100, includeUnclassified: true });
+    const bList = repoB2.list({ limit: 100, includeUnclassified: true });
 
     expect(aList.length).toBe(1);
     expect(aList[0].content).toBe('Alpha persistent secret');

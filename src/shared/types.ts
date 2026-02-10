@@ -20,6 +20,8 @@ export const ObservationRowSchema = z.object({
   embedding: z.instanceof(Buffer).nullable(),
   embedding_model: z.string().nullable(),
   embedding_version: z.string().nullable(),
+  classification: z.string().nullable(),
+  classified_at: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
   deleted_at: z.string().nullable(),
@@ -36,6 +38,8 @@ export type ObservationRow = z.infer<typeof ObservationRowSchema>;
  * Uses camelCase for idiomatic TypeScript.
  * embedding is Float32Array (converted from Buffer during mapping).
  */
+export type ObservationClassification = 'discovery' | 'problem' | 'solution' | 'noise';
+
 export interface Observation {
   rowid: number;
   id: string;
@@ -47,6 +51,8 @@ export interface Observation {
   embedding: Float32Array | null;
   embeddingModel: string | null;
   embeddingVersion: string | null;
+  classification: ObservationClassification | null;
+  classifiedAt: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
@@ -130,6 +136,8 @@ export function rowToObservation(row: ObservationRow): Observation {
       : null,
     embeddingModel: row.embedding_model,
     embeddingVersion: row.embedding_version,
+    classification: row.classification as ObservationClassification | null,
+    classifiedAt: row.classified_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at,

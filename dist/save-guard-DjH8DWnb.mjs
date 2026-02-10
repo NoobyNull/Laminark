@@ -72,6 +72,7 @@ function debugTimed(category, message, fn) {
 * Migration 009: Shift decisions table for topic shift decision logging.
 * Migration 010: Project metadata table for project selector UI.
 * Migration 011: Add project_hash to graph tables and backfill from observations.
+* Migration 012: Add classification and classified_at columns for LLM-based observation classification.
 */
 const MIGRATIONS = [
 	{
@@ -320,6 +321,16 @@ const MIGRATIONS = [
 			if (tableExists("graph_nodes")) db.exec("CREATE INDEX IF NOT EXISTS idx_graph_nodes_project ON graph_nodes(project_hash)");
 			if (tableExists("graph_edges")) db.exec("CREATE INDEX IF NOT EXISTS idx_graph_edges_project ON graph_edges(project_hash)");
 		}
+	},
+	{
+		version: 12,
+		name: "add_observation_classification",
+		up: `
+      ALTER TABLE observations ADD COLUMN classification TEXT;
+      ALTER TABLE observations ADD COLUMN classified_at TEXT;
+      CREATE INDEX idx_observations_classification
+        ON observations(classification) WHERE classification IS NOT NULL;
+    `
 	}
 ];
 /**
@@ -430,6 +441,8 @@ const ObservationRowSchema = z.object({
 	embedding: z.instanceof(Buffer).nullable(),
 	embedding_model: z.string().nullable(),
 	embedding_version: z.string().nullable(),
+	classification: z.string().nullable(),
+	classified_at: z.string().nullable(),
 	created_at: z.string(),
 	updated_at: z.string(),
 	deleted_at: z.string().nullable()
@@ -463,6 +476,8 @@ function rowToObservation(row) {
 		embedding: row.embedding ? new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.byteLength / 4) : null,
 		embeddingModel: row.embedding_model,
 		embeddingVersion: row.embedding_version,
+		classification: row.classification,
+		classifiedAt: row.classified_at,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 		deletedAt: row.deleted_at
@@ -555,8 +570,10 @@ var ObservationRepository = class {
 		debug("obs", "Listing observations", { ...options });
 		const limit = options?.limit ?? 50;
 		const offset = options?.offset ?? 0;
+		const includeUnclassified = options?.includeUnclassified ?? false;
 		let sql = "SELECT * FROM observations WHERE project_hash = ? AND deleted_at IS NULL";
 		const params = [this.projectHash];
+		if (!includeUnclassified) sql += " AND classification IS NOT NULL AND classification != 'noise'";
 		if (options?.sessionId) {
 			sql += " AND session_id = ?";
 			params.push(options.sessionId);
@@ -623,6 +640,67 @@ var ObservationRepository = class {
 		return this.stmtRestore.run(id, this.projectHash).changes > 0;
 	}
 	/**
+	* Updates the classification of an observation.
+	* Sets classified_at to current time. Returns true if found and updated.
+	*/
+	updateClassification(id, classification) {
+		debug("obs", "Updating classification", {
+			id,
+			classification
+		});
+		return this.db.prepare(`
+      UPDATE observations
+      SET classification = ?, classified_at = datetime('now'), updated_at = datetime('now')
+      WHERE id = ? AND project_hash = ? AND deleted_at IS NULL
+    `).run(classification, id, this.projectHash).changes > 0;
+	}
+	/**
+	* Creates an observation with an initial classification (bypasses classifier).
+	* Used for explicit user saves that should be immediately visible.
+	*/
+	createClassified(input, classification) {
+		const obs = this.create(input);
+		this.updateClassification(obs.id, classification);
+		return this.getById(obs.id);
+	}
+	/**
+	* Fetches unclassified observations for the background classifier.
+	* Returns observations ordered by created_at ASC (oldest first).
+	*/
+	listUnclassified(limit = 20) {
+		return this.db.prepare(`
+      SELECT * FROM observations
+      WHERE project_hash = ? AND classification IS NULL AND deleted_at IS NULL
+      ORDER BY created_at ASC
+      LIMIT ?
+    `).all(this.projectHash, limit).map(rowToObservation);
+	}
+	/**
+	* Fetches observations surrounding a given timestamp for classification context.
+	* Returns observations regardless of classification status.
+	*/
+	listContext(aroundTime, windowSize = 5) {
+		const beforeRows = this.db.prepare(`
+      SELECT * FROM observations
+      WHERE project_hash = ? AND deleted_at IS NULL AND created_at <= ?
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT ?
+    `).all(this.projectHash, aroundTime, windowSize + 1);
+		const afterRows = this.db.prepare(`
+      SELECT * FROM observations
+      WHERE project_hash = ? AND deleted_at IS NULL AND created_at > ?
+      ORDER BY created_at ASC, rowid ASC
+      LIMIT ?
+    `).all(this.projectHash, aroundTime, windowSize);
+		const allRows = [...beforeRows.reverse(), ...afterRows];
+		const seen = /* @__PURE__ */ new Set();
+		return allRows.filter((r) => {
+			if (seen.has(r.id)) return false;
+			seen.add(r.id);
+			return true;
+		}).map(rowToObservation);
+	}
+	/**
 	* Counts non-deleted observations for this project.
 	*/
 	count() {
@@ -666,6 +744,7 @@ var ObservationRepository = class {
 		});
 		let sql = "SELECT * FROM observations WHERE project_hash = ? AND title LIKE ?";
 		if (!includePurged) sql += " AND deleted_at IS NULL";
+		sql += " AND classification IS NOT NULL AND classification != 'noise'";
 		sql += " ORDER BY created_at DESC, rowid DESC LIMIT ?";
 		const rows = this.db.prepare(sql).all(this.projectHash, `%${title}%`, limit);
 		debug("obs", "Title search completed", { count: rows.length });
@@ -789,5 +868,121 @@ var SessionRepository = class {
 };
 
 //#endregion
-export { MIGRATIONS as a, debugTimed as c, openDatabase as i, ObservationRepository as n, runMigrations as o, rowToObservation as r, debug as s, SessionRepository as t };
-//# sourceMappingURL=sessions-D3yr9tXZ.mjs.map
+//#region src/shared/similarity.ts
+/**
+* Text similarity utilities shared across modules.
+*/
+/**
+* Computes Jaccard similarity between two texts based on tokenized words.
+* Words are lowercased and split on whitespace/punctuation.
+*/
+function jaccardSimilarity(textA, textB) {
+	const tokenize = (t) => new Set(t.toLowerCase().split(/[\s,.!?;:'"()\[\]{}<>\/\\|@#$%^&*+=~`]+/).filter((w) => w.length > 0));
+	const setA = tokenize(textA);
+	const setB = tokenize(textB);
+	if (setA.size === 0 && setB.size === 0) return 1;
+	if (setA.size === 0 || setB.size === 0) return 0;
+	let intersection = 0;
+	for (const w of setA) if (setB.has(w)) intersection++;
+	const union = setA.size + setB.size - intersection;
+	return union === 0 ? 0 : intersection / union;
+}
+
+//#endregion
+//#region src/hooks/save-guard.ts
+var SaveGuard = class {
+	obsRepo;
+	worker;
+	embeddingStore;
+	duplicateThreshold;
+	vectorDistanceThreshold;
+	recentWindow;
+	/**
+	* Construct from db + projectHash (creates internal ObservationRepository),
+	* or from an existing ObservationRepository.
+	*/
+	constructor(dbOrRepo, projectHashOrOpts, opts) {
+		if (dbOrRepo instanceof ObservationRepository) {
+			this.obsRepo = dbOrRepo;
+			const resolvedOpts = projectHashOrOpts ?? {};
+			this.worker = resolvedOpts.worker ?? null;
+			this.embeddingStore = resolvedOpts.embeddingStore ?? null;
+			this.duplicateThreshold = resolvedOpts.duplicateThreshold ?? .85;
+			this.vectorDistanceThreshold = resolvedOpts.vectorDistanceThreshold ?? .08;
+			this.recentWindow = resolvedOpts.recentWindow ?? 20;
+		} else {
+			this.obsRepo = new ObservationRepository(dbOrRepo, projectHashOrOpts);
+			this.worker = opts?.worker ?? null;
+			this.embeddingStore = opts?.embeddingStore ?? null;
+			this.duplicateThreshold = opts?.duplicateThreshold ?? .85;
+			this.vectorDistanceThreshold = opts?.vectorDistanceThreshold ?? .08;
+			this.recentWindow = opts?.recentWindow ?? 20;
+		}
+	}
+	/**
+	* Synchronous evaluation for the hook path (text-only, no embeddings).
+	* Only checks for duplicates — relevance is handled by the background classifier.
+	*/
+	evaluateSync(content, _source) {
+		const dupResult = this.checkTextDuplicates(content);
+		if (dupResult) return dupResult;
+		return {
+			save: true,
+			reason: "ok"
+		};
+	}
+	/**
+	* Async evaluation for the MCP path (embeddings + text fallback).
+	* Only checks for duplicates — relevance is handled by the background classifier.
+	*/
+	async evaluate(content, _source) {
+		if (this.worker?.isReady() && this.embeddingStore) {
+			const embedding = await this.worker.embed(content);
+			if (embedding) {
+				const results = this.embeddingStore.search(embedding, 5);
+				for (const result of results) if (result.distance < this.vectorDistanceThreshold) {
+					debug("save-guard", "Vector duplicate detected", {
+						distance: result.distance,
+						duplicateOf: result.observationId
+					});
+					return {
+						save: false,
+						reason: "duplicate",
+						duplicateOf: result.observationId
+					};
+				}
+			}
+		}
+		const dupResult = this.checkTextDuplicates(content);
+		if (dupResult) return dupResult;
+		return {
+			save: true,
+			reason: "ok"
+		};
+	}
+	checkTextDuplicates(content) {
+		const recent = this.obsRepo.list({
+			limit: this.recentWindow,
+			includeUnclassified: true
+		});
+		for (const obs of recent) {
+			const sim = jaccardSimilarity(content, obs.content);
+			if (sim >= this.duplicateThreshold) {
+				debug("save-guard", "Text duplicate detected", {
+					similarity: sim,
+					duplicateOf: obs.id
+				});
+				return {
+					save: false,
+					reason: "duplicate",
+					duplicateOf: obs.id
+				};
+			}
+		}
+		return null;
+	}
+};
+
+//#endregion
+export { rowToObservation as a, runMigrations as c, ObservationRepository as i, debug as l, jaccardSimilarity as n, openDatabase as o, SessionRepository as r, MIGRATIONS as s, SaveGuard as t, debugTimed as u };
+//# sourceMappingURL=save-guard-DjH8DWnb.mjs.map

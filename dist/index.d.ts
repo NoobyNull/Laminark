@@ -1,4 +1,4 @@
-import { a as SearchResult, i as ObservationInsert, n as DatabaseConfig, o as Session, r as Observation, t as ObservationRepository } from "./observations-RiHueE9T.mjs";
+import { a as SearchResult, i as ObservationInsert, n as DatabaseConfig, o as Session, r as Observation, t as ObservationRepository } from "./observations-B62-p18e.mjs";
 import Database from "better-sqlite3";
 
 //#region src/storage/database.d.ts
@@ -52,6 +52,7 @@ interface Migration {
  * Migration 009: Shift decisions table for topic shift decision logging.
  * Migration 010: Project metadata table for project selector UI.
  * Migration 011: Add project_hash to graph tables and backfill from observations.
+ * Migration 012: Add classification and classified_at columns for LLM-based observation classification.
  */
 declare const MIGRATIONS: Migration[];
 /**

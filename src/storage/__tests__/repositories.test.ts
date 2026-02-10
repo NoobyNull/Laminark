@@ -31,9 +31,9 @@ describe('ObservationRepository', () => {
   it('creates observations and lists them', () => {
     const repo = new ObservationRepository(ldb.db, 'aaa');
 
-    repo.create({ content: 'First observation about authentication' });
-    repo.create({ content: 'Second observation about databases' });
-    repo.create({ content: 'Third observation about testing patterns' });
+    repo.createClassified({ content: 'First observation about authentication' }, 'discovery');
+    repo.createClassified({ content: 'Second observation about databases' }, 'discovery');
+    repo.createClassified({ content: 'Third observation about testing patterns' }, 'discovery');
 
     const all = repo.list();
     expect(all).toHaveLength(3);
@@ -54,9 +54,9 @@ describe('ObservationRepository', () => {
     const repoA = new ObservationRepository(ldb.db, 'aaa');
     const repoB = new ObservationRepository(ldb.db, 'bbb');
 
-    repoA.create({ content: 'Project A observation 1' });
-    repoA.create({ content: 'Project A observation 2' });
-    repoA.create({ content: 'Project A observation 3' });
+    repoA.createClassified({ content: 'Project A observation 1' }, 'discovery');
+    repoA.createClassified({ content: 'Project A observation 2' }, 'discovery');
+    repoA.createClassified({ content: 'Project A observation 3' }, 'discovery');
 
     // Project B should see nothing
     const listB = repoB.list();
@@ -83,9 +83,9 @@ describe('ObservationRepository', () => {
   it('softDelete excludes observation from list and count', () => {
     const repo = new ObservationRepository(ldb.db, 'aaa');
 
-    const obs1 = repo.create({ content: 'Keep me' });
-    const obs2 = repo.create({ content: 'Delete me' });
-    repo.create({ content: 'Keep me too' });
+    const obs1 = repo.createClassified({ content: 'Keep me' }, 'discovery');
+    const obs2 = repo.createClassified({ content: 'Delete me' }, 'discovery');
+    repo.createClassified({ content: 'Keep me too' }, 'discovery');
 
     expect(repo.list()).toHaveLength(3);
     expect(repo.count()).toBe(3);
@@ -108,9 +108,9 @@ describe('ObservationRepository', () => {
   it('restore brings back a soft-deleted observation', () => {
     const repo = new ObservationRepository(ldb.db, 'aaa');
 
-    const obs = repo.create({ content: 'Deletable and restorable' });
-    repo.create({ content: 'Filler 1' });
-    repo.create({ content: 'Filler 2' });
+    const obs = repo.createClassified({ content: 'Deletable and restorable' }, 'discovery');
+    repo.createClassified({ content: 'Filler 1' }, 'discovery');
+    repo.createClassified({ content: 'Filler 2' }, 'discovery');
 
     repo.softDelete(obs.id);
     expect(repo.list()).toHaveLength(2);
@@ -192,9 +192,9 @@ describe('ObservationRepository', () => {
   it('list supports sessionId filter', () => {
     const repo = new ObservationRepository(ldb.db, 'aaa');
 
-    repo.create({ content: 'Session A obs', sessionId: 'sess-a' });
-    repo.create({ content: 'Session B obs', sessionId: 'sess-b' });
-    repo.create({ content: 'No session obs' });
+    repo.createClassified({ content: 'Session A obs', sessionId: 'sess-a' }, 'discovery');
+    repo.createClassified({ content: 'Session B obs', sessionId: 'sess-b' }, 'discovery');
+    repo.createClassified({ content: 'No session obs' }, 'discovery');
 
     const sessionAObs = repo.list({ sessionId: 'sess-a' });
     expect(sessionAObs).toHaveLength(1);
@@ -204,9 +204,9 @@ describe('ObservationRepository', () => {
   it('list returns results ordered by created_at DESC', () => {
     const repo = new ObservationRepository(ldb.db, 'aaa');
 
-    const obs1 = repo.create({ content: 'First' });
-    const obs2 = repo.create({ content: 'Second' });
-    const obs3 = repo.create({ content: 'Third' });
+    const obs1 = repo.createClassified({ content: 'First' }, 'discovery');
+    const obs2 = repo.createClassified({ content: 'Second' }, 'discovery');
+    const obs3 = repo.createClassified({ content: 'Third' }, 'discovery');
 
     const all = repo.list();
     // Most recent first
@@ -218,7 +218,7 @@ describe('ObservationRepository', () => {
     const repo = new ObservationRepository(ldb.db, 'aaa');
 
     for (let i = 0; i < 10; i++) {
-      repo.create({ content: `Observation ${i}` });
+      repo.createClassified({ content: `Observation ${i}` }, 'discovery');
     }
 
     const page1 = repo.list({ limit: 3, offset: 0 });

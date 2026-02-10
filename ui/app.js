@@ -496,6 +496,7 @@ function toDatetimeLocalString(date) {
 
 function initDetailPanel() {
   const closeBtn = document.getElementById('detail-close');
+  const focusBtn = document.getElementById('detail-focus');
 
   if (closeBtn) {
     closeBtn.addEventListener('click', function () {
@@ -504,6 +505,16 @@ function initDetailPanel() {
       } else {
         var panel = document.getElementById('detail-panel');
         if (panel) panel.classList.add('hidden');
+      }
+    });
+  }
+
+  if (focusBtn) {
+    focusBtn.addEventListener('click', function () {
+      var nodeId = focusBtn.getAttribute('data-node-id');
+      var nodeLabel = focusBtn.getAttribute('data-node-label');
+      if (nodeId && window.laminarkGraph && window.laminarkGraph.enterFocusMode) {
+        window.laminarkGraph.enterFocusMode(nodeId, nodeLabel || nodeId);
       }
     });
   }
@@ -517,6 +528,13 @@ function showNodeDetails(nodeData) {
   if (!panel || !title || !body) return;
 
   title.textContent = nodeData.entity.label;
+
+  // Update focus button with current node info
+  var focusBtn = document.getElementById('detail-focus');
+  if (focusBtn) {
+    focusBtn.setAttribute('data-node-id', nodeData.entity.id);
+    focusBtn.setAttribute('data-node-label', nodeData.entity.label);
+  }
 
   // Build detail panel content using DOM elements for safety
   body.innerHTML = '';

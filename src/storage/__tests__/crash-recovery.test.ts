@@ -93,7 +93,7 @@ describe('Crash Recovery: WAL transaction atomicity', { timeout: 15000 }, () => 
     expect(count).toBe(COMMITTED);
 
     // Verify none of the uncommitted content exists
-    const allObs = repo.list({ limit: 100 });
+    const allObs = repo.list({ limit: 100, includeUnclassified: true });
     for (const obs of allObs) {
       expect(obs.content).not.toContain('uncommitted');
     }

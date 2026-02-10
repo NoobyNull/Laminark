@@ -89,7 +89,7 @@ describe('Concurrency: Multi-process write safety', { timeout: 30000 }, () => {
     expect(count).toBe(300);
 
     // Verify no duplicate IDs
-    const allObs = repo.list({ limit: 300 });
+    const allObs = repo.list({ limit: 300, includeUnclassified: true });
     const ids = allObs.map((o) => o.id);
     const uniqueIds = new Set(ids);
     expect(uniqueIds.size).toBe(300);
@@ -118,7 +118,7 @@ describe('Concurrency: Multi-process write safety', { timeout: 30000 }, () => {
     const maxReads = 20;
 
     for (let i = 0; i < maxReads; i++) {
-      const observations = readerRepo.list({ limit: 300 });
+      const observations = readerRepo.list({ limit: 300, includeUnclassified: true });
       for (const obs of observations) {
         // Every observation must have valid content (no partial/corrupted data)
         expect(obs.content).toBeTruthy();

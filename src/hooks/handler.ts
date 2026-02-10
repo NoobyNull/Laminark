@@ -6,6 +6,7 @@ import { extractObservation } from './capture.js';
 import { handleSessionStart, handleSessionEnd, handleStop } from './session-lifecycle.js';
 import { redactSensitiveContent, isExcludedFile } from './privacy-filter.js';
 import { shouldAdmit } from './admission-filter.js';
+import { SaveGuard } from './save-guard.js';
 import { debug } from '../shared/debug.js';
 
 /**
@@ -100,6 +101,16 @@ export function processPostToolUseFiltered(
   // 6. Admission filter: reject noise
   if (!shouldAdmit(toolName, redacted)) {
     debug('hook', 'Observation rejected by admission filter', { tool: toolName });
+    return;
+  }
+
+  // 6.5. Save guard: duplicate detection
+  const guard = new SaveGuard(obsRepo);
+  const decision = guard.evaluateSync(redacted, 'hook:' + toolName);
+  if (!decision.save) {
+    debug('hook', 'Observation rejected by save guard', {
+      tool: toolName, reason: decision.reason, duplicateOf: decision.duplicateOf,
+    });
     return;
   }
 

@@ -48,18 +48,18 @@ afterEach(() => {
 
 describe('SC-1: keyword search', () => {
   it('returns BM25-ranked results for keyword query', () => {
-    repo.create({
+    repo.createClassified({
       content: 'TypeScript compiler options for strict mode',
       title: 'TypeScript compiler',
-    });
-    repo.create({
+    }, 'discovery');
+    repo.createClassified({
       content: 'Python web framework with Django and Flask',
       title: 'Python web',
-    });
-    repo.create({
+    }, 'discovery');
+    repo.createClassified({
       content: 'TypeScript type inference and generics patterns',
       title: 'TypeScript types',
-    });
+    }, 'discovery');
 
     const results = search.searchKeyword('TypeScript');
 
@@ -73,10 +73,10 @@ describe('SC-1: keyword search', () => {
   });
 
   it('searches both title and content', () => {
-    repo.create({
+    repo.createClassified({
       content: 'We decided to use JWT for session management',
       title: 'Auth decisions',
-    });
+    }, 'discovery');
 
     // Title match
     const titleResults = search.searchKeyword('Auth');
@@ -88,10 +88,10 @@ describe('SC-1: keyword search', () => {
   });
 
   it('returns empty array for no matches', () => {
-    repo.create({
+    repo.createClassified({
       content: 'Something about databases',
       title: 'Database notes',
-    });
+    }, 'discovery');
 
     const results = search.searchKeyword('kubernetes');
     expect(results).toHaveLength(0);
@@ -99,10 +99,10 @@ describe('SC-1: keyword search', () => {
 
   it('respects limit parameter', () => {
     for (let i = 0; i < 5; i++) {
-      repo.create({
+      repo.createClassified({
         content: `Test observation about search quality ${i}`,
         title: `Test ${i}`,
-      });
+      }, 'discovery');
     }
 
     const results = search.searchKeyword('search', { limit: 2 });
@@ -169,10 +169,10 @@ describe('SC-2: save_memory', () => {
 
 describe('SC-3: purge and restore', () => {
   it('purge soft-deletes: memory disappears from normal search', () => {
-    const obs = repo.create({
+    const obs = repo.createClassified({
       content: 'unique_test_word_alpha in this observation',
       title: 'Unique test',
-    });
+    }, 'discovery');
 
     // Before purge: found in search
     const before = search.searchKeyword('unique_test_word_alpha');
@@ -200,10 +200,10 @@ describe('SC-3: purge and restore', () => {
   });
 
   it('restore un-deletes: memory reappears in search', () => {
-    const obs = repo.create({
+    const obs = repo.createClassified({
       content: 'unique_restore_word_beta in this text',
       title: 'Restore test',
-    });
+    }, 'discovery');
     repo.softDelete(obs.id);
 
     // Confirm gone from search
@@ -225,10 +225,10 @@ describe('SC-3: purge and restore', () => {
   });
 
   it('include_purged finds soft-deleted items', () => {
-    const obs = repo.create({
+    const obs = repo.createClassified({
       content: 'Item to be soft-deleted and listed',
       title: 'Listed purge',
-    });
+    }, 'discovery');
     repo.softDelete(obs.id);
 
     // Normal list excludes it
@@ -273,10 +273,10 @@ describe('SC-4: progressive disclosure and token budget', () => {
     // Use full-view format (~400 chars per item = ~100 tokens each) to guarantee budget overflow.
     const longContent = 'budget '.repeat(60);
     for (let i = 0; i < 50; i++) {
-      repo.create({
+      repo.createClassified({
         content: `${longContent} observation ${i}`,
         title: `Budget item ${i} - extended title for token budget testing`,
-      });
+      }, 'discovery');
     }
 
     const results = search.searchKeyword('budget', { limit: 50 });
@@ -298,10 +298,10 @@ describe('SC-4: progressive disclosure and token budget', () => {
   it('large result sets report truncation', () => {
     const longContent = 'truncation '.repeat(50);
     for (let i = 0; i < 30; i++) {
-      repo.create({
+      repo.createClassified({
         content: `${longContent} item ${i}`,
         title: `Truncation test ${i}`,
-      });
+      }, 'discovery');
     }
 
     const results = search.searchKeyword('truncation', { limit: 30 });

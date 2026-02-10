@@ -48,13 +48,23 @@
     </div>
 
     <div id="graph-view" class="view-container active">
+      <div id="graph-breadcrumbs" class="graph-breadcrumbs hidden">
+        <button class="breadcrumb-item" data-action="full">Full Graph</button>
+      </div>
       <div id="cy"></div>
       <div id="graph-stats" class="graph-stats">0 nodes, 0 edges</div>
-      <button id="fit-btn" class="fit-btn" title="Fit to view" onclick="window.laminarkGraph && window.laminarkGraph.fitToView()">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M2 2h4v1.5H3.5V6H2V2zm8 0h4v4h-1.5V3.5H10V2zM2 10h1.5v2.5H6V14H2v-4zm10.5 2.5V10H14v4h-4v-1.5h2.5z"/>
-        </svg>
-      </button>
+      <div class="graph-toolbar">
+        <div class="layout-selector">
+          <button class="layout-btn active" data-layout="clustered" title="Force-directed layout">Clustered</button>
+          <button class="layout-btn" data-layout="hierarchical" title="Top-down tree layout">Hierarchical</button>
+          <button class="layout-btn" data-layout="concentric" title="Rings by entity type">Concentric</button>
+        </div>
+        <button id="fit-btn" class="fit-btn" title="Fit to view" onclick="window.laminarkGraph && window.laminarkGraph.fitToView()">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M2 2h4v1.5H3.5V6H2V2zm8 0h4v4h-1.5V3.5H10V2zM2 10h1.5v2.5H6V14H2v-4zm10.5 2.5V10H14v4h-4v-1.5h2.5z"/>
+          </svg>
+        </button>
+      </div>
       <div class="graph-legend" id="graph-legend">
         <div class="graph-legend-title">Entity Types</div>
         <div class="graph-legend-item"><span class="legend-color" style="background:#58a6ff; border-radius:3px;"></span> Project</div>
@@ -88,7 +98,14 @@
   <aside id="detail-panel" class="hidden">
     <div class="panel-header">
       <h3 id="detail-title">Node Details</h3>
-      <button id="detail-close" aria-label="Close detail panel">&times;</button>
+      <div class="panel-header-actions">
+        <button id="detail-focus" class="panel-action-btn" aria-label="Focus on this node" title="Focus on this node">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 3a5 5 0 100 10A5 5 0 008 3zm0 1.5a3.5 3.5 0 110 7 3.5 3.5 0 010-7zM8 6a2 2 0 100 4 2 2 0 000-4z"/>
+          </svg>
+        </button>
+        <button id="detail-close" aria-label="Close detail panel">&times;</button>
+      </div>
     </div>
     <div id="detail-body">
       <p class="empty-state">Click a node to view details</p>

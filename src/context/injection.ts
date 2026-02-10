@@ -135,6 +135,7 @@ export function getHighValueObservations(
     .prepare(
       `SELECT * FROM observations
        WHERE project_hash = ? AND deleted_at IS NULL
+         AND classification IS NOT NULL AND classification != 'noise'
        ORDER BY
          CASE
            WHEN source = 'mcp:save_memory' THEN 0

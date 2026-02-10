@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-CtH17VYQ.mjs";
-import { a as MIGRATIONS, c as debugTimed, i as openDatabase, n as ObservationRepository, o as runMigrations, r as rowToObservation, s as debug, t as SessionRepository } from "./sessions-D3yr9tXZ.mjs";
+import { a as rowToObservation, c as runMigrations, i as ObservationRepository, l as debug, n as jaccardSimilarity, o as openDatabase, r as SessionRepository, s as MIGRATIONS, t as SaveGuard, u as debugTimed } from "./save-guard-DjH8DWnb.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -54,6 +54,7 @@ var SearchEngine = class {
       WHERE observations_fts MATCH ?
         AND o.project_hash = ?
         AND o.deleted_at IS NULL
+        AND o.classification IS NOT NULL AND o.classification != 'noise'
     `;
 		const params = [sanitized, this.projectHash];
 		if (options?.sessionId) {
@@ -97,6 +98,7 @@ var SearchEngine = class {
       WHERE observations_fts MATCH ?
         AND o.project_hash = ?
         AND o.deleted_at IS NULL
+        AND o.classification IS NOT NULL AND o.classification != 'noise'
       ORDER BY rank
       LIMIT ?
     `;
@@ -876,7 +878,7 @@ function generateTitle(content) {
 * save_memory persists user-provided text as a new observation with an optional title.
 * If title is omitted, one is auto-generated from the text content.
 */
-function registerSaveMemory(server, db, projectHash, notificationStore = null) {
+function registerSaveMemory(server, db, projectHash, notificationStore = null, worker = null, embeddingStore = null) {
 	server.registerTool("save_memory", {
 		title: "Save Memory",
 		description: "Save a new memory observation. Provide text content and an optional title. If title is omitted, one is auto-generated from the text.",
@@ -888,12 +890,26 @@ function registerSaveMemory(server, db, projectHash, notificationStore = null) {
 	}, async (args) => {
 		try {
 			const repo = new ObservationRepository(db, projectHash);
+			const decision = await new SaveGuard(repo, {
+				worker,
+				embeddingStore
+			}).evaluate(args.text, args.source);
+			if (!decision.save) {
+				debug("mcp", "save_memory: rejected by save guard", {
+					reason: decision.reason,
+					duplicateOf: decision.duplicateOf
+				});
+				return { content: [{
+					type: "text",
+					text: `Memory not saved: ${decision.reason}` + (decision.duplicateOf ? ` (similar to existing observation ${decision.duplicateOf})` : "")
+				}] };
+			}
 			const resolvedTitle = args.title ?? generateTitle(args.text);
-			const obs = repo.create({
+			const obs = repo.createClassified({
 				content: args.text,
 				title: resolvedTitle,
 				source: args.source
-			});
+			}, "discovery");
 			debug("mcp", "save_memory: saved", {
 				id: obs.id,
 				title: resolvedTitle
@@ -3591,21 +3607,6 @@ function cosineSimilarity(a, b) {
 	return dot / denom;
 }
 /**
-* Computes Jaccard similarity between two texts based on tokenized words.
-* Words are lowercased and split on whitespace/punctuation.
-*/
-function jaccardSimilarity(textA, textB) {
-	const tokenize = (t) => new Set(t.toLowerCase().split(/[\s,.!?;:'"()\[\]{}<>\/\\|@#$%^&*+=~`]+/).filter((w) => w.length > 0));
-	const setA = tokenize(textA);
-	const setB = tokenize(textB);
-	if (setA.size === 0 && setB.size === 0) return 1;
-	if (setA.size === 0 || setB.size === 0) return 0;
-	let intersection = 0;
-	for (const w of setA) if (setB.has(w)) intersection++;
-	const union = setA.size + setB.size - intersection;
-	return union === 0 ? 0 : intersection / union;
-}
-/**
 * Converts a Buffer of Float32 values to a number array.
 */
 function bufferToNumbers(buf) {
@@ -3999,6 +4000,178 @@ var CurationAgent = class {
 	*/
 	getLastRun() {
 		return this.lastRun;
+	}
+};
+
+//#endregion
+//#region src/curation/observation-classifier.ts
+const CLASSIFICATION_PROMPT = `You are a knowledge curator for a developer's memory system. Below is a chronological sequence of observations captured during a coding session.
+
+Each observation marked [PENDING] needs classification. The surrounding observations (marked [context]) provide narrative context — what happened before and after.
+
+Classify each [PENDING] observation as exactly one of:
+- discovery: New understanding, finding, or insight about the codebase or problem
+- problem: Error, bug, failure, or obstacle encountered
+- solution: Fix, resolution, workaround, or decision that resolved something
+- noise: Routine investigation step, redundant info, or working memory with no long-term value
+
+Return ONLY a JSON array, no other text: [{"id": "...", "classification": "...", "reason": "..."}]`;
+const VALID_CLASSIFICATIONS = new Set([
+	"discovery",
+	"problem",
+	"solution",
+	"noise"
+]);
+var ObservationClassifier = class {
+	db;
+	projectHash;
+	mcpServer;
+	intervalMs;
+	contextWindow;
+	batchSize;
+	fallbackTimeoutMs;
+	timer = null;
+	constructor(db, projectHash, mcpServer, opts) {
+		this.db = db;
+		this.projectHash = projectHash;
+		this.mcpServer = mcpServer;
+		this.intervalMs = opts?.intervalMs ?? 45e3;
+		this.contextWindow = opts?.contextWindow ?? 5;
+		this.batchSize = opts?.batchSize ?? 20;
+		this.fallbackTimeoutMs = opts?.fallbackTimeoutMs ?? 300 * 1e3;
+	}
+	start() {
+		if (this.timer) return;
+		debug("classify", "Classifier started", {
+			intervalMs: this.intervalMs,
+			batchSize: this.batchSize
+		});
+		this.timer = setInterval(() => {
+			this.runOnce().catch((err) => {
+				debug("classify", "Classification cycle error", { error: err instanceof Error ? err.message : String(err) });
+			});
+		}, this.intervalMs);
+	}
+	stop() {
+		if (this.timer) {
+			clearInterval(this.timer);
+			this.timer = null;
+			debug("classify", "Classifier stopped");
+		}
+	}
+	async runOnce() {
+		const repo = new ObservationRepository(this.db, this.projectHash);
+		const unclassified = repo.listUnclassified(this.batchSize);
+		if (unclassified.length === 0) {
+			debug("classify", "No unclassified observations");
+			return [];
+		}
+		debug("classify", "Processing unclassified observations", { count: unclassified.length });
+		const now = Date.now();
+		const stale = [];
+		const pending = [];
+		for (const obs of unclassified) {
+			const createdAtUtc = obs.createdAt.endsWith("Z") ? obs.createdAt : obs.createdAt + "Z";
+			if (now - new Date(createdAtUtc).getTime() > this.fallbackTimeoutMs) stale.push(obs);
+			else pending.push(obs);
+		}
+		const results = [];
+		for (const obs of stale) {
+			repo.updateClassification(obs.id, "discovery");
+			results.push({
+				observationId: obs.id,
+				classification: "discovery",
+				reason: "fallback: unclassified for >5min"
+			});
+			debug("classify", "Auto-promoted stale observation", { id: obs.id });
+		}
+		if (pending.length === 0) return results;
+		const prompt = this.buildPrompt(pending, repo);
+		try {
+			const llmResults = await this.classify(prompt, pending);
+			for (const result of llmResults) {
+				repo.updateClassification(result.observationId, result.classification);
+				if (result.classification === "noise") repo.softDelete(result.observationId);
+				results.push(result);
+				debug("classify", "Classified observation", {
+					id: result.observationId,
+					classification: result.classification
+				});
+			}
+		} catch (err) {
+			debug("classify", "LLM classification failed, will retry next cycle", {
+				error: err instanceof Error ? err.message : String(err),
+				pendingCount: pending.length
+			});
+		}
+		return results;
+	}
+	buildPrompt(pending, repo) {
+		const contextMap = /* @__PURE__ */ new Map();
+		const pendingIds = new Set(pending.map((o) => o.id));
+		for (const obs of pending) {
+			const context = repo.listContext(obs.createdAt, this.contextWindow);
+			for (const ctx of context) if (!contextMap.has(ctx.id)) contextMap.set(ctx.id, ctx);
+		}
+		const allObs = Array.from(contextMap.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.rowid - b.rowid);
+		const lines = [];
+		for (const obs of allObs) {
+			const tag = pendingIds.has(obs.id) ? `[PENDING] ${obs.id}` : "[context]";
+			const content = obs.content.length > 300 ? obs.content.substring(0, 300) + "..." : obs.content;
+			lines.push(`${tag} | ${obs.createdAt} | ${content}`);
+		}
+		return `${CLASSIFICATION_PROMPT}\n\nObservations (chronological):\n${lines.join("\n")}`;
+	}
+	async classify(prompt, pending) {
+		const content = (await this.mcpServer.server.createMessage({
+			messages: [{
+				role: "user",
+				content: {
+					type: "text",
+					text: prompt
+				}
+			}],
+			maxTokens: 2048,
+			modelPreferences: {
+				costPriority: .8,
+				speedPriority: .8,
+				intelligencePriority: .3
+			}
+		})).content;
+		let text;
+		if (typeof content === "string") text = content;
+		else if (Array.isArray(content)) text = content.filter((c) => c.type === "text").map((c) => c.text).join("");
+		else if (content && "type" in content && content.type === "text") text = content.text;
+		else throw new Error("Unexpected response format from createMessage");
+		return this.parseResponse(text, pending);
+	}
+	parseResponse(text, pending) {
+		const jsonMatch = text.match(/\[[\s\S]*\]/);
+		if (!jsonMatch) {
+			debug("classify", "Failed to parse JSON from LLM response", { responseLength: text.length });
+			throw new Error("No JSON array found in LLM response");
+		}
+		let parsed;
+		try {
+			parsed = JSON.parse(jsonMatch[0]);
+		} catch {
+			throw new Error("Invalid JSON in LLM response");
+		}
+		if (!Array.isArray(parsed)) throw new Error("Expected JSON array from LLM");
+		const pendingIds = new Set(pending.map((o) => o.id));
+		const results = [];
+		for (const item of parsed) {
+			if (typeof item !== "object" || item === null || typeof item.id !== "string" || typeof item.classification !== "string") continue;
+			if (!pendingIds.has(item.id)) continue;
+			if (!VALID_CLASSIFICATIONS.has(item.classification)) continue;
+			results.push({
+				observationId: item.id,
+				classification: item.classification,
+				reason: typeof item.reason === "string" ? item.reason : ""
+			});
+			pendingIds.delete(item.id);
+		}
+		return results;
 	}
 };
 
@@ -4449,6 +4622,78 @@ apiRoutes.get("/node/:id", (c) => {
 		relationships
 	});
 });
+/**
+* GET /api/node/:id/neighborhood
+*
+* Returns the N-hop subgraph around a node. Powers the focus/drill-down view.
+* Query params:
+*   ?depth=1  - hop count (1 or 2, default 1)
+*/
+apiRoutes.get("/node/:id/neighborhood", (c) => {
+	const db = getDb(c);
+	const centerId = c.req.param("id");
+	const depthParam = c.req.query("depth");
+	const depth = Math.min(Math.max(parseInt(depthParam || "1", 10) || 1, 1), 2);
+	let centerRow;
+	try {
+		centerRow = db.prepare("SELECT id, name, type, observation_ids, created_at FROM graph_nodes WHERE id = ?").get(centerId);
+	} catch {}
+	if (!centerRow) return c.json({ error: "Node not found" }, 404);
+	const visitedNodeIds = new Set([centerId]);
+	let frontier = new Set([centerId]);
+	const allEdgeRows = [];
+	const seenEdgeIds = /* @__PURE__ */ new Set();
+	for (let d = 0; d < depth; d++) {
+		if (frontier.size === 0) break;
+		const frontierIds = Array.from(frontier);
+		const placeholders = frontierIds.map(() => "?").join(", ");
+		const nextFrontier = /* @__PURE__ */ new Set();
+		try {
+			const edgeRows = db.prepare(`SELECT id, source_id, target_id, type, weight FROM graph_edges
+         WHERE source_id IN (${placeholders}) OR target_id IN (${placeholders})`).all(...frontierIds, ...frontierIds);
+			for (const edge of edgeRows) {
+				if (!seenEdgeIds.has(edge.id)) {
+					seenEdgeIds.add(edge.id);
+					allEdgeRows.push(edge);
+				}
+				if (!visitedNodeIds.has(edge.source_id)) {
+					visitedNodeIds.add(edge.source_id);
+					nextFrontier.add(edge.source_id);
+				}
+				if (!visitedNodeIds.has(edge.target_id)) {
+					visitedNodeIds.add(edge.target_id);
+					nextFrontier.add(edge.target_id);
+				}
+			}
+		} catch {}
+		frontier = nextFrontier;
+	}
+	const nodeIds = Array.from(visitedNodeIds);
+	let nodeRows = [];
+	if (nodeIds.length > 0) try {
+		const placeholders = nodeIds.map(() => "?").join(", ");
+		nodeRows = db.prepare(`SELECT id, name, type, observation_ids, created_at FROM graph_nodes WHERE id IN (${placeholders})`).all(...nodeIds);
+	} catch {}
+	const nodes = nodeRows.map((row) => ({
+		id: row.id,
+		label: row.name,
+		type: row.type,
+		observationCount: safeParseJsonArray(row.observation_ids).length,
+		createdAt: row.created_at
+	}));
+	const nodeIdSet = new Set(nodeIds);
+	const edges = allEdgeRows.filter((e) => nodeIdSet.has(e.source_id) && nodeIdSet.has(e.target_id)).map((row) => ({
+		id: row.id,
+		source: row.source_id,
+		target: row.target_id,
+		type: row.type
+	}));
+	return c.json({
+		center: centerId,
+		nodes,
+		edges
+	});
+});
 function safeParseJsonArray(json) {
 	try {
 		const parsed = JSON.parse(json);
@@ -4694,13 +4939,20 @@ const embedTimer = setInterval(() => {
 	});
 }, 5e3);
 const server = createServer();
-registerSaveMemory(server, db.db, projectHash, notificationStore);
+registerSaveMemory(server, db.db, projectHash, notificationStore, worker, embeddingStore);
 registerRecall(server, db.db, projectHash, worker, embeddingStore, notificationStore);
 registerTopicContext(server, db.db, projectHash, notificationStore);
 registerQueryGraph(server, db.db, projectHash, notificationStore);
 registerGraphStats(server, db.db, projectHash, notificationStore);
 registerStatus(server, db.db, projectHash, process.cwd(), db.hasVectorSupport, () => worker.isReady(), notificationStore);
-startServer(server).catch((err) => {
+const classifier = new ObservationClassifier(db.db, projectHash, server, {
+	intervalMs: 45e3,
+	contextWindow: 5,
+	batchSize: 20
+});
+startServer(server).then(() => {
+	classifier.start();
+}).catch((err) => {
 	debug("mcp", "Fatal: failed to start server", { error: err.message });
 	clearInterval(embedTimer);
 	db.close();
@@ -4725,6 +4977,7 @@ const curationAgent = new CurationAgent(db.db, {
 curationAgent.start();
 process.on("SIGINT", () => {
 	clearInterval(embedTimer);
+	classifier.stop();
 	curationAgent.stop();
 	worker.shutdown().catch(() => {});
 	db.close();
@@ -4732,6 +4985,7 @@ process.on("SIGINT", () => {
 });
 process.on("SIGTERM", () => {
 	clearInterval(embedTimer);
+	classifier.stop();
 	curationAgent.stop();
 	worker.shutdown().catch(() => {});
 	db.close();
@@ -4740,6 +4994,7 @@ process.on("SIGTERM", () => {
 process.on("uncaughtException", (err) => {
 	debug("mcp", "Uncaught exception", { error: err.message });
 	clearInterval(embedTimer);
+	classifier.stop();
 	curationAgent.stop();
 	worker.shutdown().catch(() => {});
 	db.close();

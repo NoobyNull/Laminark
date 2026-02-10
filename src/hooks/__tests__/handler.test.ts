@@ -44,7 +44,7 @@ describe('processPostToolUseFiltered', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(1);
     expect(observations[0].source).toBe('hook:Write');
     expect(observations[0].content).toContain('[Write] Created /src/app.ts');
@@ -64,7 +64,7 @@ describe('processPostToolUseFiltered', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(0);
   });
 
@@ -83,7 +83,7 @@ describe('processPostToolUseFiltered', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(1);
     expect(observations[0].content).toContain('[REDACTED:api_key]');
     expect(observations[0].content).not.toContain('sk-abcdefghijklmnopqrstuvwxyz12345678');
@@ -104,7 +104,7 @@ describe('processPostToolUseFiltered', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(0);
   });
 
@@ -123,7 +123,7 @@ describe('processPostToolUseFiltered', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(0);
   });
 
@@ -140,7 +140,7 @@ describe('processPostToolUseFiltered', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(1);
     expect(observations[0].source).toBe('hook:Write');
   });
@@ -157,7 +157,7 @@ describe('processPostToolUseFiltered', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(0);
   });
 
@@ -173,7 +173,7 @@ describe('processPostToolUseFiltered', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(0);
   });
 
@@ -187,7 +187,7 @@ describe('processPostToolUseFiltered', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(0);
   });
 
@@ -204,7 +204,7 @@ describe('processPostToolUseFiltered', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(0);
   });
 
@@ -221,7 +221,7 @@ describe('processPostToolUseFiltered', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(1);
     expect(observations[0].content).toContain('[Bash]');
   });
@@ -242,7 +242,7 @@ describe('processPostToolUseFiltered', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(1);
     expect(observations[0].content).toContain('[REDACTED:jwt]');
     expect(observations[0].content).not.toContain(jwt);
@@ -263,7 +263,7 @@ describe('processPostToolUseFiltered', () => {
       obsRepo,
     );
 
-    const observations = obsRepo.list({ limit: 10 });
+    const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
     expect(observations).toHaveLength(1);
     expect(observations[0].content).toContain('[REDACTED:connection_string]');
     expect(observations[0].content).not.toContain('user:pass');

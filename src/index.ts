@@ -32,6 +32,7 @@ import { initGraphSchema } from './graph/schema.js';
 import { extractAndPersist } from './graph/entity-extractor.js';
 import { detectAndPersist } from './graph/relationship-detector.js';
 import { CurationAgent } from './graph/curation-agent.js';
+import { ObservationClassifier } from './curation/observation-classifier.js';
 import { broadcast } from './web/routes/sse.js';
 import { createWebServer, startWebServer } from './web/server.js';
 
@@ -216,14 +217,26 @@ const embedTimer = setInterval(() => {
 // ---------------------------------------------------------------------------
 
 const server = createServer();
-registerSaveMemory(server, db.db, projectHash, notificationStore);
+registerSaveMemory(server, db.db, projectHash, notificationStore, worker, embeddingStore);
 registerRecall(server, db.db, projectHash, worker, embeddingStore, notificationStore);
 registerTopicContext(server, db.db, projectHash, notificationStore);
 registerQueryGraph(server, db.db, projectHash, notificationStore);
 registerGraphStats(server, db.db, projectHash, notificationStore);
 registerStatus(server, db.db, projectHash, process.cwd(), db.hasVectorSupport, () => worker.isReady(), notificationStore);
 
-startServer(server).catch((err) => {
+// ---------------------------------------------------------------------------
+// Background observation classifier (LLM-based via MCP sampling)
+// ---------------------------------------------------------------------------
+
+const classifier = new ObservationClassifier(db.db, projectHash, server, {
+  intervalMs: 45_000,
+  contextWindow: 5,
+  batchSize: 20,
+});
+
+startServer(server).then(() => {
+  classifier.start();
+}).catch((err) => {
   debug('mcp', 'Fatal: failed to start server', { error: err.message });
   clearInterval(embedTimer);
   db.close();
@@ -264,6 +277,7 @@ curationAgent.start();
 
 process.on('SIGINT', () => {
   clearInterval(embedTimer);
+  classifier.stop();
   curationAgent.stop();
   worker.shutdown().catch(() => {});
   db.close();
@@ -271,6 +285,7 @@ process.on('SIGINT', () => {
 });
 process.on('SIGTERM', () => {
   clearInterval(embedTimer);
+  classifier.stop();
   curationAgent.stop();
   worker.shutdown().catch(() => {});
   db.close();
@@ -279,6 +294,7 @@ process.on('SIGTERM', () => {
 process.on('uncaughtException', (err) => {
   debug('mcp', 'Uncaught exception', { error: err.message });
   clearInterval(embedTimer);
+  classifier.stop();
   curationAgent.stop();
   worker.shutdown().catch(() => {});
   db.close();

@@ -459,6 +459,113 @@ apiRoutes.get('/node/:id', (c) => {
   return c.json({ entity, observations: nodeObservations, relationships });
 });
 
+/**
+ * GET /api/node/:id/neighborhood
+ *
+ * Returns the N-hop subgraph around a node. Powers the focus/drill-down view.
+ * Query params:
+ *   ?depth=1  - hop count (1 or 2, default 1)
+ */
+apiRoutes.get('/node/:id/neighborhood', (c) => {
+  const db = getDb(c);
+  const centerId = c.req.param('id');
+  const depthParam = c.req.query('depth');
+  const depth = Math.min(Math.max(parseInt(depthParam || '1', 10) || 1, 1), 2);
+
+  // Verify the center node exists
+  let centerRow: GraphNodeRow | undefined;
+  try {
+    centerRow = db.prepare(
+      'SELECT id, name, type, observation_ids, created_at FROM graph_nodes WHERE id = ?'
+    ).get(centerId) as GraphNodeRow | undefined;
+  } catch { /* table may not exist */ }
+
+  if (!centerRow) {
+    return c.json({ error: 'Node not found' }, 404);
+  }
+
+  // Collect node IDs at each depth level
+  const visitedNodeIds = new Set<string>([centerId]);
+  let frontier = new Set<string>([centerId]);
+
+  interface EdgeRow {
+    id: string;
+    source_id: string;
+    target_id: string;
+    type: string;
+    weight: number;
+  }
+
+  const allEdgeRows: EdgeRow[] = [];
+  const seenEdgeIds = new Set<string>();
+
+  for (let d = 0; d < depth; d++) {
+    if (frontier.size === 0) break;
+
+    const frontierIds = Array.from(frontier);
+    const placeholders = frontierIds.map(() => '?').join(', ');
+    const nextFrontier = new Set<string>();
+
+    try {
+      const edgeRows = db.prepare(
+        `SELECT id, source_id, target_id, type, weight FROM graph_edges
+         WHERE source_id IN (${placeholders}) OR target_id IN (${placeholders})`
+      ).all(...frontierIds, ...frontierIds) as EdgeRow[];
+
+      for (const edge of edgeRows) {
+        if (!seenEdgeIds.has(edge.id)) {
+          seenEdgeIds.add(edge.id);
+          allEdgeRows.push(edge);
+        }
+
+        if (!visitedNodeIds.has(edge.source_id)) {
+          visitedNodeIds.add(edge.source_id);
+          nextFrontier.add(edge.source_id);
+        }
+        if (!visitedNodeIds.has(edge.target_id)) {
+          visitedNodeIds.add(edge.target_id);
+          nextFrontier.add(edge.target_id);
+        }
+      }
+    } catch { /* table may not exist */ }
+
+    frontier = nextFrontier;
+  }
+
+  // Fetch full node data for all collected node IDs
+  const nodeIds = Array.from(visitedNodeIds);
+  let nodeRows: GraphNodeRow[] = [];
+  if (nodeIds.length > 0) {
+    try {
+      const placeholders = nodeIds.map(() => '?').join(', ');
+      nodeRows = db.prepare(
+        `SELECT id, name, type, observation_ids, created_at FROM graph_nodes WHERE id IN (${placeholders})`
+      ).all(...nodeIds) as GraphNodeRow[];
+    } catch { /* table may not exist */ }
+  }
+
+  const nodes = nodeRows.map(row => ({
+    id: row.id,
+    label: row.name,
+    type: row.type,
+    observationCount: safeParseJsonArray(row.observation_ids).length,
+    createdAt: row.created_at,
+  }));
+
+  // Only include edges where both endpoints are in our node set
+  const nodeIdSet = new Set(nodeIds);
+  const edges = allEdgeRows
+    .filter(e => nodeIdSet.has(e.source_id) && nodeIdSet.has(e.target_id))
+    .map(row => ({
+      id: row.id,
+      source: row.source_id,
+      target: row.target_id,
+      type: row.type,
+    }));
+
+  return c.json({ center: centerId, nodes, edges });
+});
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

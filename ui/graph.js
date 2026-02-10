@@ -41,11 +41,46 @@ const COSE_DEFAULTS = {
   name: 'cose',
   animate: true,
   animationDuration: 500,
-  nodeRepulsion: function () { return 400000; },
-  idealEdgeLength: function () { return 100; },
-  gravity: 0.25,
+  nodeRepulsion: function () { return 500000; },
+  idealEdgeLength: function () { return 130; },
+  gravity: 0.4,
   numIter: 1000,
   nodeDimensionsIncludeLabels: true,
+};
+
+const LAYOUT_CONFIGS = {
+  clustered: Object.assign({}, COSE_DEFAULTS),
+  hierarchical: {
+    name: 'breadthfirst',
+    animate: true,
+    animationDuration: 500,
+    directed: true,
+    spacingFactor: 1.5,
+    nodeDimensionsIncludeLabels: true,
+  },
+  concentric: {
+    name: 'concentric',
+    animate: true,
+    animationDuration: 500,
+    nodeDimensionsIncludeLabels: true,
+    concentric: function (node) {
+      var typeOrder = { Project: 5, Tool: 4, File: 3, Decision: 2, Person: 2, Problem: 1, Solution: 1 };
+      return typeOrder[node.data('type')] || 1;
+    },
+    levelWidth: function () { return 2; },
+    minNodeSpacing: 50,
+  },
+};
+
+// Relationship type colors for focus mode edges
+var EDGE_TYPE_COLORS = {
+  uses: '#58a6ff',
+  depends_on: '#f0883e',
+  related_to: '#8b949e',
+  part_of: '#d2a8ff',
+  caused_by: '#f85149',
+  solved_by: '#3fb950',
+  decided_by: '#d29922',
 };
 
 // ---------------------------------------------------------------------------
@@ -69,6 +104,14 @@ var perfFrameCount = 0;
 var perfLastFpsTime = 0;
 var perfFps = 0;
 var perfRafId = null;
+
+// Focus mode state
+var focusStack = []; // Array of { nodeId, label }
+var isFocusMode = false;
+var cachedFullElements = null; // Stashed full graph elements for restoration
+
+// Current layout setting
+var currentLayout = localStorage.getItem('laminark-layout') || 'clustered';
 
 // Batch update queue for SSE events
 var batchQueue = [];
@@ -120,6 +163,12 @@ function initGraph(containerId) {
         window.laminarkApp.showNodeDetails(details);
       }
     }
+  });
+
+  // Double-click node to enter focus mode
+  cy.on('dbltap', 'node', function (evt) {
+    var node = evt.target;
+    enterFocusMode(node.data('id'), node.data('label'));
   });
 
   // Click on background closes detail panel and deselects all
@@ -192,7 +241,7 @@ function buildCytoscapeStyles() {
     });
   });
 
-  // Edge style
+  // Edge style - brighter arrows and lines for visibility
   styles.push({
     selector: 'edge',
     style: {
@@ -202,8 +251,8 @@ function buildCytoscapeStyles() {
       'text-rotation': 'autorotate',
       'curve-style': 'bezier',
       'target-arrow-shape': 'triangle',
-      'target-arrow-color': '#30363d',
-      'line-color': '#30363d',
+      'target-arrow-color': '#8b949e',
+      'line-color': '#8b949e',
       'width': 1.5,
       'opacity': 0.7,
     },
@@ -224,6 +273,32 @@ function buildCytoscapeStyles() {
       'line-color': '#f0883e',
       'width': 3,
     },
+  });
+
+  // Focus-root node style - pulsing border glow
+  styles.push({
+    selector: '.focus-root',
+    style: {
+      'border-width': 4,
+      'border-color': '#58a6ff',
+      'border-opacity': 1,
+      'overlay-color': '#58a6ff',
+      'overlay-padding': 6,
+      'overlay-opacity': 0.15,
+    },
+  });
+
+  // Focus mode edge coloring by relationship type
+  Object.keys(EDGE_TYPE_COLORS).forEach(function (relType) {
+    styles.push({
+      selector: 'edge.focus-edge[type="' + relType + '"]',
+      style: {
+        'line-color': EDGE_TYPE_COLORS[relType],
+        'target-arrow-color': EDGE_TYPE_COLORS[relType],
+        'opacity': 0.9,
+        'width': 2,
+      },
+    });
   });
 
   // Culled elements (hidden via viewport culling)
@@ -313,8 +388,9 @@ async function loadGraphData(filters) {
   cy.elements().remove();
   cy.add(elements);
 
-  // Run force-directed layout
-  cy.layout(Object.assign({}, COSE_DEFAULTS)).run();
+  // Run layout based on current selection
+  var layoutConfig = LAYOUT_CONFIGS[currentLayout] || LAYOUT_CONFIGS.clustered;
+  cy.layout(Object.assign({}, layoutConfig)).run();
 
   // Fit to view after layout settles
   cy.one('layoutstop', function () {
@@ -992,6 +1068,247 @@ function flushBatchUpdates() {
 }
 
 // ---------------------------------------------------------------------------
+// Focus mode (drill-down)
+// ---------------------------------------------------------------------------
+
+/**
+ * Enters focus mode centered on a node. Fetches the neighborhood subgraph
+ * and renders it using breadthfirst layout.
+ * @param {string} nodeId - The node to focus on
+ * @param {string} label - The node's display label
+ */
+async function enterFocusMode(nodeId, label) {
+  if (!cy) return;
+
+  // Stash full graph elements on first focus entry
+  if (!isFocusMode) {
+    cachedFullElements = cy.elements().jsons();
+  }
+
+  // Fetch neighborhood data
+  var data;
+  try {
+    var res = await fetch('/api/node/' + encodeURIComponent(nodeId) + '/neighborhood?depth=1');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    data = await res.json();
+  } catch (err) {
+    console.error('[laminark:graph] Failed to fetch neighborhood:', err);
+    return;
+  }
+
+  if (!data.nodes || data.nodes.length === 0) return;
+
+  isFocusMode = true;
+
+  // Update focus stack
+  focusStack.push({ nodeId: nodeId, label: label });
+
+  // Build cytoscape elements from neighborhood data
+  var elements = [];
+
+  data.nodes.forEach(function (node) {
+    elements.push({
+      group: 'nodes',
+      data: {
+        id: node.id,
+        label: node.label,
+        type: node.type,
+        observationCount: node.observationCount || 0,
+        createdAt: node.createdAt,
+      },
+      classes: node.id === nodeId ? 'focus-root' : '',
+    });
+  });
+
+  data.edges.forEach(function (edge) {
+    elements.push({
+      group: 'edges',
+      data: {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        type: edge.type,
+        label: edge.type,
+      },
+      classes: 'focus-edge',
+    });
+  });
+
+  // Replace graph elements
+  cy.elements().remove();
+  cy.add(elements);
+
+  // Use breadthfirst layout rooted at the focus node
+  cy.layout({
+    name: 'breadthfirst',
+    animate: true,
+    animationDuration: 400,
+    directed: true,
+    roots: '#' + CSS.escape(nodeId),
+    spacingFactor: 1.5,
+    nodeDimensionsIncludeLabels: true,
+  }).run();
+
+  cy.one('layoutstop', function () {
+    cy.fit(undefined, 50);
+  });
+
+  updateBreadcrumbs();
+  updateGraphStatsFromCy();
+
+  console.log('[laminark:graph] Focus mode: centered on', label, '(' + data.nodes.length + ' nodes)');
+}
+
+/**
+ * Exits focus mode and restores the full graph.
+ */
+function exitFocusMode() {
+  if (!cy || !isFocusMode) return;
+
+  isFocusMode = false;
+  focusStack = [];
+
+  if (cachedFullElements) {
+    cy.elements().remove();
+    cy.add(cachedFullElements);
+    cachedFullElements = null;
+
+    var layoutConfig = LAYOUT_CONFIGS[currentLayout] || LAYOUT_CONFIGS.clustered;
+    cy.layout(Object.assign({}, layoutConfig)).run();
+    cy.one('layoutstop', function () {
+      cy.fit(undefined, 50);
+    });
+  } else {
+    // Fallback: reload from API
+    loadGraphData();
+  }
+
+  updateBreadcrumbs();
+  updateGraphStatsFromCy();
+
+  console.log('[laminark:graph] Exited focus mode');
+}
+
+/**
+ * Navigates focus mode back to a specific breadcrumb level.
+ * @param {number} index - The breadcrumb index to navigate to (-1 for full graph)
+ */
+function navigateBreadcrumb(index) {
+  if (index < 0) {
+    exitFocusMode();
+    return;
+  }
+
+  // Pop focus stack to the target level
+  var target = focusStack[index];
+  if (!target) return;
+
+  focusStack = focusStack.slice(0, index);
+  isFocusMode = false; // Will be re-set by enterFocusMode
+  enterFocusMode(target.nodeId, target.label);
+}
+
+/**
+ * Updates the breadcrumb bar to reflect the current focus stack.
+ */
+function updateBreadcrumbs() {
+  var bar = document.getElementById('graph-breadcrumbs');
+  if (!bar) return;
+
+  if (!isFocusMode || focusStack.length === 0) {
+    bar.classList.add('hidden');
+    return;
+  }
+
+  bar.classList.remove('hidden');
+  bar.innerHTML = '';
+
+  // "Full Graph" root crumb
+  var rootBtn = document.createElement('button');
+  rootBtn.className = 'breadcrumb-item';
+  rootBtn.textContent = 'Full Graph';
+  rootBtn.addEventListener('click', function () {
+    exitFocusMode();
+  });
+  bar.appendChild(rootBtn);
+
+  // Focus stack crumbs
+  focusStack.forEach(function (item, idx) {
+    var sep = document.createElement('span');
+    sep.className = 'breadcrumb-separator';
+    sep.textContent = '>';
+    bar.appendChild(sep);
+
+    var btn = document.createElement('button');
+    btn.className = 'breadcrumb-item';
+    if (idx === focusStack.length - 1) {
+      btn.classList.add('current');
+    }
+    btn.textContent = item.label;
+    btn.addEventListener('click', (function (i) {
+      return function () {
+        if (i < focusStack.length - 1) {
+          navigateBreadcrumb(i);
+        }
+      };
+    })(idx));
+    bar.appendChild(btn);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Layout selector
+// ---------------------------------------------------------------------------
+
+/**
+ * Switches the graph layout and re-renders.
+ * @param {string} layoutName - 'clustered', 'hierarchical', or 'concentric'
+ */
+function setLayout(layoutName) {
+  if (!LAYOUT_CONFIGS[layoutName]) return;
+
+  currentLayout = layoutName;
+  localStorage.setItem('laminark-layout', layoutName);
+
+  // Update button states
+  var btns = document.querySelectorAll('.layout-btn');
+  btns.forEach(function (btn) {
+    btn.classList.toggle('active', btn.getAttribute('data-layout') === layoutName);
+  });
+
+  // Re-run layout if not in focus mode
+  if (!isFocusMode && cy && cy.nodes().length > 0) {
+    var layoutConfig = LAYOUT_CONFIGS[layoutName];
+    cy.layout(Object.assign({}, layoutConfig)).run();
+    cy.one('layoutstop', function () {
+      cy.fit(undefined, 50);
+    });
+  }
+}
+
+/**
+ * Initializes layout selector button click handlers.
+ */
+function initLayoutSelector() {
+  var btns = document.querySelectorAll('.layout-btn');
+
+  // Set initial active state from stored preference
+  btns.forEach(function (btn) {
+    btn.classList.toggle('active', btn.getAttribute('data-layout') === currentLayout);
+    btn.addEventListener('click', function () {
+      setLayout(btn.getAttribute('data-layout'));
+    });
+  });
+}
+
+// Initialize layout selector when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initLayoutSelector);
+} else {
+  initLayoutSelector();
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -1013,6 +1330,10 @@ window.laminarkGraph = {
   selectAndCenterNode: selectAndCenterNode,
   queueBatchUpdate: queueBatchUpdate,
   togglePerfOverlay: togglePerfOverlay,
+  enterFocusMode: enterFocusMode,
+  exitFocusMode: exitFocusMode,
+  setLayout: setLayout,
+  isFocusMode: function () { return isFocusMode; },
   ENTITY_STYLES: ENTITY_STYLES,
   getCy: function () { return cy; },
 };

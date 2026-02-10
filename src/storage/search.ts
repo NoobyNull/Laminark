@@ -53,6 +53,7 @@ export class SearchEngine {
       WHERE observations_fts MATCH ?
         AND o.project_hash = ?
         AND o.deleted_at IS NULL
+        AND o.classification IS NOT NULL AND o.classification != 'noise'
     `;
     const params: unknown[] = [sanitized, this.projectHash];
 
@@ -114,6 +115,7 @@ export class SearchEngine {
       WHERE observations_fts MATCH ?
         AND o.project_hash = ?
         AND o.deleted_at IS NULL
+        AND o.classification IS NOT NULL AND o.classification != 'noise'
       ORDER BY rank
       LIMIT ?
     `;

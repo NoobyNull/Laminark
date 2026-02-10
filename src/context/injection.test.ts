@@ -42,6 +42,8 @@ function makeObservation(overrides: Partial<Observation> = {}): Observation {
     embedding: null,
     embeddingModel: null,
     embeddingVersion: null,
+    classification: 'discovery',
+    classifiedAt: '2026-02-09T10:30:00Z',
     createdAt: '2026-02-09T10:30:00Z',
     updatedAt: '2026-02-09T10:30:00Z',
     deletedAt: null,
@@ -227,10 +229,10 @@ describe('assembleSessionContext', () => {
 
   it('includes recent observations in output', () => {
     const obsRepo = new ObservationRepository(laminarkDb.db, 'test-project');
-    obsRepo.create({
+    obsRepo.createClassified({
       content: 'Created the user model with Prisma schema',
       source: 'hook:Write',
-    });
+    }, 'discovery');
 
     const result = assembleSessionContext(laminarkDb.db, 'test-project');
 
@@ -248,10 +250,10 @@ describe('assembleSessionContext', () => {
     const obsRepo = new ObservationRepository(laminarkDb.db, 'test-project');
     // Create 5 observations with moderate content
     for (let i = 0; i < 5; i++) {
-      obsRepo.create({
+      obsRepo.createClassified({
         content: `Observation ${i}: ${'detailed content '.repeat(10)}`,
         source: i < 2 ? 'mcp:save_memory' : 'hook:Bash',
-      });
+      }, 'discovery');
     }
 
     const result = assembleSessionContext(laminarkDb.db, 'test-project');
@@ -263,20 +265,20 @@ describe('assembleSessionContext', () => {
     const obsRepo = new ObservationRepository(laminarkDb.db, 'test-project');
 
     // Create regular observations first (older)
-    obsRepo.create({
+    obsRepo.createClassified({
       content: 'Regular observation 1',
       source: 'hook:Bash',
-    });
-    obsRepo.create({
+    }, 'discovery');
+    obsRepo.createClassified({
       content: 'Regular observation 2',
       source: 'hook:Read',
-    });
+    }, 'discovery');
 
     // Create an explicit save (could be older but should appear first)
-    obsRepo.create({
+    obsRepo.createClassified({
       content: 'Important memory saved by user',
       source: 'mcp:save_memory',
-    });
+    }, 'discovery');
 
     const observations = getHighValueObservations(laminarkDb.db, 'test-project', 5);
 
@@ -288,16 +290,16 @@ describe('assembleSessionContext', () => {
   it('excludes deleted observations from high-value query', () => {
     const obsRepo = new ObservationRepository(laminarkDb.db, 'test-project');
 
-    const obs = obsRepo.create({
+    const obs = obsRepo.createClassified({
       content: 'This will be deleted',
       source: 'hook:Bash',
-    });
+    }, 'discovery');
     obsRepo.softDelete(obs.id);
 
-    obsRepo.create({
+    obsRepo.createClassified({
       content: 'This is still active',
       source: 'hook:Bash',
-    });
+    }, 'discovery');
 
     const observations = getHighValueObservations(laminarkDb.db, 'test-project', 5);
 
@@ -309,8 +311,8 @@ describe('assembleSessionContext', () => {
     const obsRepo1 = new ObservationRepository(laminarkDb.db, 'project-a');
     const obsRepo2 = new ObservationRepository(laminarkDb.db, 'project-b');
 
-    obsRepo1.create({ content: 'Project A observation', source: 'hook:Bash' });
-    obsRepo2.create({ content: 'Project B observation', source: 'hook:Bash' });
+    obsRepo1.createClassified({ content: 'Project A observation', source: 'hook:Bash' }, 'discovery');
+    obsRepo2.createClassified({ content: 'Project B observation', source: 'hook:Bash' }, 'discovery');
 
     const obsA = getHighValueObservations(laminarkDb.db, 'project-a', 5);
     const obsB = getHighValueObservations(laminarkDb.db, 'project-b', 5);

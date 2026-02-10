@@ -1,5 +1,5 @@
 import { i as getProjectHash, n as getDatabaseConfig } from "../config-CtH17VYQ.mjs";
-import { i as openDatabase, n as ObservationRepository, r as rowToObservation, s as debug, t as SessionRepository } from "../sessions-D3yr9tXZ.mjs";
+import { a as rowToObservation, i as ObservationRepository, l as debug, o as openDatabase, r as SessionRepository, t as SaveGuard } from "../save-guard-DjH8DWnb.mjs";
 import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
@@ -333,6 +333,7 @@ function getHighValueObservations(db, projectHash, limit = 5) {
 	});
 	const rows = db.prepare(`SELECT * FROM observations
        WHERE project_hash = ? AND deleted_at IS NULL
+         AND classification IS NOT NULL AND classification != 'noise'
        ORDER BY
          CASE
            WHEN source = 'mcp:save_memory' THEN 0
@@ -862,6 +863,15 @@ function processPostToolUseFiltered(input, obsRepo) {
 	}
 	if (!shouldAdmit(toolName, redacted)) {
 		debug("hook", "Observation rejected by admission filter", { tool: toolName });
+		return;
+	}
+	const decision = new SaveGuard(obsRepo).evaluateSync(redacted, "hook:" + toolName);
+	if (!decision.save) {
+		debug("hook", "Observation rejected by save guard", {
+			tool: toolName,
+			reason: decision.reason,
+			duplicateOf: decision.duplicateOf
+		});
 		return;
 	}
 	obsRepo.create({

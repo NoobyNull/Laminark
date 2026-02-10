@@ -6,6 +6,7 @@ import {
   ObservationInsertSchema,
   rowToObservation,
   type Observation,
+  type ObservationClassification,
   type ObservationInsert,
   type ObservationRow,
 } from '../shared/types.js';
@@ -135,15 +136,21 @@ export class ObservationRepository {
     offset?: number;
     sessionId?: string;
     since?: string;
+    includeUnclassified?: boolean;
   }): Observation[] {
     debug('obs', 'Listing observations', { ...options });
 
     const limit = options?.limit ?? 50;
     const offset = options?.offset ?? 0;
+    const includeUnclassified = options?.includeUnclassified ?? false;
 
     let sql =
       'SELECT * FROM observations WHERE project_hash = ? AND deleted_at IS NULL';
     const params: unknown[] = [this.projectHash];
+
+    if (!includeUnclassified) {
+      sql += " AND classification IS NOT NULL AND classification != 'noise'";
+    }
 
     if (options?.sessionId) {
       sql += ' AND session_id = ?';
@@ -248,6 +255,89 @@ export class ObservationRepository {
   }
 
   /**
+   * Updates the classification of an observation.
+   * Sets classified_at to current time. Returns true if found and updated.
+   */
+  updateClassification(
+    id: string,
+    classification: ObservationClassification,
+  ): boolean {
+    debug('obs', 'Updating classification', { id, classification });
+    const sql = `
+      UPDATE observations
+      SET classification = ?, classified_at = datetime('now'), updated_at = datetime('now')
+      WHERE id = ? AND project_hash = ? AND deleted_at IS NULL
+    `;
+    const result = this.db.prepare(sql).run(classification, id, this.projectHash);
+    return result.changes > 0;
+  }
+
+  /**
+   * Creates an observation with an initial classification (bypasses classifier).
+   * Used for explicit user saves that should be immediately visible.
+   */
+  createClassified(input: ObservationInsert, classification: ObservationClassification): Observation {
+    const obs = this.create(input);
+    this.updateClassification(obs.id, classification);
+    // Re-fetch to get the updated classification fields
+    return this.getById(obs.id)!;
+  }
+
+  /**
+   * Fetches unclassified observations for the background classifier.
+   * Returns observations ordered by created_at ASC (oldest first).
+   */
+  listUnclassified(limit: number = 20): Observation[] {
+    const sql = `
+      SELECT * FROM observations
+      WHERE project_hash = ? AND classification IS NULL AND deleted_at IS NULL
+      ORDER BY created_at ASC
+      LIMIT ?
+    `;
+    const rows = this.db.prepare(sql).all(this.projectHash, limit) as ObservationRow[];
+    return rows.map(rowToObservation);
+  }
+
+  /**
+   * Fetches observations surrounding a given timestamp for classification context.
+   * Returns observations regardless of classification status.
+   */
+  listContext(aroundTime: string, windowSize: number = 5): Observation[] {
+    // Get N observations before
+    const beforeSql = `
+      SELECT * FROM observations
+      WHERE project_hash = ? AND deleted_at IS NULL AND created_at <= ?
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT ?
+    `;
+    const beforeRows = this.db.prepare(beforeSql).all(
+      this.projectHash, aroundTime, windowSize + 1,
+    ) as ObservationRow[];
+
+    // Get N observations after
+    const afterSql = `
+      SELECT * FROM observations
+      WHERE project_hash = ? AND deleted_at IS NULL AND created_at > ?
+      ORDER BY created_at ASC, rowid ASC
+      LIMIT ?
+    `;
+    const afterRows = this.db.prepare(afterSql).all(
+      this.projectHash, aroundTime, windowSize,
+    ) as ObservationRow[];
+
+    // Combine in chronological order (before is DESC, so reverse it)
+    const allRows = [...beforeRows.reverse(), ...afterRows];
+    // Deduplicate by id
+    const seen = new Set<string>();
+    const unique = allRows.filter(r => {
+      if (seen.has(r.id)) return false;
+      seen.add(r.id);
+      return true;
+    });
+    return unique.map(rowToObservation);
+  }
+
+  /**
    * Counts non-deleted observations for this project.
    */
   count(): number {
@@ -310,6 +400,7 @@ export class ObservationRepository {
     if (!includePurged) {
       sql += ' AND deleted_at IS NULL';
     }
+    sql += " AND classification IS NOT NULL AND classification != 'noise'";
     sql += ' ORDER BY created_at DESC, rowid DESC LIMIT ?';
 
     const rows = this.db

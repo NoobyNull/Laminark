@@ -5,6 +5,9 @@ import { z } from 'zod';
 import { debug } from '../../shared/debug.js';
 import { ObservationRepository } from '../../storage/observations.js';
 import type { NotificationStore } from '../../storage/notifications.js';
+import type { AnalysisWorker } from '../../analysis/worker-bridge.js';
+import type { EmbeddingStore } from '../../storage/embeddings.js';
+import { SaveGuard } from '../../hooks/save-guard.js';
 
 /**
  * Generates a title from observation content.
@@ -30,6 +33,8 @@ export function registerSaveMemory(
   db: BetterSqlite3.Database,
   projectHash: string,
   notificationStore: NotificationStore | null = null,
+  worker: AnalysisWorker | null = null,
+  embeddingStore: EmbeddingStore | null = null,
 ): void {
   server.registerTool(
     'save_memory',
@@ -59,12 +64,30 @@ export function registerSaveMemory(
     async (args) => {
       try {
         const repo = new ObservationRepository(db, projectHash);
+
+        // Pre-save gate: duplicate detection + relevance scoring
+        const guard = new SaveGuard(repo, { worker, embeddingStore });
+        const decision = await guard.evaluate(args.text, args.source);
+        if (!decision.save) {
+          debug('mcp', 'save_memory: rejected by save guard', {
+            reason: decision.reason,
+            duplicateOf: decision.duplicateOf,
+          });
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Memory not saved: ${decision.reason}` +
+                (decision.duplicateOf ? ` (similar to existing observation ${decision.duplicateOf})` : ''),
+            }],
+          };
+        }
+
         const resolvedTitle = args.title ?? generateTitle(args.text);
-        const obs = repo.create({
+        const obs = repo.createClassified({
           content: args.text,
           title: resolvedTitle,
           source: args.source,
-        });
+        }, 'discovery');
 
         debug('mcp', 'save_memory: saved', {
           id: obs.id,
