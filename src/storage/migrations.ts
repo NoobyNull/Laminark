@@ -7,7 +7,7 @@ import type BetterSqlite3 from 'better-sqlite3';
 export interface Migration {
   version: number;
   name: string;
-  up: string; // SQL to execute
+  up: string | ((db: BetterSqlite3.Database) => void); // SQL string or function
 }
 
 /**
@@ -25,6 +25,8 @@ export interface Migration {
  * Migration 007: Context stashes table for topic detection thread snapshots.
  * Migration 008: Threshold history table for EWMA adaptive threshold seeding.
  * Migration 009: Shift decisions table for topic shift decision logging.
+ * Migration 010: Project metadata table for project selector UI.
+ * Migration 011: Add project_hash to graph tables and backfill from observations.
  */
 export const MIGRATIONS: Migration[] = [
   {
@@ -229,6 +231,68 @@ export const MIGRATIONS: Migration[] = [
         ON shift_decisions(shifted, created_at DESC);
     `,
   },
+  {
+    version: 10,
+    name: 'create_project_metadata',
+    up: `
+      CREATE TABLE IF NOT EXISTS project_metadata (
+        project_hash TEXT PRIMARY KEY,
+        project_path TEXT NOT NULL,
+        display_name TEXT,
+        last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `,
+  },
+  {
+    version: 11,
+    name: 'add_project_hash_to_graph_tables',
+    up: (db: BetterSqlite3.Database) => {
+      // Graph tables are created by initGraphSchema() (separate from main migrations).
+      // They may or may not exist, and may or may not already have project_hash.
+      const tableExists = (name: string) =>
+        !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
+
+      const columnExists = (table: string, column: string) => {
+        const cols = db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name: string }>;
+        return cols.some(c => c.name === column);
+      };
+
+      if (tableExists('graph_nodes') && !columnExists('graph_nodes', 'project_hash')) {
+        db.exec('ALTER TABLE graph_nodes ADD COLUMN project_hash TEXT');
+
+        // Backfill from linked observations
+        db.exec(`
+          UPDATE graph_nodes SET project_hash = (
+            SELECT o.project_hash FROM observations o
+            WHERE o.id IN (
+              SELECT value FROM json_each(graph_nodes.observation_ids)
+            )
+            LIMIT 1
+          ) WHERE project_hash IS NULL
+        `);
+      }
+
+      if (tableExists('graph_edges') && !columnExists('graph_edges', 'project_hash')) {
+        db.exec('ALTER TABLE graph_edges ADD COLUMN project_hash TEXT');
+
+        // Backfill from source node
+        db.exec(`
+          UPDATE graph_edges SET project_hash = (
+            SELECT gn.project_hash FROM graph_nodes gn
+            WHERE gn.id = graph_edges.source_id
+          ) WHERE project_hash IS NULL
+        `);
+      }
+
+      // Indexes are safe with IF NOT EXISTS
+      if (tableExists('graph_nodes')) {
+        db.exec('CREATE INDEX IF NOT EXISTS idx_graph_nodes_project ON graph_nodes(project_hash)');
+      }
+      if (tableExists('graph_edges')) {
+        db.exec('CREATE INDEX IF NOT EXISTS idx_graph_edges_project ON graph_edges(project_hash)');
+      }
+    },
+  },
 ];
 
 /**
@@ -270,7 +334,11 @@ export function runMigrations(
 
   // Apply each unapplied migration in a transaction
   const applyMigration = db.transaction((m: Migration) => {
-    db.exec(m.up);
+    if (typeof m.up === 'function') {
+      m.up(db);
+    } else {
+      db.exec(m.up);
+    }
     insertMigration.run(m.version, m.name);
   });
 

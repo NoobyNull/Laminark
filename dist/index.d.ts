@@ -33,7 +33,7 @@ declare function openDatabase(config: DatabaseConfig): LaminarkDatabase;
 interface Migration {
   version: number;
   name: string;
-  up: string;
+  up: string | ((db: Database.Database) => void);
 }
 /**
  * All schema migrations in order.
@@ -50,6 +50,8 @@ interface Migration {
  * Migration 007: Context stashes table for topic detection thread snapshots.
  * Migration 008: Threshold history table for EWMA adaptive threshold seeding.
  * Migration 009: Shift decisions table for topic shift decision logging.
+ * Migration 010: Project metadata table for project selector UI.
+ * Migration 011: Add project_hash to graph tables and backfill from observations.
  */
 declare const MIGRATIONS: Migration[];
 /**

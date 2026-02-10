@@ -13,7 +13,9 @@
     "dist",
     "hooks",
     "scripts",
-    ".claude-plugin"
+    "ui",
+    ".claude-plugin",
+    ".mcp.json"
   ],
   "engines": {
     "node": ">=22.0.0"

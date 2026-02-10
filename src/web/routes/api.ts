@@ -65,11 +65,49 @@ function getDb(c: { get: (key: string) => unknown }): BetterSqlite3.Database {
   return c.get('db') as BetterSqlite3.Database;
 }
 
+function getProjectHash(c: { get: (key: string) => unknown; req: { query: (key: string) => string | undefined } }): string | null {
+  return c.req.query('project') || (c.get('defaultProject') as string | undefined) || null;
+}
+
 // ---------------------------------------------------------------------------
 // Route group
 // ---------------------------------------------------------------------------
 
 export const apiRoutes = new Hono();
+
+/**
+ * GET /api/projects
+ *
+ * Returns list of known projects from project_metadata table.
+ */
+apiRoutes.get('/projects', (c) => {
+  const db = getDb(c);
+  const defaultProject = (c.get('defaultProject') as string | undefined) || null;
+
+  interface ProjectRow {
+    project_hash: string;
+    project_path: string;
+    display_name: string | null;
+    last_seen_at: string;
+  }
+
+  let projects: ProjectRow[] = [];
+  try {
+    projects = db.prepare(
+      'SELECT project_hash, project_path, display_name, last_seen_at FROM project_metadata ORDER BY last_seen_at DESC'
+    ).all() as ProjectRow[];
+  } catch { /* table may not exist yet */ }
+
+  return c.json({
+    projects: projects.map(p => ({
+      hash: p.project_hash,
+      path: p.project_path,
+      displayName: p.display_name || p.project_path.split('/').pop() || p.project_hash.substring(0, 8),
+      lastSeenAt: p.last_seen_at,
+    })),
+    defaultProject,
+  });
+});
 
 /**
  * GET /api/graph
@@ -84,11 +122,17 @@ apiRoutes.get('/graph', (c) => {
   const typeFilter = c.req.query('type');
   const sinceFilter = c.req.query('since');
   const untilFilter = c.req.query('until');
+  const projectFilter = getProjectHash(c);
 
   // Build nodes query
   let nodesSql = 'SELECT id, name, type, observation_ids, created_at FROM graph_nodes';
   const nodeParams: unknown[] = [];
   const nodeConditions: string[] = [];
+
+  if (projectFilter) {
+    nodeConditions.push('project_hash = ?');
+    nodeParams.push(projectFilter);
+  }
 
   if (typeFilter) {
     const types = typeFilter.split(',').map(t => t.trim()).filter(Boolean);
@@ -132,14 +176,18 @@ apiRoutes.get('/graph', (c) => {
   // Build edges query -- only include edges where both nodes are in the result set
   let edgeRows: GraphEdgeRow[];
   try {
-    const edgesSql = `
+    let edgesSql = `
       SELECT e.id, e.source_id, e.target_id, e.type, e.weight,
              tn.name AS name
       FROM graph_edges e
-      LEFT JOIN graph_nodes tn ON tn.id = e.target_id
-      ORDER BY e.created_at DESC
-    `;
-    edgeRows = db.prepare(edgesSql).all() as GraphEdgeRow[];
+      LEFT JOIN graph_nodes tn ON tn.id = e.target_id`;
+    const edgeParams: unknown[] = [];
+    if (projectFilter) {
+      edgesSql += ' WHERE e.project_hash = ?';
+      edgeParams.push(projectFilter);
+    }
+    edgesSql += ' ORDER BY e.created_at DESC';
+    edgeRows = db.prepare(edgesSql).all(...edgeParams) as GraphEdgeRow[];
   } catch {
     edgeRows = [];
   }
@@ -178,6 +226,7 @@ apiRoutes.get('/timeline', (c) => {
   const limit = limitStr ? Math.min(parseInt(limitStr, 10) || 500, 2000) : 500;
   const offsetStr = c.req.query('offset');
   const offset = offsetStr ? Math.max(parseInt(offsetStr, 10) || 0, 0) : 0;
+  const projectFilter = getProjectHash(c);
 
   // Sessions
   let sessions: Array<{ id: string; startedAt: string; endedAt: string | null; observationCount: number; summary: string | null }> = [];
@@ -185,6 +234,11 @@ apiRoutes.get('/timeline', (c) => {
     let sessionsSql = 'SELECT id, started_at, ended_at, summary FROM sessions';
     const sessionParams: unknown[] = [];
     const sessionConds: string[] = [];
+
+    if (projectFilter) {
+      sessionConds.push('project_hash = ?');
+      sessionParams.push(projectFilter);
+    }
 
     if (from) {
       sessionConds.push('started_at >= ?');
@@ -231,6 +285,11 @@ apiRoutes.get('/timeline', (c) => {
     let obsSql = 'SELECT id, content, title, source, created_at, session_id FROM observations WHERE deleted_at IS NULL';
     const obsParams: unknown[] = [];
 
+    if (projectFilter) {
+      obsSql += ' AND project_hash = ?';
+      obsParams.push(projectFilter);
+    }
+
     if (from) {
       obsSql += ' AND created_at >= ?';
       obsParams.push(from);
@@ -260,6 +319,11 @@ apiRoutes.get('/timeline', (c) => {
   try {
     let shiftSql = 'SELECT id, session_id, distance, threshold, confidence, created_at FROM shift_decisions WHERE shifted = 1';
     const shiftParams: unknown[] = [];
+
+    if (projectFilter) {
+      shiftSql += ' AND project_id = ?';
+      shiftParams.push(projectFilter);
+    }
 
     if (from) {
       shiftSql += ' AND created_at >= ?';

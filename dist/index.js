@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-CtH17VYQ.mjs";
-import { a as MIGRATIONS, c as debugTimed, i as openDatabase, n as ObservationRepository, o as runMigrations, r as rowToObservation, s as debug, t as SessionRepository } from "./sessions-bHB4xCD4.mjs";
+import { a as MIGRATIONS, c as debugTimed, i as openDatabase, n as ObservationRepository, o as runMigrations, r as rowToObservation, s as debug, t as SessionRepository } from "./sessions-D3yr9tXZ.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
+import path from "path";
+import { fileURLToPath } from "url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Worker } from "node:worker_threads";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath as fileURLToPath$1 } from "node:url";
 import { Hono } from "hono";
+import fs from "fs";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
-import { serveStatic } from "@hono/node-server/serve-static";
 
 //#region src/storage/search.ts
 /**
@@ -1113,6 +1115,7 @@ const up = `
     name TEXT NOT NULL,
     metadata TEXT DEFAULT '{}',
     observation_ids TEXT DEFAULT '[]',
+    project_hash TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -1124,6 +1127,7 @@ const up = `
     type TEXT NOT NULL CHECK(type IN ('uses','depends_on','decided_by','related_to','part_of','caused_by','solved_by')),
     weight REAL NOT NULL DEFAULT 1.0 CHECK(weight >= 0.0 AND weight <= 1.0),
     metadata TEXT DEFAULT '{}',
+    project_hash TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -1330,8 +1334,8 @@ function upsertNode(db, node) {
 		return rowToNode(db.prepare("SELECT * FROM graph_nodes WHERE id = ?").get(existing.id));
 	}
 	const id = node.id ?? randomBytes(16).toString("hex");
-	db.prepare(`INSERT INTO graph_nodes (id, type, name, metadata, observation_ids)
-     VALUES (?, ?, ?, ?, ?)`).run(id, node.type, node.name, JSON.stringify(node.metadata), JSON.stringify(node.observation_ids));
+	db.prepare(`INSERT INTO graph_nodes (id, type, name, metadata, observation_ids, project_hash)
+     VALUES (?, ?, ?, ?, ?, ?)`).run(id, node.type, node.name, JSON.stringify(node.metadata), JSON.stringify(node.observation_ids), node.project_hash ?? null);
 	return rowToNode(db.prepare("SELECT * FROM graph_nodes WHERE id = ?").get(id));
 }
 /**
@@ -1342,11 +1346,11 @@ function upsertNode(db, node) {
 */
 function insertEdge(db, edge) {
 	const id = edge.id ?? randomBytes(16).toString("hex");
-	db.prepare(`INSERT INTO graph_edges (id, source_id, target_id, type, weight, metadata)
-     VALUES (?, ?, ?, ?, ?, ?)
+	db.prepare(`INSERT INTO graph_edges (id, source_id, target_id, type, weight, metadata, project_hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (source_id, target_id, type) DO UPDATE SET
        weight = MAX(graph_edges.weight, excluded.weight),
-       metadata = excluded.metadata`).run(id, edge.source_id, edge.target_id, edge.type, edge.weight, JSON.stringify(edge.metadata));
+       metadata = excluded.metadata`).run(id, edge.source_id, edge.target_id, edge.type, edge.weight, JSON.stringify(edge.metadata), edge.project_hash ?? null);
 	return rowToEdge(db.prepare("SELECT * FROM graph_edges WHERE source_id = ? AND target_id = ? AND type = ?").get(edge.source_id, edge.target_id, edge.type));
 }
 
@@ -1871,7 +1875,7 @@ var AnalysisWorker = class {
 	workerPath;
 	constructor(workerPath) {
 		if (workerPath) this.workerPath = workerPath;
-		else this.workerPath = join(dirname(fileURLToPath(import.meta.url)), "worker.js");
+		else this.workerPath = join(dirname(fileURLToPath$1(import.meta.url)), "worker.js");
 	}
 	/**
 	* Starts the worker thread and waits for the 'ready' message.
@@ -3042,7 +3046,8 @@ function extractAndPersist(db, text, observationId, opts) {
 				type: entity.type,
 				name: entity.name,
 				metadata: { confidence: entity.confidence },
-				observation_ids: [observationId]
+				observation_ids: [observationId],
+				project_hash: opts?.projectHash
 			});
 			persisted.push(node);
 		} catch {
@@ -3411,7 +3416,7 @@ function detectRelationships(text, entities) {
 *
 * @returns Array of persisted GraphEdge objects
 */
-function detectAndPersist(db, text, entities) {
+function detectAndPersist(db, text, entities, opts) {
 	const candidates = detectRelationships(text, entities);
 	const persisted = [];
 	const affectedNodeIds = /* @__PURE__ */ new Set();
@@ -3427,7 +3432,8 @@ function detectAndPersist(db, text, entities) {
 					target_id: targetNode.id,
 					type: candidate.relationshipType,
 					weight: candidate.confidence,
-					metadata: { evidence: candidate.evidence }
+					metadata: { evidence: candidate.evidence },
+					project_hash: opts?.projectHash
 				});
 				persisted.push(edge);
 				affectedNodeIds.add(sourceNode.id);
@@ -4051,7 +4057,32 @@ function broadcast(event, data) {
 function getDb(c) {
 	return c.get("db");
 }
+function getProjectHash$1(c) {
+	return c.req.query("project") || c.get("defaultProject") || null;
+}
 const apiRoutes = new Hono();
+/**
+* GET /api/projects
+*
+* Returns list of known projects from project_metadata table.
+*/
+apiRoutes.get("/projects", (c) => {
+	const db = getDb(c);
+	const defaultProject = c.get("defaultProject") || null;
+	let projects = [];
+	try {
+		projects = db.prepare("SELECT project_hash, project_path, display_name, last_seen_at FROM project_metadata ORDER BY last_seen_at DESC").all();
+	} catch {}
+	return c.json({
+		projects: projects.map((p) => ({
+			hash: p.project_hash,
+			path: p.project_path,
+			displayName: p.display_name || p.project_path.split("/").pop() || p.project_hash.substring(0, 8),
+			lastSeenAt: p.last_seen_at
+		})),
+		defaultProject
+	});
+});
 /**
 * GET /api/graph
 *
@@ -4065,9 +4096,14 @@ apiRoutes.get("/graph", (c) => {
 	const typeFilter = c.req.query("type");
 	const sinceFilter = c.req.query("since");
 	const untilFilter = c.req.query("until");
+	const projectFilter = getProjectHash$1(c);
 	let nodesSql = "SELECT id, name, type, observation_ids, created_at FROM graph_nodes";
 	const nodeParams = [];
 	const nodeConditions = [];
+	if (projectFilter) {
+		nodeConditions.push("project_hash = ?");
+		nodeParams.push(projectFilter);
+	}
 	if (typeFilter) {
 		const types = typeFilter.split(",").map((t) => t.trim()).filter(Boolean);
 		if (types.length > 0) {
@@ -4100,13 +4136,18 @@ apiRoutes.get("/graph", (c) => {
 	}));
 	let edgeRows;
 	try {
-		edgeRows = db.prepare(`
+		let edgesSql = `
       SELECT e.id, e.source_id, e.target_id, e.type, e.weight,
              tn.name AS name
       FROM graph_edges e
-      LEFT JOIN graph_nodes tn ON tn.id = e.target_id
-      ORDER BY e.created_at DESC
-    `).all();
+      LEFT JOIN graph_nodes tn ON tn.id = e.target_id`;
+		const edgeParams = [];
+		if (projectFilter) {
+			edgesSql += " WHERE e.project_hash = ?";
+			edgeParams.push(projectFilter);
+		}
+		edgesSql += " ORDER BY e.created_at DESC";
+		edgeRows = db.prepare(edgesSql).all(...edgeParams);
 	} catch {
 		edgeRows = [];
 	}
@@ -4140,11 +4181,16 @@ apiRoutes.get("/timeline", (c) => {
 	const limit = limitStr ? Math.min(parseInt(limitStr, 10) || 500, 2e3) : 500;
 	const offsetStr = c.req.query("offset");
 	const offset = offsetStr ? Math.max(parseInt(offsetStr, 10) || 0, 0) : 0;
+	const projectFilter = getProjectHash$1(c);
 	let sessions = [];
 	try {
 		let sessionsSql = "SELECT id, started_at, ended_at, summary FROM sessions";
 		const sessionParams = [];
 		const sessionConds = [];
+		if (projectFilter) {
+			sessionConds.push("project_hash = ?");
+			sessionParams.push(projectFilter);
+		}
 		if (from) {
 			sessionConds.push("started_at >= ?");
 			sessionParams.push(from);
@@ -4176,6 +4222,10 @@ apiRoutes.get("/timeline", (c) => {
 	try {
 		let obsSql = "SELECT id, content, title, source, created_at, session_id FROM observations WHERE deleted_at IS NULL";
 		const obsParams = [];
+		if (projectFilter) {
+			obsSql += " AND project_hash = ?";
+			obsParams.push(projectFilter);
+		}
 		if (from) {
 			obsSql += " AND created_at >= ?";
 			obsParams.push(from);
@@ -4199,6 +4249,10 @@ apiRoutes.get("/timeline", (c) => {
 	try {
 		let shiftSql = "SELECT id, session_id, distance, threshold, confidence, created_at FROM shift_decisions WHERE shifted = 1";
 		const shiftParams = [];
+		if (projectFilter) {
+			shiftSql += " AND project_id = ?";
+			shiftParams.push(projectFilter);
+		}
 		if (from) {
 			shiftSql += " AND created_at >= ?";
 			shiftParams.push(from);
@@ -4315,9 +4369,10 @@ function safeParseJson(json) {
 * and route registration.
 *
 * @param db - better-sqlite3 Database instance for API queries
+* @param uiRoot - Absolute path to the ui/ directory for static file serving
 * @returns Configured Hono app
 */
-function createWebServer(db) {
+function createWebServer(db, uiRoot, defaultProjectHash) {
 	const app = new Hono();
 	app.use("*", cors({ origin: (origin) => {
 		if (!origin) return "*";
@@ -4326,6 +4381,7 @@ function createWebServer(db) {
 	} }));
 	app.use("*", async (c, next) => {
 		c.set("db", db);
+		if (defaultProjectHash) c.set("defaultProject", defaultProjectHash);
 		await next();
 	});
 	app.get("/api/health", (c) => {
@@ -4336,11 +4392,35 @@ function createWebServer(db) {
 	});
 	app.route("/api", apiRoutes);
 	app.route("/api", sseRoutes);
-	app.use("/*", serveStatic({ root: "./ui/" }));
-	app.get("*", serveStatic({
-		root: "./ui/",
-		path: "index.html"
-	}));
+	app.use("/*", async (c, next) => {
+		const reqPath = c.req.path === "/" ? "/index.html" : c.req.path;
+		const filePath = path.join(uiRoot, reqPath);
+		try {
+			const data = fs.readFileSync(filePath);
+			const ext = path.extname(filePath).toLowerCase();
+			const mimeTypes = {
+				".html": "text/html",
+				".js": "application/javascript",
+				".css": "text/css",
+				".json": "application/json",
+				".png": "image/png",
+				".svg": "image/svg+xml",
+				".ico": "image/x-icon"
+			};
+			return c.body(data, 200, { "Content-Type": mimeTypes[ext] || "application/octet-stream" });
+		} catch {
+			await next();
+		}
+	});
+	app.get("*", async (c) => {
+		const indexPath = path.join(uiRoot, "index.html");
+		try {
+			const data = fs.readFileSync(indexPath, "utf-8");
+			return c.html(data);
+		} catch {
+			return c.text("UI not found", 404);
+		}
+	});
 	return app;
 }
 /**
@@ -4365,6 +4445,15 @@ function startWebServer(app, port = 37820) {
 const db = openDatabase(getDatabaseConfig());
 initGraphSchema(db.db);
 const projectHash = getProjectHash(process.cwd());
+try {
+	db.db.prepare(`
+    INSERT INTO project_metadata (project_hash, project_path, last_seen_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(project_hash) DO UPDATE SET
+      project_path = excluded.project_path,
+      last_seen_at = excluded.last_seen_at
+  `).run(projectHash, process.cwd());
+} catch {}
 const embeddingStore = db.hasVectorSupport ? new EmbeddingStore(db.db, projectHash) : null;
 const worker = new AnalysisWorker();
 worker.start().catch(() => {
@@ -4436,13 +4525,13 @@ async function processUnembedded() {
 				debug("embed", "Topic shift detection error (non-fatal)", { error: topicErr instanceof Error ? topicErr.message : String(topicErr) });
 			}
 			try {
-				const nodes = extractAndPersist(db.db, text, String(id));
+				const nodes = extractAndPersist(db.db, text, String(id), { projectHash });
 				if (nodes.length > 0) {
 					const entityPairs = nodes.map((n) => ({
 						name: n.name,
 						type: n.type
 					}));
-					detectAndPersist(db.db, text, entityPairs);
+					detectAndPersist(db.db, text, entityPairs, { projectHash });
 					debug("embed", "Graph updated", {
 						id,
 						entities: nodes.length
@@ -4479,7 +4568,10 @@ startServer(server).catch((err) => {
 	process.exit(1);
 });
 const webPort = parseInt(process.env.LAMINARK_WEB_PORT || "37820", 10);
-startWebServer(createWebServer(db.db), webPort);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const uiRoot = path.resolve(__dirname, "..", "ui");
+startWebServer(createWebServer(db.db, uiRoot, projectHash), webPort);
 const curationAgent = new CurationAgent(db.db, {
 	intervalMs: 300 * 1e3,
 	onComplete: (report) => {

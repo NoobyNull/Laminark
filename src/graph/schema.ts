@@ -350,7 +350,7 @@ export function countEdgesForNode(
  */
 export function upsertNode(
   db: BetterSqlite3.Database,
-  node: Omit<GraphNode, 'id' | 'created_at' | 'updated_at'> & { id?: string },
+  node: Omit<GraphNode, 'id' | 'created_at' | 'updated_at'> & { id?: string; project_hash?: string },
 ): GraphNode {
   const existing = getNodeByNameAndType(db, node.name, node.type);
 
@@ -382,14 +382,15 @@ export function upsertNode(
   // Insert new node
   const id = node.id ?? randomBytes(16).toString('hex');
   db.prepare(
-    `INSERT INTO graph_nodes (id, type, name, metadata, observation_ids)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO graph_nodes (id, type, name, metadata, observation_ids, project_hash)
+     VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     node.type,
     node.name,
     JSON.stringify(node.metadata),
     JSON.stringify(node.observation_ids),
+    node.project_hash ?? null,
   );
 
   const inserted = db
@@ -406,13 +407,13 @@ export function upsertNode(
  */
 export function insertEdge(
   db: BetterSqlite3.Database,
-  edge: Omit<GraphEdge, 'id' | 'created_at'> & { id?: string },
+  edge: Omit<GraphEdge, 'id' | 'created_at'> & { id?: string; project_hash?: string },
 ): GraphEdge {
   const id = edge.id ?? randomBytes(16).toString('hex');
 
   db.prepare(
-    `INSERT INTO graph_edges (id, source_id, target_id, type, weight, metadata)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO graph_edges (id, source_id, target_id, type, weight, metadata, project_hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (source_id, target_id, type) DO UPDATE SET
        weight = MAX(graph_edges.weight, excluded.weight),
        metadata = excluded.metadata`,
@@ -423,6 +424,7 @@ export function insertEdge(
     edge.type,
     edge.weight,
     JSON.stringify(edge.metadata),
+    edge.project_hash ?? null,
   );
 
   // Retrieve the actual row (may be the existing row if conflict occurred)

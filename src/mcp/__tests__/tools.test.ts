@@ -358,8 +358,9 @@ describe('SC-5: tool discoverability', () => {
     const manifest = JSON.parse(raw);
 
     // Verify structure
-    expect(manifest).toHaveProperty('laminark');
-    expect(manifest.laminark.command).toBe('bash');
-    expect(manifest.laminark.args).toContain('${CLAUDE_PLUGIN_ROOT}/dist/index.js');
+    expect(manifest).toHaveProperty('mcpServers');
+    expect(manifest.mcpServers).toHaveProperty('laminark');
+    expect(manifest.mcpServers.laminark.command).toBe('bash');
+    expect(manifest.mcpServers.laminark.args).toContain('${CLAUDE_PLUGIN_ROOT}/dist/index.js');
   });
 });

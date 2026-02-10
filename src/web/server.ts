@@ -8,6 +8,8 @@
  * @module web/server
  */
 
+import path from 'path';
+import fs from 'fs';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
@@ -23,9 +25,10 @@ import { sseRoutes } from './routes/sse.js';
  * and route registration.
  *
  * @param db - better-sqlite3 Database instance for API queries
+ * @param uiRoot - Absolute path to the ui/ directory for static file serving
  * @returns Configured Hono app
  */
-export function createWebServer(db: BetterSqlite3.Database): Hono {
+export function createWebServer(db: BetterSqlite3.Database, uiRoot: string, defaultProjectHash?: string): Hono {
   const app = new Hono();
 
   // CORS middleware for localhost development
@@ -42,9 +45,12 @@ export function createWebServer(db: BetterSqlite3.Database): Hono {
     }),
   );
 
-  // Make db available to all route handlers via Hono context
+  // Make db and defaultProject available to all route handlers via Hono context
   app.use('*', async (c, next) => {
     c.set('db', db);
+    if (defaultProjectHash) {
+      c.set('defaultProject', defaultProjectHash);
+    }
     await next();
   });
 
@@ -57,16 +63,40 @@ export function createWebServer(db: BetterSqlite3.Database): Hono {
   app.route('/api', apiRoutes);
   app.route('/api', sseRoutes);
 
-  // Serve static files from ui/ directory
-  app.use(
-    '/*',
-    serveStatic({
-      root: './ui/',
-    }),
-  );
+  // Serve static files from ui/ directory (absolute path so CWD doesn't matter)
+  app.use('/*', async (c, next) => {
+    const reqPath = c.req.path === '/' ? '/index.html' : c.req.path;
+    const filePath = path.join(uiRoot, reqPath);
+    try {
+      const data = fs.readFileSync(filePath);
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeTypes: Record<string, string> = {
+        '.html': 'text/html',
+        '.js': 'application/javascript',
+        '.css': 'text/css',
+        '.json': 'application/json',
+        '.png': 'image/png',
+        '.svg': 'image/svg+xml',
+        '.ico': 'image/x-icon',
+      };
+      return c.body(data, 200, {
+        'Content-Type': mimeTypes[ext] || 'application/octet-stream',
+      });
+    } catch {
+      await next();
+    }
+  });
 
   // Fallback: serve index.html for SPA routing
-  app.get('*', serveStatic({ root: './ui/', path: 'index.html' }));
+  app.get('*', async (c) => {
+    const indexPath = path.join(uiRoot, 'index.html');
+    try {
+      const data = fs.readFileSync(indexPath, 'utf-8');
+      return c.html(data);
+    } catch {
+      return c.text('UI not found', 404);
+    }
+  });
 
   return app;
 }

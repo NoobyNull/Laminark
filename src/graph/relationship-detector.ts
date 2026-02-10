@@ -207,6 +207,7 @@ export function detectAndPersist(
   db: BetterSqlite3.Database,
   text: string,
   entities: Array<{ name: string; type: EntityType }>,
+  opts?: { projectHash?: string },
 ): GraphEdge[] {
   const candidates = detectRelationships(text, entities);
   const persisted: GraphEdge[] = [];
@@ -239,6 +240,7 @@ export function detectAndPersist(
           type: candidate.relationshipType,
           weight: candidate.confidence,
           metadata: { evidence: candidate.evidence },
+          project_hash: opts?.projectHash,
         });
         persisted.push(edge);
         affectedNodeIds.add(sourceNode.id);

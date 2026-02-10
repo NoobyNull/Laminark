@@ -110,7 +110,7 @@ export function extractAndPersist(
   db: BetterSqlite3.Database,
   text: string,
   observationId: string,
-  opts?: { minConfidence?: number },
+  opts?: { minConfidence?: number; projectHash?: string },
 ): GraphNode[] {
   const result = extractEntities(text, observationId, opts);
   const persisted: GraphNode[] = [];
@@ -123,6 +123,7 @@ export function extractAndPersist(
           name: entity.name,
           metadata: { confidence: entity.confidence },
           observation_ids: [observationId],
+          project_hash: opts?.projectHash,
         });
         persisted.push(node);
       } catch {

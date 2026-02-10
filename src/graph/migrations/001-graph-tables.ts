@@ -22,6 +22,7 @@ export const up = `
     name TEXT NOT NULL,
     metadata TEXT DEFAULT '{}',
     observation_ids TEXT DEFAULT '[]',
+    project_hash TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -33,6 +34,7 @@ export const up = `
     type TEXT NOT NULL CHECK(type IN ('uses','depends_on','decided_by','related_to','part_of','caused_by','solved_by')),
     weight REAL NOT NULL DEFAULT 1.0 CHECK(weight >= 0.0 AND weight <= 1.0),
     metadata TEXT DEFAULT '{}',
+    project_hash TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 

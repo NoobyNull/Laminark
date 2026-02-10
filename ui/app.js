@@ -14,6 +14,7 @@ window.laminarkState = {
   timeline: null,
   graphInitialized: false,
   timelineInitialized: false,
+  currentProject: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -32,6 +33,7 @@ async function fetchGraphData(filters) {
   if (filters?.type) params.set('type', filters.type);
   if (filters?.since) params.set('since', filters.since);
   if (filters?.until) params.set('until', filters.until);
+  if (window.laminarkState.currentProject) params.set('project', window.laminarkState.currentProject);
 
   const url = '/api/graph' + (params.toString() ? '?' + params.toString() : '');
 
@@ -58,6 +60,7 @@ async function fetchTimelineData(range) {
   if (range?.from) params.set('from', range.from);
   if (range?.to) params.set('to', range.to);
   if (range?.limit) params.set('limit', String(range.limit));
+  if (window.laminarkState.currentProject) params.set('project', window.laminarkState.currentProject);
 
   const url = '/api/timeline' + (params.toString() ? '?' + params.toString() : '');
 
@@ -84,6 +87,21 @@ async function fetchNodeDetails(id) {
   } catch (err) {
     console.error('[laminark] Failed to fetch node details:', err);
     return null;
+  }
+}
+
+/**
+ * Fetches available projects from the REST API.
+ * @returns {Promise<{projects: Array, defaultProject: string|null}>}
+ */
+async function fetchProjects() {
+  try {
+    const res = await fetch('/api/projects');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.error('[laminark] Failed to fetch projects:', err);
+    return { projects: [], defaultProject: null };
   }
 }
 
@@ -216,6 +234,51 @@ function connectSSE() {
 }
 
 // ---------------------------------------------------------------------------
+// Project selector
+// ---------------------------------------------------------------------------
+
+async function initProjectSelector() {
+  var select = document.getElementById('project-selector');
+  if (!select) return;
+
+  var data = await fetchProjects();
+  var projects = data.projects || [];
+  var defaultProject = data.defaultProject;
+
+  select.innerHTML = '';
+
+  if (projects.length === 0) {
+    var opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'No projects';
+    select.appendChild(opt);
+    return;
+  }
+
+  projects.forEach(function (p) {
+    var opt = document.createElement('option');
+    opt.value = p.hash;
+    opt.textContent = p.displayName;
+    if (p.hash === defaultProject) opt.selected = true;
+    select.appendChild(opt);
+  });
+
+  // Set initial current project
+  window.laminarkState.currentProject = select.value || defaultProject;
+
+  select.addEventListener('change', function () {
+    window.laminarkState.currentProject = select.value;
+    // Reload all data for the new project
+    if (window.laminarkGraph && window.laminarkState.graphInitialized) {
+      window.laminarkGraph.loadGraphData();
+    }
+    if (window.laminarkTimeline && window.laminarkState.timelineInitialized) {
+      window.laminarkTimeline.loadTimelineData();
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Tab navigation
 // ---------------------------------------------------------------------------
 
@@ -238,12 +301,13 @@ function initNavigation() {
       });
 
       // Show/hide filter bar and time range bar (only for graph view)
+      var isGraph = targetView === 'graph-view';
       if (filterBar) {
-        filterBar.style.display = targetView === 'graph-view' ? '' : 'none';
+        filterBar.style.display = isGraph ? '' : 'none';
       }
       var timeRangeBar = document.getElementById('time-range-bar');
       if (timeRangeBar) {
-        timeRangeBar.style.display = targetView === 'graph-view' ? '' : 'none';
+        timeRangeBar.style.display = isGraph ? '' : 'none';
       }
 
       // Lazy initialization: only init each view when first activated
@@ -596,11 +660,17 @@ function escapeHtml(text) {
 document.addEventListener('DOMContentLoaded', async function () {
   console.log('[laminark] Initializing application');
 
+  await initProjectSelector();
   initNavigation();
   initFilters();
   initTimeRange();
   initDetailPanel();
   connectSSE();
+
+  // Initialize activity feed
+  if (window.laminarkActivity) {
+    window.laminarkActivity.initActivityFeed();
+  }
 
   // Fetch initial data
   const [graphData, timelineData] = await Promise.all([
@@ -772,6 +842,7 @@ window.laminarkApp = {
   fetchGraphData: fetchGraphData,
   fetchTimelineData: fetchTimelineData,
   fetchNodeDetails: fetchNodeDetails,
+  fetchProjects: fetchProjects,
   showNodeDetails: showNodeDetails,
   getActiveFilters: getActiveFilters,
 };

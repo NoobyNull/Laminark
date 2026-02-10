@@ -10,9 +10,11 @@
 <body>
   <nav id="nav-bar">
     <div class="nav-brand">Laminark</div>
+    <select id="project-selector" class="project-selector" title="Switch project"></select>
     <div class="nav-tabs">
       <button class="nav-tab active" data-view="graph-view">Knowledge Graph</button>
       <button class="nav-tab" data-view="timeline-view">Timeline</button>
+      <button class="nav-tab" data-view="activity-view">Activity</button>
     </div>
     <div class="nav-status">
       <span id="sse-status" class="status-indicator disconnected" title="SSE connection status"></span>
@@ -71,6 +73,16 @@
       </div>
       <button class="jump-today-btn" title="Jump to latest">Today</button>
     </div>
+
+    <div id="activity-view" class="view-container">
+      <div class="activity-feed-header">
+        <h3>Live Activity</h3>
+        <button id="activity-clear-btn" class="activity-clear-btn">Clear</button>
+      </div>
+      <div id="activity-feed" class="activity-feed">
+        <p class="empty-state">Waiting for live events...</p>
+      </div>
+    </div>
   </main>
 
   <aside id="detail-panel" class="hidden">
@@ -86,5 +98,6 @@
   <script src="/app.js"></script>
   <script src="/graph.js"></script>
   <script src="/timeline.js"></script>
+  <script src="/activity.js"></script>
 </body>
 </html>

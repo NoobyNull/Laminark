@@ -4,6 +4,9 @@
 // Re-export storage API for library consumers
 export * from './storage/index.js';
 
+import path from 'path';
+import { fileURLToPath } from 'url';
+
 import { openDatabase } from './storage/database.js';
 import { getDatabaseConfig, getProjectHash } from './shared/config.js';
 import { debug } from './shared/debug.js';
@@ -34,6 +37,19 @@ import { createWebServer, startWebServer } from './web/server.js';
 const db = openDatabase(getDatabaseConfig());
 initGraphSchema(db.db);
 const projectHash = getProjectHash(process.cwd());
+
+// Register this project in project_metadata (upsert)
+try {
+  db.db.prepare(`
+    INSERT INTO project_metadata (project_hash, project_path, last_seen_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(project_hash) DO UPDATE SET
+      project_path = excluded.project_path,
+      last_seen_at = excluded.last_seen_at
+  `).run(projectHash, process.cwd());
+} catch {
+  // Table may not exist yet on first run before migrations
+}
 
 // ---------------------------------------------------------------------------
 // Worker thread and embedding store (graceful degradation)
@@ -155,13 +171,13 @@ async function processUnembedded(): Promise<void> {
 
       // Knowledge graph -- extract entities and detect relationships
       try {
-        const nodes = extractAndPersist(db.db, text, String(id));
+        const nodes = extractAndPersist(db.db, text, String(id), { projectHash });
         if (nodes.length > 0) {
           const entityPairs = nodes.map(n => ({
             name: n.name,
             type: n.type,
           }));
-          detectAndPersist(db.db, text, entityPairs);
+          detectAndPersist(db.db, text, entityPairs, { projectHash });
           debug('embed', 'Graph updated', {
             id,
             entities: nodes.length,
@@ -217,7 +233,10 @@ startServer(server).catch((err) => {
 // ---------------------------------------------------------------------------
 
 const webPort = parseInt(process.env.LAMINARK_WEB_PORT || '37820', 10);
-const webApp = createWebServer(db.db);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const uiRoot = path.resolve(__dirname, '..', 'ui');
+const webApp = createWebServer(db.db, uiRoot, projectHash);
 startWebServer(webApp, webPort);
 
 // ---------------------------------------------------------------------------
