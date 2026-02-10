@@ -11,6 +11,13 @@
 import { Hono } from 'hono';
 import type BetterSqlite3 from 'better-sqlite3';
 
+type AppEnv = {
+  Variables: {
+    db: BetterSqlite3.Database;
+    defaultProject: string;
+  };
+};
+
 // ---------------------------------------------------------------------------
 // Raw row interfaces for SQL results
 // ---------------------------------------------------------------------------
@@ -61,19 +68,19 @@ interface ShiftDecisionRow {
 // Helper: get db from Hono context
 // ---------------------------------------------------------------------------
 
-function getDb(c: { get: (key: string) => unknown }): BetterSqlite3.Database {
-  return c.get('db') as BetterSqlite3.Database;
+function getDb(c: { get: (key: 'db') => BetterSqlite3.Database }): BetterSqlite3.Database {
+  return c.get('db');
 }
 
-function getProjectHash(c: { get: (key: string) => unknown; req: { query: (key: string) => string | undefined } }): string | null {
-  return c.req.query('project') || (c.get('defaultProject') as string | undefined) || null;
+function getProjectHash(c: { get: (key: 'defaultProject') => string; req: { query: (key: string) => string | undefined } }): string | null {
+  return c.req.query('project') || c.get('defaultProject') || null;
 }
 
 // ---------------------------------------------------------------------------
 // Route group
 // ---------------------------------------------------------------------------
 
-export const apiRoutes = new Hono();
+export const apiRoutes = new Hono<AppEnv>();
 
 /**
  * GET /api/projects
@@ -82,7 +89,7 @@ export const apiRoutes = new Hono();
  */
 apiRoutes.get('/projects', (c) => {
   const db = getDb(c);
-  const defaultProject = (c.get('defaultProject') as string | undefined) || null;
+  const defaultProject = c.get('defaultProject') || null;
 
   interface ProjectRow {
     project_hash: string;

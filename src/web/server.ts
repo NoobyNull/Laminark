@@ -16,6 +16,13 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import type BetterSqlite3 from 'better-sqlite3';
 
+type AppEnv = {
+  Variables: {
+    db: BetterSqlite3.Database;
+    defaultProject: string;
+  };
+};
+
 import { debug } from '../shared/debug.js';
 import { apiRoutes } from './routes/api.js';
 import { sseRoutes } from './routes/sse.js';
@@ -28,8 +35,8 @@ import { sseRoutes } from './routes/sse.js';
  * @param uiRoot - Absolute path to the ui/ directory for static file serving
  * @returns Configured Hono app
  */
-export function createWebServer(db: BetterSqlite3.Database, uiRoot: string, defaultProjectHash?: string): Hono {
-  const app = new Hono();
+export function createWebServer(db: BetterSqlite3.Database, uiRoot: string, defaultProjectHash?: string): Hono<AppEnv> {
+  const app = new Hono<AppEnv>();
 
   // CORS middleware for localhost development
   app.use(
@@ -109,7 +116,7 @@ export function createWebServer(db: BetterSqlite3.Database, uiRoot: string, defa
  * @returns The Node.js HTTP server instance
  */
 export function startWebServer(
-  app: Hono,
+  app: Hono<AppEnv>,
   port: number = 37820,
 ): ReturnType<typeof serve> {
   debug('db', `Starting web server on port ${port}`);
