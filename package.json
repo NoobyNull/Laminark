@@ -10,7 +10,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "hooks",
+    "scripts",
+    ".claude-plugin"
   ],
   "engines": {
     "node": ">=22.0.0"
