@@ -1,0 +1,15 @@
+{
+  "name": "laminark",
+  "owner": {
+    "name": "NoobyNull"
+  },
+  "plugins": [
+    {
+      "name": "laminark",
+      "source": ".",
+      "description": "Persistent adaptive memory for Claude Code. Automatic observation capture, semantic search, topic detection, knowledge graph, and web visualization.",
+      "version": "1.0.0",
+      "category": "productivity"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "laminark": {
-    "command": "npx",
-    "args": ["tsx", "src/index.ts"],
+    "command": "bash",
+    "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/ensure-deps.sh", "node", "${CLAUDE_PLUGIN_ROOT}/dist/index.js"],
     "env": {}
   }
 }

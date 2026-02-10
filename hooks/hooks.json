@@ -6,9 +6,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js\"",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-deps.sh\" node \"${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js\"",
             "async": true,
-            "timeout": 10
+            "timeout": 30
           }
         ]
       }
@@ -19,9 +19,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js\"",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-deps.sh\" node \"${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js\"",
             "async": true,
-            "timeout": 10
+            "timeout": 30
           }
         ]
       }
@@ -32,8 +32,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js\"",
-            "timeout": 5
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-deps.sh\" node \"${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js\"",
+            "timeout": 30
           }
         ]
       }
@@ -44,9 +44,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js\"",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-deps.sh\" node \"${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js\"",
             "async": true,
-            "timeout": 10
+            "timeout": 30
           }
         ]
       }
@@ -56,9 +56,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js\"",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-deps.sh\" node \"${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js\"",
             "async": true,
-            "timeout": 10
+            "timeout": 30
           }
         ]
       }

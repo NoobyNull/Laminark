@@ -359,8 +359,7 @@ describe('SC-5: tool discoverability', () => {
 
     // Verify structure
     expect(manifest).toHaveProperty('laminark');
-    expect(manifest.laminark.command).toBe('npx');
-    expect(manifest.laminark.args).toContain('tsx');
-    expect(manifest.laminark.args).toContain('src/index.ts');
+    expect(manifest.laminark.command).toBe('bash');
+    expect(manifest.laminark.args).toContain('${CLAUDE_PLUGIN_ROOT}/dist/index.js');
   });
 });
