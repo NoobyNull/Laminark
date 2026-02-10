@@ -52,24 +52,28 @@ adminRoutes.get('/stats', (c) => {
   const observations = tableCount(db, 'observations', projectWhere, projectParams);
   const observationsFts = tableCount(db, 'observations_fts');
   const observationEmbeddings = tableCount(db, 'observation_embeddings');
+  const stalenessFlags = tableCount(db, 'staleness_flags');
   const graphNodes = tableCount(db, 'graph_nodes', projectWhere, projectParams);
   const graphEdges = tableCount(db, 'graph_edges', projectWhere, projectParams);
   const sessions = tableCount(db, 'sessions', projectWhere, projectParams);
   const contextStashes = tableCount(db, 'context_stashes', projectIdWhere, projectParams);
   const thresholdHistory = tableCount(db, 'threshold_history', projectIdWhere, projectParams);
   const shiftDecisions = tableCount(db, 'shift_decisions', projectIdWhere, projectParams);
+  const pendingNotifications = tableCount(db, 'pending_notifications', projectIdWhere, projectParams);
   const projects = tableCount(db, 'project_metadata');
 
   return c.json({
     observations,
     observationsFts,
     observationEmbeddings,
+    stalenessFlags,
     graphNodes,
     graphEdges,
     sessions,
     contextStashes,
     thresholdHistory,
     shiftDecisions,
+    pendingNotifications,
     projects,
     scopedToProject: project || null,
   });
@@ -95,6 +99,10 @@ adminRoutes.post('/reset', async (c) => {
   const scoped = scope === 'current' && project;
   const deleted: string[] = [];
 
+  const exec = (sql: string) => {
+    try { db.exec(sql); } catch { /* table/trigger may not exist */ }
+  };
+
   const run = (sql: string, params?: unknown[]) => {
     try {
       db.prepare(sql).run(...(params || []));
@@ -105,20 +113,48 @@ adminRoutes.post('/reset', async (c) => {
 
   db.transaction(() => {
     if (type === 'observations' || type === 'all') {
+      // Drop FTS sync triggers FIRST — they fire on every DELETE and will
+      // abort the delete if the FTS index is out of sync with observations.
+      exec('DROP TRIGGER IF EXISTS observations_ai');
+      exec('DROP TRIGGER IF EXISTS observations_au');
+      exec('DROP TRIGGER IF EXISTS observations_ad');
+
       if (scoped) {
-        // Delete FTS rows for matching observations
-        run(
-          `DELETE FROM observations_fts WHERE rowid IN (SELECT rowid FROM observations WHERE project_hash = ?)`,
-          [project],
-        );
         run('DELETE FROM observation_embeddings WHERE observation_id IN (SELECT id FROM observations WHERE project_hash = ?)', [project]);
+        run('DELETE FROM staleness_flags WHERE observation_id IN (SELECT id FROM observations WHERE project_hash = ?)', [project]);
         run('DELETE FROM observations WHERE project_hash = ?', [project]);
       } else {
-        run('DELETE FROM observations_fts');
         run('DELETE FROM observation_embeddings');
+        run('DELETE FROM staleness_flags');
         run('DELETE FROM observations');
       }
-      deleted.push('observations', 'observations_fts', 'observation_embeddings');
+
+      // Rebuild FTS (will be empty or contain only remaining rows)
+      exec("INSERT INTO observations_fts(observations_fts) VALUES('rebuild')");
+
+      // Recreate FTS sync triggers
+      exec(`
+        CREATE TRIGGER observations_ai AFTER INSERT ON observations BEGIN
+          INSERT INTO observations_fts(rowid, title, content)
+            VALUES (new.rowid, new.title, new.content);
+        END
+      `);
+      exec(`
+        CREATE TRIGGER observations_au AFTER UPDATE ON observations BEGIN
+          INSERT INTO observations_fts(observations_fts, rowid, title, content)
+            VALUES('delete', old.rowid, old.title, old.content);
+          INSERT INTO observations_fts(rowid, title, content)
+            VALUES (new.rowid, new.title, new.content);
+        END
+      `);
+      exec(`
+        CREATE TRIGGER observations_ad AFTER DELETE ON observations BEGIN
+          INSERT INTO observations_fts(observations_fts, rowid, title, content)
+            VALUES('delete', old.rowid, old.title, old.content);
+        END
+      `);
+
+      deleted.push('observations', 'observations_fts', 'observation_embeddings', 'staleness_flags');
     }
 
     if (type === 'graph' || type === 'all') {
@@ -137,19 +173,22 @@ adminRoutes.post('/reset', async (c) => {
         run('DELETE FROM shift_decisions WHERE project_id = ?', [project]);
         run('DELETE FROM threshold_history WHERE project_id = ?', [project]);
         run('DELETE FROM context_stashes WHERE project_id = ?', [project]);
+        run('DELETE FROM pending_notifications WHERE project_id = ?', [project]);
         run('DELETE FROM sessions WHERE project_hash = ?', [project]);
       } else {
         run('DELETE FROM shift_decisions');
         run('DELETE FROM threshold_history');
         run('DELETE FROM context_stashes');
+        run('DELETE FROM pending_notifications');
         run('DELETE FROM sessions');
       }
-      deleted.push('sessions', 'context_stashes', 'threshold_history', 'shift_decisions');
+      deleted.push('sessions', 'context_stashes', 'threshold_history', 'shift_decisions', 'pending_notifications');
     }
 
     if (type === 'all' && !scoped) {
       run('DELETE FROM project_metadata');
-      deleted.push('project_metadata');
+      run('DELETE FROM _migrations');
+      deleted.push('project_metadata', '_migrations');
     }
   })();
 

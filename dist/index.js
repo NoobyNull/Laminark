@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-CtH17VYQ.mjs";
-import { a as rowToObservation, c as runMigrations, i as ObservationRepository, l as debug, n as jaccardSimilarity, o as openDatabase, r as SessionRepository, s as MIGRATIONS, t as SaveGuard, u as debugTimed } from "./save-guard-DjH8DWnb.mjs";
+import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-t8LZeB-u.mjs";
+import { a as rowToObservation, c as runMigrations, i as ObservationRepository, l as debug, n as jaccardSimilarity, o as openDatabase, r as SessionRepository, s as MIGRATIONS, t as SaveGuard, u as debugTimed } from "./save-guard-B6cie18b.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -4694,6 +4694,352 @@ apiRoutes.get("/node/:id/neighborhood", (c) => {
 		edges
 	});
 });
+/**
+* GET /api/graph/search
+*
+* Two-tier search: name-based LIKE matching on graph_nodes, then FTS fallback
+* on observations_fts for richer content matching.
+* Query params:
+*   ?q=       - search query (required)
+*   ?type=    - entity type filter
+*   ?limit=20 - max results
+*   ?project= - project hash filter
+*/
+apiRoutes.get("/graph/search", (c) => {
+	const db = getDb$1(c);
+	const query = (c.req.query("q") || "").trim();
+	const typeFilter = c.req.query("type") || null;
+	const limitStr = c.req.query("limit");
+	const limit = limitStr ? Math.min(parseInt(limitStr, 10) || 20, 50) : 20;
+	const projectFilter = getProjectHash$2(c);
+	if (!query) return c.json({ results: [] });
+	const results = [];
+	const seenIds = /* @__PURE__ */ new Set();
+	try {
+		let nameSql = `SELECT id, name, type, observation_ids FROM graph_nodes WHERE name LIKE ? COLLATE NOCASE`;
+		const nameParams = [`%${query}%`];
+		if (projectFilter) {
+			nameSql += " AND project_hash = ?";
+			nameParams.push(projectFilter);
+		}
+		if (typeFilter) {
+			nameSql += " AND type = ?";
+			nameParams.push(typeFilter);
+		}
+		nameSql += " LIMIT 100";
+		const rows = db.prepare(nameSql).all(...nameParams);
+		const lowerQuery = query.toLowerCase();
+		const ranked = rows.map((row) => {
+			const lowerName = row.name.toLowerCase();
+			let rank;
+			if (lowerName === lowerQuery) rank = "exact";
+			else if (lowerName.startsWith(lowerQuery)) rank = "prefix";
+			else rank = "contains";
+			return {
+				row,
+				rank
+			};
+		});
+		const rankOrder = {
+			exact: 0,
+			prefix: 1,
+			contains: 2
+		};
+		ranked.sort((a, b) => rankOrder[a.rank] - rankOrder[b.rank]);
+		for (const { row, rank } of ranked) {
+			if (results.length >= limit) break;
+			seenIds.add(row.id);
+			results.push({
+				id: row.id,
+				label: row.name,
+				type: row.type,
+				observationCount: safeParseJsonArray(row.observation_ids).length,
+				matchSource: rank,
+				snippet: null
+			});
+		}
+	} catch {}
+	if (results.length < limit) try {
+		if (db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='observations_fts'").get()) {
+			let ftsSql = `
+          SELECT o.id AS obs_id, o.content, o.title,
+                 gn.id AS node_id, gn.name, gn.type, gn.observation_ids
+          FROM observations_fts fts
+          JOIN observations o ON o.id = fts.rowid
+          JOIN graph_nodes gn ON EXISTS (
+            SELECT 1 FROM json_each(gn.observation_ids) je WHERE je.value = o.id
+          )
+          WHERE observations_fts MATCH ?
+            AND o.deleted_at IS NULL`;
+			const ftsParams = [query + "*"];
+			if (projectFilter) {
+				ftsSql += " AND gn.project_hash = ?";
+				ftsParams.push(projectFilter);
+			}
+			if (typeFilter) {
+				ftsSql += " AND gn.type = ?";
+				ftsParams.push(typeFilter);
+			}
+			ftsSql += " LIMIT 50";
+			const ftsRows = db.prepare(ftsSql).all(...ftsParams);
+			for (const row of ftsRows) {
+				if (results.length >= limit) break;
+				if (seenIds.has(row.node_id)) continue;
+				seenIds.add(row.node_id);
+				const text = row.title ? `${row.title}: ${row.content}` : row.content;
+				const snippet = text.length > 120 ? text.substring(0, 120) + "..." : text;
+				results.push({
+					id: row.node_id,
+					label: row.name,
+					type: row.type,
+					observationCount: safeParseJsonArray(row.observation_ids).length,
+					matchSource: "fts",
+					snippet
+				});
+			}
+		}
+	} catch {}
+	return c.json({ results });
+});
+/**
+* GET /api/graph/analysis
+*
+* Returns graph analysis insights: type distributions, top entities by degree,
+* connected components, and recent activity stats.
+* 30-second in-memory cache to avoid recomputation.
+*/
+let analysisCache = null;
+apiRoutes.get("/graph/analysis", (c) => {
+	const db = getDb$1(c);
+	const projectFilter = getProjectHash$2(c);
+	const cacheKey = `analysis:${projectFilter || "all"}`;
+	const now = Date.now();
+	if (analysisCache && analysisCache.key === cacheKey && analysisCache.expiry > now) return c.json(analysisCache.data);
+	let entityTypes = [];
+	try {
+		let sql = "SELECT type, COUNT(*) as count FROM graph_nodes";
+		const params = [];
+		if (projectFilter) {
+			sql += " WHERE project_hash = ?";
+			params.push(projectFilter);
+		}
+		sql += " GROUP BY type ORDER BY count DESC";
+		entityTypes = db.prepare(sql).all(...params);
+	} catch {}
+	let relationshipTypes = [];
+	try {
+		let sql = "SELECT type, COUNT(*) as count FROM graph_edges";
+		const params = [];
+		if (projectFilter) {
+			sql += " WHERE project_hash = ?";
+			params.push(projectFilter);
+		}
+		sql += " GROUP BY type ORDER BY count DESC";
+		relationshipTypes = db.prepare(sql).all(...params);
+	} catch {}
+	let topEntities = [];
+	try {
+		let sql = `
+      SELECT gn.id, gn.name AS label, gn.type,
+        (SELECT COUNT(*) FROM graph_edges e WHERE e.source_id = gn.id${projectFilter ? " AND e.project_hash = ?" : ""})
+        + (SELECT COUNT(*) FROM graph_edges e WHERE e.target_id = gn.id${projectFilter ? " AND e.project_hash = ?" : ""})
+        AS degree
+      FROM graph_nodes gn`;
+		const params = [];
+		if (projectFilter) {
+			sql += " WHERE gn.project_hash = ?";
+			params.push(projectFilter);
+			params.unshift(projectFilter, projectFilter);
+		}
+		sql += " ORDER BY degree DESC LIMIT 10";
+		topEntities = db.prepare(sql).all(...params);
+	} catch {}
+	let components = [];
+	try {
+		let nodesSql = "SELECT id, name FROM graph_nodes";
+		const nodesParams = [];
+		if (projectFilter) {
+			nodesSql += " WHERE project_hash = ?";
+			nodesParams.push(projectFilter);
+		}
+		const allNodes = db.prepare(nodesSql).all(...nodesParams);
+		const nodeNameMap = new Map(allNodes.map((n) => [n.id, n.name]));
+		let edgesSql = "SELECT source_id, target_id FROM graph_edges";
+		const edgesParams = [];
+		if (projectFilter) {
+			edgesSql += " WHERE project_hash = ?";
+			edgesParams.push(projectFilter);
+		}
+		const allEdges = db.prepare(edgesSql).all(...edgesParams);
+		const adj = /* @__PURE__ */ new Map();
+		for (const node of allNodes) adj.set(node.id, /* @__PURE__ */ new Set());
+		for (const edge of allEdges) {
+			if (adj.has(edge.source_id)) adj.get(edge.source_id).add(edge.target_id);
+			if (adj.has(edge.target_id)) adj.get(edge.target_id).add(edge.source_id);
+		}
+		const visited = /* @__PURE__ */ new Set();
+		let componentId = 0;
+		for (const nodeId of adj.keys()) {
+			if (visited.has(nodeId)) continue;
+			const queue = [nodeId];
+			visited.add(nodeId);
+			const compNodes = [];
+			while (queue.length > 0) {
+				const current = queue.shift();
+				compNodes.push(current);
+				for (const neighbor of adj.get(current) || []) if (!visited.has(neighbor)) {
+					visited.add(neighbor);
+					queue.push(neighbor);
+				}
+			}
+			const compSet = new Set(compNodes);
+			let edgeCount = 0;
+			for (const edge of allEdges) if (compSet.has(edge.source_id) && compSet.has(edge.target_id)) edgeCount++;
+			let maxDeg = -1;
+			let labelNodeId = compNodes[0];
+			for (const nid of compNodes) {
+				const deg = (adj.get(nid) || /* @__PURE__ */ new Set()).size;
+				if (deg > maxDeg) {
+					maxDeg = deg;
+					labelNodeId = nid;
+				}
+			}
+			components.push({
+				id: componentId++,
+				label: nodeNameMap.get(labelNodeId) || labelNodeId,
+				nodeIds: compNodes,
+				nodeCount: compNodes.length,
+				edgeCount
+			});
+		}
+		components.sort((a, b) => b.nodeCount - a.nodeCount);
+	} catch {}
+	let recentActivity = {
+		lastDay: 0,
+		lastWeek: 0
+	};
+	try {
+		const dayAgo = (/* @__PURE__ */ new Date(Date.now() - 1440 * 60 * 1e3)).toISOString();
+		const weekAgo = (/* @__PURE__ */ new Date(Date.now() - 10080 * 60 * 1e3)).toISOString();
+		let daySql = "SELECT COUNT(*) as count FROM graph_nodes WHERE created_at >= ?";
+		let weekSql = "SELECT COUNT(*) as count FROM graph_nodes WHERE created_at >= ?";
+		const dayParams = [dayAgo];
+		const weekParams = [weekAgo];
+		if (projectFilter) {
+			daySql += " AND project_hash = ?";
+			weekSql += " AND project_hash = ?";
+			dayParams.push(projectFilter);
+			weekParams.push(projectFilter);
+		}
+		const dayRow = db.prepare(daySql).get(...dayParams);
+		const weekRow = db.prepare(weekSql).get(...weekParams);
+		recentActivity = {
+			lastDay: dayRow?.count ?? 0,
+			lastWeek: weekRow?.count ?? 0
+		};
+	} catch {}
+	const result = {
+		entityTypes,
+		relationshipTypes,
+		topEntities,
+		components,
+		recentActivity
+	};
+	analysisCache = {
+		key: cacheKey,
+		data: result,
+		expiry: now + 3e4
+	};
+	return c.json(result);
+});
+/**
+* GET /api/graph/communities
+*
+* Returns community assignments with colors from a 10-color palette.
+* Builds on the same BFS component detection as analysis.
+*/
+apiRoutes.get("/graph/communities", (c) => {
+	const db = getDb$1(c);
+	const projectFilter = getProjectHash$2(c);
+	const COMMUNITY_COLORS = [
+		"#58a6ff",
+		"#3fb950",
+		"#d2a8ff",
+		"#f0883e",
+		"#f85149",
+		"#79c0ff",
+		"#d29922",
+		"#7ee787",
+		"#f778ba",
+		"#a5d6ff"
+	];
+	const communities = [];
+	const isolatedNodes = [];
+	try {
+		let nodesSql = "SELECT id, name FROM graph_nodes";
+		const nodesParams = [];
+		if (projectFilter) {
+			nodesSql += " WHERE project_hash = ?";
+			nodesParams.push(projectFilter);
+		}
+		const allNodes = db.prepare(nodesSql).all(...nodesParams);
+		const nodeNameMap = new Map(allNodes.map((n) => [n.id, n.name]));
+		let edgesSql = "SELECT source_id, target_id FROM graph_edges";
+		const edgesParams = [];
+		if (projectFilter) {
+			edgesSql += " WHERE project_hash = ?";
+			edgesParams.push(projectFilter);
+		}
+		const allEdges = db.prepare(edgesSql).all(...edgesParams);
+		const adj = /* @__PURE__ */ new Map();
+		for (const node of allNodes) adj.set(node.id, /* @__PURE__ */ new Set());
+		for (const edge of allEdges) {
+			if (adj.has(edge.source_id)) adj.get(edge.source_id).add(edge.target_id);
+			if (adj.has(edge.target_id)) adj.get(edge.target_id).add(edge.source_id);
+		}
+		const visited = /* @__PURE__ */ new Set();
+		let communityId = 0;
+		for (const nodeId of adj.keys()) {
+			if (visited.has(nodeId)) continue;
+			const queue = [nodeId];
+			visited.add(nodeId);
+			const compNodes = [];
+			while (queue.length > 0) {
+				const current = queue.shift();
+				compNodes.push(current);
+				for (const neighbor of adj.get(current) || []) if (!visited.has(neighbor)) {
+					visited.add(neighbor);
+					queue.push(neighbor);
+				}
+			}
+			if (compNodes.length === 1 && (adj.get(compNodes[0])?.size ?? 0) === 0) {
+				isolatedNodes.push(compNodes[0]);
+				continue;
+			}
+			let maxDeg = -1;
+			let labelNodeId = compNodes[0];
+			for (const nid of compNodes) {
+				const deg = (adj.get(nid) || /* @__PURE__ */ new Set()).size;
+				if (deg > maxDeg) {
+					maxDeg = deg;
+					labelNodeId = nid;
+				}
+			}
+			communities.push({
+				id: communityId,
+				label: nodeNameMap.get(labelNodeId) || labelNodeId,
+				color: COMMUNITY_COLORS[communityId % COMMUNITY_COLORS.length],
+				nodeIds: compNodes
+			});
+			communityId++;
+		}
+		communities.sort((a, b) => b.nodeIds.length - a.nodeIds.length);
+	} catch {}
+	return c.json({
+		communities,
+		isolatedNodes
+	});
+});
 function safeParseJsonArray(json) {
 	try {
 		const parsed = JSON.parse(json);
@@ -4746,23 +5092,27 @@ adminRoutes.get("/stats", (c) => {
 	const observations = tableCount(db, "observations", projectWhere, projectParams);
 	const observationsFts = tableCount(db, "observations_fts");
 	const observationEmbeddings = tableCount(db, "observation_embeddings");
+	const stalenessFlags = tableCount(db, "staleness_flags");
 	const graphNodes = tableCount(db, "graph_nodes", projectWhere, projectParams);
 	const graphEdges = tableCount(db, "graph_edges", projectWhere, projectParams);
 	const sessions = tableCount(db, "sessions", projectWhere, projectParams);
 	const contextStashes = tableCount(db, "context_stashes", projectIdWhere, projectParams);
 	const thresholdHistory = tableCount(db, "threshold_history", projectIdWhere, projectParams);
 	const shiftDecisions = tableCount(db, "shift_decisions", projectIdWhere, projectParams);
+	const pendingNotifications = tableCount(db, "pending_notifications", projectIdWhere, projectParams);
 	const projects = tableCount(db, "project_metadata");
 	return c.json({
 		observations,
 		observationsFts,
 		observationEmbeddings,
+		stalenessFlags,
 		graphNodes,
 		graphEdges,
 		sessions,
 		contextStashes,
 		thresholdHistory,
 		shiftDecisions,
+		pendingNotifications,
 		projects,
 		scopedToProject: project || null
 	});
@@ -4787,6 +5137,11 @@ adminRoutes.post("/reset", async (c) => {
 	if (!validTypes.includes(type)) return c.json({ error: `Invalid type. Must be one of: ${validTypes.join(", ")}` }, 400);
 	const scoped = scope === "current" && project;
 	const deleted = [];
+	const exec = (sql) => {
+		try {
+			db.exec(sql);
+		} catch {}
+	};
 	const run = (sql, params) => {
 		try {
 			db.prepare(sql).run(...params || []);
@@ -4794,16 +5149,40 @@ adminRoutes.post("/reset", async (c) => {
 	};
 	db.transaction(() => {
 		if (type === "observations" || type === "all") {
+			exec("DROP TRIGGER IF EXISTS observations_ai");
+			exec("DROP TRIGGER IF EXISTS observations_au");
+			exec("DROP TRIGGER IF EXISTS observations_ad");
 			if (scoped) {
-				run(`DELETE FROM observations_fts WHERE rowid IN (SELECT rowid FROM observations WHERE project_hash = ?)`, [project]);
 				run("DELETE FROM observation_embeddings WHERE observation_id IN (SELECT id FROM observations WHERE project_hash = ?)", [project]);
+				run("DELETE FROM staleness_flags WHERE observation_id IN (SELECT id FROM observations WHERE project_hash = ?)", [project]);
 				run("DELETE FROM observations WHERE project_hash = ?", [project]);
 			} else {
-				run("DELETE FROM observations_fts");
 				run("DELETE FROM observation_embeddings");
+				run("DELETE FROM staleness_flags");
 				run("DELETE FROM observations");
 			}
-			deleted.push("observations", "observations_fts", "observation_embeddings");
+			exec("INSERT INTO observations_fts(observations_fts) VALUES('rebuild')");
+			exec(`
+        CREATE TRIGGER observations_ai AFTER INSERT ON observations BEGIN
+          INSERT INTO observations_fts(rowid, title, content)
+            VALUES (new.rowid, new.title, new.content);
+        END
+      `);
+			exec(`
+        CREATE TRIGGER observations_au AFTER UPDATE ON observations BEGIN
+          INSERT INTO observations_fts(observations_fts, rowid, title, content)
+            VALUES('delete', old.rowid, old.title, old.content);
+          INSERT INTO observations_fts(rowid, title, content)
+            VALUES (new.rowid, new.title, new.content);
+        END
+      `);
+			exec(`
+        CREATE TRIGGER observations_ad AFTER DELETE ON observations BEGIN
+          INSERT INTO observations_fts(observations_fts, rowid, title, content)
+            VALUES('delete', old.rowid, old.title, old.content);
+        END
+      `);
+			deleted.push("observations", "observations_fts", "observation_embeddings", "staleness_flags");
 		}
 		if (type === "graph" || type === "all") {
 			if (scoped) {
@@ -4820,18 +5199,21 @@ adminRoutes.post("/reset", async (c) => {
 				run("DELETE FROM shift_decisions WHERE project_id = ?", [project]);
 				run("DELETE FROM threshold_history WHERE project_id = ?", [project]);
 				run("DELETE FROM context_stashes WHERE project_id = ?", [project]);
+				run("DELETE FROM pending_notifications WHERE project_id = ?", [project]);
 				run("DELETE FROM sessions WHERE project_hash = ?", [project]);
 			} else {
 				run("DELETE FROM shift_decisions");
 				run("DELETE FROM threshold_history");
 				run("DELETE FROM context_stashes");
+				run("DELETE FROM pending_notifications");
 				run("DELETE FROM sessions");
 			}
-			deleted.push("sessions", "context_stashes", "threshold_history", "shift_decisions");
+			deleted.push("sessions", "context_stashes", "threshold_history", "shift_decisions", "pending_notifications");
 		}
 		if (type === "all" && !scoped) {
 			run("DELETE FROM project_metadata");
-			deleted.push("project_metadata");
+			run("DELETE FROM _migrations");
+			deleted.push("project_metadata", "_migrations");
 		}
 	})();
 	return c.json({
@@ -4997,6 +5379,12 @@ const topicShiftHandler = new TopicShiftHandler({
 	decisionLogger,
 	adaptiveManager
 });
+const TOPIC_SHIFT_SOURCES = new Set([
+	"hook:Write",
+	"hook:Edit",
+	"hook:Bash",
+	"manual"
+]);
 async function processUnembedded() {
 	if (!embeddingStore || !worker.isReady()) return;
 	const ids = embeddingStore.findUnembedded(10);
@@ -5019,7 +5407,7 @@ async function processUnembedded() {
 				sessionId: obs.sessionId ?? null,
 				createdAt: obs.createdAt
 			});
-			if (topicConfig.enabled) try {
+			if (topicConfig.enabled && TOPIC_SHIFT_SOURCES.has(obs.source)) try {
 				const obsWithEmbedding = {
 					...obs,
 					embedding

@@ -33,6 +33,10 @@
       <button class="filter-pill active" data-type="Solution"><span class="color-dot" style="background:#3fb950"></span>Solution <span class="count">0</span></button>
       <button class="filter-pill active" data-type="Tool"><span class="color-dot" style="background:#f0883e"></span>Tool <span class="count">0</span></button>
       <button class="filter-pill active" data-type="Person"><span class="color-dot" style="background:#79c0ff"></span>Person <span class="count">0</span></button>
+      <div class="filter-search-wrapper">
+        <input type="text" id="graph-search" class="graph-search-input" placeholder="Search nodes..." autocomplete="off" spellcheck="false">
+        <div id="search-results" class="search-results-dropdown hidden"></div>
+      </div>
     </div>
 
     <div id="time-range-bar">
@@ -59,7 +63,13 @@
           <button class="layout-btn active" data-layout="clustered" title="Force-directed layout">Clustered</button>
           <button class="layout-btn" data-layout="hierarchical" title="Top-down tree layout">Hierarchical</button>
           <button class="layout-btn" data-layout="concentric" title="Rings by entity type">Concentric</button>
+          <button class="layout-btn" data-layout="communities" title="Community-grouped layout">Communities</button>
         </div>
+        <button id="analysis-btn" class="analysis-btn" title="Graph analysis">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M1 14h14v1H0V0h1v14zM3 12V8h2v4H3zm3 0V5h2v7H6zm3 0V2h2v10H9zm3 0V6h2v6h-2z"/>
+          </svg>
+        </button>
         <button id="fit-btn" class="fit-btn" title="Fit to view" onclick="window.laminarkGraph && window.laminarkGraph.fitToView()">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <path d="M2 2h4v1.5H3.5V6H2V2zm8 0h4v4h-1.5V3.5H10V2zM2 10h1.5v2.5H6V14H2v-4zm10.5 2.5V10H14v4h-4v-1.5h2.5z"/>
@@ -156,6 +166,16 @@
       </div>
     </div>
   </div>
+
+  <aside id="analysis-panel" class="analysis-panel hidden">
+    <div class="panel-header">
+      <h3>Graph Analysis</h3>
+      <button id="analysis-close" aria-label="Close analysis panel">&times;</button>
+    </div>
+    <div id="analysis-body" class="analysis-body">
+      <p class="empty-state">Loading analysis...</p>
+    </div>
+  </aside>
 
   <aside id="detail-panel" class="hidden">
     <div class="panel-header">

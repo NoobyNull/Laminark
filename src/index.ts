@@ -109,6 +109,10 @@ const topicShiftHandler = new TopicShiftHandler({
 // Background embedding loop
 // ---------------------------------------------------------------------------
 
+// Sources that reflect user-directed work (for topic shift detection).
+// Exploration tools (Read/Glob/Grep/Task) are excluded to avoid false shifts.
+const TOPIC_SHIFT_SOURCES = new Set(['hook:Write', 'hook:Edit', 'hook:Bash', 'manual']);
+
 async function processUnembedded(): Promise<void> {
   if (!embeddingStore || !worker.isReady()) return;
 
@@ -142,8 +146,9 @@ async function processUnembedded(): Promise<void> {
         createdAt: obs.createdAt,
       });
 
-      // Topic shift detection -- evaluate the newly embedded observation
-      if (topicConfig.enabled) {
+      // Topic shift detection -- only evaluate user-directed observations
+      // (Write/Edit/Bash reflect user intent; Read/Glob/Grep are exploration noise)
+      if (topicConfig.enabled && TOPIC_SHIFT_SOURCES.has(obs.source)) {
         try {
           // Build the observation with its newly generated embedding
           const obsWithEmbedding = { ...obs, embedding };

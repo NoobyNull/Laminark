@@ -1,4 +1,5 @@
 ---
+name: status
 description: Show Laminark system status — connection info, memory count, token stats, and capabilities
 ---
 

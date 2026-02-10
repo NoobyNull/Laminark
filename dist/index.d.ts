@@ -389,7 +389,7 @@ declare class ThresholdStore {
 declare function isDebugEnabled(): boolean;
 /**
  * Returns the path to the single Laminark database file.
- * User decision: single database at ~/.laminark/data.db for ALL projects.
+ * Single database at ~/.claude/plugins/cache/laminark/data/data.db for ALL projects.
  */
 declare function getDbPath(): string;
 /**

@@ -566,6 +566,471 @@ apiRoutes.get('/node/:id/neighborhood', (c) => {
   return c.json({ center: centerId, nodes, edges });
 });
 
+/**
+ * GET /api/graph/search
+ *
+ * Two-tier search: name-based LIKE matching on graph_nodes, then FTS fallback
+ * on observations_fts for richer content matching.
+ * Query params:
+ *   ?q=       - search query (required)
+ *   ?type=    - entity type filter
+ *   ?limit=20 - max results
+ *   ?project= - project hash filter
+ */
+apiRoutes.get('/graph/search', (c) => {
+  const db = getDb(c);
+  const query = (c.req.query('q') || '').trim();
+  const typeFilter = c.req.query('type') || null;
+  const limitStr = c.req.query('limit');
+  const limit = limitStr ? Math.min(parseInt(limitStr, 10) || 20, 50) : 20;
+  const projectFilter = getProjectHash(c);
+
+  if (!query) {
+    return c.json({ results: [] });
+  }
+
+  interface SearchResult {
+    id: string;
+    label: string;
+    type: string;
+    observationCount: number;
+    matchSource: 'exact' | 'prefix' | 'contains' | 'fts';
+    snippet: string | null;
+  }
+
+  const results: SearchResult[] = [];
+  const seenIds = new Set<string>();
+
+  // Pass 1: Name-based matching ranked by exact > prefix > contains
+  try {
+    let nameSql = `SELECT id, name, type, observation_ids FROM graph_nodes WHERE name LIKE ? COLLATE NOCASE`;
+    const nameParams: unknown[] = [`%${query}%`];
+
+    if (projectFilter) {
+      nameSql += ' AND project_hash = ?';
+      nameParams.push(projectFilter);
+    }
+    if (typeFilter) {
+      nameSql += ' AND type = ?';
+      nameParams.push(typeFilter);
+    }
+
+    nameSql += ' LIMIT 100';
+
+    const rows = db.prepare(nameSql).all(...nameParams) as GraphNodeRow[];
+
+    // Rank results: exact > prefix > contains
+    const lowerQuery = query.toLowerCase();
+    const ranked = rows.map(row => {
+      const lowerName = row.name.toLowerCase();
+      let rank: 'exact' | 'prefix' | 'contains';
+      if (lowerName === lowerQuery) {
+        rank = 'exact';
+      } else if (lowerName.startsWith(lowerQuery)) {
+        rank = 'prefix';
+      } else {
+        rank = 'contains';
+      }
+      return { row, rank };
+    });
+
+    const rankOrder = { exact: 0, prefix: 1, contains: 2 };
+    ranked.sort((a, b) => rankOrder[a.rank] - rankOrder[b.rank]);
+
+    for (const { row, rank } of ranked) {
+      if (results.length >= limit) break;
+      seenIds.add(row.id);
+      results.push({
+        id: row.id,
+        label: row.name,
+        type: row.type,
+        observationCount: safeParseJsonArray(row.observation_ids).length,
+        matchSource: rank,
+        snippet: null,
+      });
+    }
+  } catch { /* graph_nodes may not exist */ }
+
+  // Pass 2: FTS fallback if name matching returned sparse results
+  if (results.length < limit) {
+    try {
+      // Check if observations_fts table exists
+      const ftsCheck = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='observations_fts'"
+      ).get();
+
+      if (ftsCheck) {
+        let ftsSql = `
+          SELECT o.id AS obs_id, o.content, o.title,
+                 gn.id AS node_id, gn.name, gn.type, gn.observation_ids
+          FROM observations_fts fts
+          JOIN observations o ON o.id = fts.rowid
+          JOIN graph_nodes gn ON EXISTS (
+            SELECT 1 FROM json_each(gn.observation_ids) je WHERE je.value = o.id
+          )
+          WHERE observations_fts MATCH ?
+            AND o.deleted_at IS NULL`;
+        const ftsParams: unknown[] = [query + '*'];
+
+        if (projectFilter) {
+          ftsSql += ' AND gn.project_hash = ?';
+          ftsParams.push(projectFilter);
+        }
+        if (typeFilter) {
+          ftsSql += ' AND gn.type = ?';
+          ftsParams.push(typeFilter);
+        }
+
+        ftsSql += ' LIMIT 50';
+
+        interface FtsRow {
+          obs_id: string;
+          content: string;
+          title: string | null;
+          node_id: string;
+          name: string;
+          type: string;
+          observation_ids: string;
+        }
+
+        const ftsRows = db.prepare(ftsSql).all(...ftsParams) as FtsRow[];
+
+        for (const row of ftsRows) {
+          if (results.length >= limit) break;
+          if (seenIds.has(row.node_id)) continue;
+          seenIds.add(row.node_id);
+
+          // Build snippet from matching observation content
+          const text = row.title ? `${row.title}: ${row.content}` : row.content;
+          const snippet = text.length > 120 ? text.substring(0, 120) + '...' : text;
+
+          results.push({
+            id: row.node_id,
+            label: row.name,
+            type: row.type,
+            observationCount: safeParseJsonArray(row.observation_ids).length,
+            matchSource: 'fts',
+            snippet,
+          });
+        }
+      }
+    } catch { /* FTS table may not exist */ }
+  }
+
+  return c.json({ results });
+});
+
+/**
+ * GET /api/graph/analysis
+ *
+ * Returns graph analysis insights: type distributions, top entities by degree,
+ * connected components, and recent activity stats.
+ * 30-second in-memory cache to avoid recomputation.
+ */
+
+let analysisCache: { key: string; data: unknown; expiry: number } | null = null;
+
+apiRoutes.get('/graph/analysis', (c) => {
+  const db = getDb(c);
+  const projectFilter = getProjectHash(c);
+  const cacheKey = `analysis:${projectFilter || 'all'}`;
+  const now = Date.now();
+
+  // Check cache
+  if (analysisCache && analysisCache.key === cacheKey && analysisCache.expiry > now) {
+    return c.json(analysisCache.data as Record<string, unknown>);
+  }
+
+  // Entity type distribution
+  let entityTypes: Array<{ type: string; count: number }> = [];
+  try {
+    let sql = 'SELECT type, COUNT(*) as count FROM graph_nodes';
+    const params: unknown[] = [];
+    if (projectFilter) {
+      sql += ' WHERE project_hash = ?';
+      params.push(projectFilter);
+    }
+    sql += ' GROUP BY type ORDER BY count DESC';
+    entityTypes = db.prepare(sql).all(...params) as Array<{ type: string; count: number }>;
+  } catch { /* table may not exist */ }
+
+  // Relationship type distribution
+  let relationshipTypes: Array<{ type: string; count: number }> = [];
+  try {
+    let sql = 'SELECT type, COUNT(*) as count FROM graph_edges';
+    const params: unknown[] = [];
+    if (projectFilter) {
+      sql += ' WHERE project_hash = ?';
+      params.push(projectFilter);
+    }
+    sql += ' GROUP BY type ORDER BY count DESC';
+    relationshipTypes = db.prepare(sql).all(...params) as Array<{ type: string; count: number }>;
+  } catch { /* table may not exist */ }
+
+  // Top 10 entities by degree (most connected)
+  let topEntities: Array<{ id: string; label: string; type: string; degree: number }> = [];
+  try {
+    let sql = `
+      SELECT gn.id, gn.name AS label, gn.type,
+        (SELECT COUNT(*) FROM graph_edges e WHERE e.source_id = gn.id${projectFilter ? ' AND e.project_hash = ?' : ''})
+        + (SELECT COUNT(*) FROM graph_edges e WHERE e.target_id = gn.id${projectFilter ? ' AND e.project_hash = ?' : ''})
+        AS degree
+      FROM graph_nodes gn`;
+    const params: unknown[] = [];
+    if (projectFilter) {
+      sql += ' WHERE gn.project_hash = ?';
+      params.push(projectFilter);
+      // Two extra params for the subqueries
+      params.unshift(projectFilter, projectFilter);
+    }
+    sql += ' ORDER BY degree DESC LIMIT 10';
+    topEntities = db.prepare(sql).all(...params) as Array<{ id: string; label: string; type: string; degree: number }>;
+  } catch { /* table may not exist */ }
+
+  // Connected components via in-memory BFS
+  interface ComponentResult {
+    id: number;
+    label: string;
+    nodeIds: string[];
+    nodeCount: number;
+    edgeCount: number;
+  }
+
+  let components: ComponentResult[] = [];
+  try {
+    // Fetch all node IDs
+    let nodesSql = 'SELECT id, name FROM graph_nodes';
+    const nodesParams: unknown[] = [];
+    if (projectFilter) {
+      nodesSql += ' WHERE project_hash = ?';
+      nodesParams.push(projectFilter);
+    }
+    const allNodes = db.prepare(nodesSql).all(...nodesParams) as Array<{ id: string; name: string }>;
+    const nodeNameMap = new Map(allNodes.map(n => [n.id, n.name]));
+
+    // Fetch all edges
+    let edgesSql = 'SELECT source_id, target_id FROM graph_edges';
+    const edgesParams: unknown[] = [];
+    if (projectFilter) {
+      edgesSql += ' WHERE project_hash = ?';
+      edgesParams.push(projectFilter);
+    }
+    const allEdges = db.prepare(edgesSql).all(...edgesParams) as Array<{ source_id: string; target_id: string }>;
+
+    // Build adjacency list
+    const adj = new Map<string, Set<string>>();
+    for (const node of allNodes) {
+      adj.set(node.id, new Set());
+    }
+    for (const edge of allEdges) {
+      if (adj.has(edge.source_id)) adj.get(edge.source_id)!.add(edge.target_id);
+      if (adj.has(edge.target_id)) adj.get(edge.target_id)!.add(edge.source_id);
+    }
+
+    // BFS to find connected components
+    const visited = new Set<string>();
+    let componentId = 0;
+
+    for (const nodeId of adj.keys()) {
+      if (visited.has(nodeId)) continue;
+
+      const queue = [nodeId];
+      visited.add(nodeId);
+      const compNodes: string[] = [];
+
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        compNodes.push(current);
+        for (const neighbor of adj.get(current) || []) {
+          if (!visited.has(neighbor)) {
+            visited.add(neighbor);
+            queue.push(neighbor);
+          }
+        }
+      }
+
+      // Count edges within this component
+      const compSet = new Set(compNodes);
+      let edgeCount = 0;
+      for (const edge of allEdges) {
+        if (compSet.has(edge.source_id) && compSet.has(edge.target_id)) {
+          edgeCount++;
+        }
+      }
+
+      // Label by highest-degree node in component
+      let maxDeg = -1;
+      let labelNodeId = compNodes[0];
+      for (const nid of compNodes) {
+        const deg = (adj.get(nid) || new Set()).size;
+        if (deg > maxDeg) {
+          maxDeg = deg;
+          labelNodeId = nid;
+        }
+      }
+
+      components.push({
+        id: componentId++,
+        label: nodeNameMap.get(labelNodeId) || labelNodeId,
+        nodeIds: compNodes,
+        nodeCount: compNodes.length,
+        edgeCount,
+      });
+    }
+
+    // Sort by size descending
+    components.sort((a, b) => b.nodeCount - a.nodeCount);
+  } catch { /* tables may not exist */ }
+
+  // Recent activity stats
+  let recentActivity = { lastDay: 0, lastWeek: 0 };
+  try {
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    let daySql = 'SELECT COUNT(*) as count FROM graph_nodes WHERE created_at >= ?';
+    let weekSql = 'SELECT COUNT(*) as count FROM graph_nodes WHERE created_at >= ?';
+    const dayParams: unknown[] = [dayAgo];
+    const weekParams: unknown[] = [weekAgo];
+
+    if (projectFilter) {
+      daySql += ' AND project_hash = ?';
+      weekSql += ' AND project_hash = ?';
+      dayParams.push(projectFilter);
+      weekParams.push(projectFilter);
+    }
+
+    const dayRow = db.prepare(daySql).get(...dayParams) as { count: number } | undefined;
+    const weekRow = db.prepare(weekSql).get(...weekParams) as { count: number } | undefined;
+    recentActivity = {
+      lastDay: dayRow?.count ?? 0,
+      lastWeek: weekRow?.count ?? 0,
+    };
+  } catch { /* table may not exist */ }
+
+  const result = {
+    entityTypes,
+    relationshipTypes,
+    topEntities,
+    components,
+    recentActivity,
+  };
+
+  // Cache for 30 seconds
+  analysisCache = { key: cacheKey, data: result, expiry: now + 30_000 };
+
+  return c.json(result);
+});
+
+/**
+ * GET /api/graph/communities
+ *
+ * Returns community assignments with colors from a 10-color palette.
+ * Builds on the same BFS component detection as analysis.
+ */
+apiRoutes.get('/graph/communities', (c) => {
+  const db = getDb(c);
+  const projectFilter = getProjectHash(c);
+
+  const COMMUNITY_COLORS = [
+    '#58a6ff', '#3fb950', '#d2a8ff', '#f0883e', '#f85149',
+    '#79c0ff', '#d29922', '#7ee787', '#f778ba', '#a5d6ff',
+  ];
+
+  interface Community {
+    id: number;
+    label: string;
+    color: string;
+    nodeIds: string[];
+  }
+
+  const communities: Community[] = [];
+  const isolatedNodes: string[] = [];
+
+  try {
+    // Fetch all nodes
+    let nodesSql = 'SELECT id, name FROM graph_nodes';
+    const nodesParams: unknown[] = [];
+    if (projectFilter) {
+      nodesSql += ' WHERE project_hash = ?';
+      nodesParams.push(projectFilter);
+    }
+    const allNodes = db.prepare(nodesSql).all(...nodesParams) as Array<{ id: string; name: string }>;
+    const nodeNameMap = new Map(allNodes.map(n => [n.id, n.name]));
+
+    // Fetch all edges
+    let edgesSql = 'SELECT source_id, target_id FROM graph_edges';
+    const edgesParams: unknown[] = [];
+    if (projectFilter) {
+      edgesSql += ' WHERE project_hash = ?';
+      edgesParams.push(projectFilter);
+    }
+    const allEdges = db.prepare(edgesSql).all(...edgesParams) as Array<{ source_id: string; target_id: string }>;
+
+    // Build adjacency list
+    const adj = new Map<string, Set<string>>();
+    for (const node of allNodes) {
+      adj.set(node.id, new Set());
+    }
+    for (const edge of allEdges) {
+      if (adj.has(edge.source_id)) adj.get(edge.source_id)!.add(edge.target_id);
+      if (adj.has(edge.target_id)) adj.get(edge.target_id)!.add(edge.source_id);
+    }
+
+    // BFS to find connected components
+    const visited = new Set<string>();
+    let communityId = 0;
+
+    for (const nodeId of adj.keys()) {
+      if (visited.has(nodeId)) continue;
+
+      const queue = [nodeId];
+      visited.add(nodeId);
+      const compNodes: string[] = [];
+
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        compNodes.push(current);
+        for (const neighbor of adj.get(current) || []) {
+          if (!visited.has(neighbor)) {
+            visited.add(neighbor);
+            queue.push(neighbor);
+          }
+        }
+      }
+
+      if (compNodes.length === 1 && (adj.get(compNodes[0])?.size ?? 0) === 0) {
+        isolatedNodes.push(compNodes[0]);
+        continue;
+      }
+
+      // Label by highest-degree node
+      let maxDeg = -1;
+      let labelNodeId = compNodes[0];
+      for (const nid of compNodes) {
+        const deg = (adj.get(nid) || new Set()).size;
+        if (deg > maxDeg) {
+          maxDeg = deg;
+          labelNodeId = nid;
+        }
+      }
+
+      communities.push({
+        id: communityId,
+        label: nodeNameMap.get(labelNodeId) || labelNodeId,
+        color: COMMUNITY_COLORS[communityId % COMMUNITY_COLORS.length],
+        nodeIds: compNodes,
+      });
+      communityId++;
+    }
+
+    // Sort by size descending
+    communities.sort((a, b) => b.nodeIds.length - a.nodeIds.length);
+  } catch { /* tables may not exist */ }
+
+  return c.json({ communities, isolatedNodes });
+});
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

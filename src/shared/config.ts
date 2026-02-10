@@ -35,7 +35,7 @@ export function isDebugEnabled(): boolean {
 
   // Check config.json
   try {
-    const configPath = join(homedir(), '.laminark', 'config.json');
+    const configPath = join(getConfigDir(), 'config.json');
     const raw = readFileSync(configPath, 'utf-8');
     const config = JSON.parse(raw) as Record<string, unknown>;
     if (config.debug === true) {
@@ -58,22 +58,23 @@ export function isDebugEnabled(): boolean {
 export const DEFAULT_BUSY_TIMEOUT = 5000;
 
 /**
- * Returns the Laminark configuration directory (~/.laminark/).
+ * Returns the Laminark data directory.
+ * Default: ~/.claude/plugins/cache/laminark/data/
  * Creates the directory recursively if it does not exist.
  *
  * Supports LAMINARK_DATA_DIR env var override for testing --
  * redirects all data storage to a custom directory without
- * affecting the real ~/.laminark/ data.
+ * affecting the real plugin data.
  */
 export function getConfigDir(): string {
-  const dir = process.env.LAMINARK_DATA_DIR || join(homedir(), '.laminark');
+  const dir = process.env.LAMINARK_DATA_DIR || join(homedir(), '.claude', 'plugins', 'cache', 'laminark', 'data');
   mkdirSync(dir, { recursive: true });
   return dir;
 }
 
 /**
  * Returns the path to the single Laminark database file.
- * User decision: single database at ~/.laminark/data.db for ALL projects.
+ * Single database at ~/.claude/plugins/cache/laminark/data/data.db for ALL projects.
  */
 export function getDbPath(): string {
   return join(getConfigDir(), 'data.db');

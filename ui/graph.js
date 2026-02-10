@@ -301,6 +301,24 @@ function buildCytoscapeStyles() {
     });
   });
 
+  // Search dimmed elements
+  styles.push({
+    selector: '.search-dimmed',
+    style: {
+      'opacity': 0.15,
+    },
+  });
+
+  // Search match highlight (gold border)
+  styles.push({
+    selector: '.search-match',
+    style: {
+      'border-width': 3,
+      'border-color': '#d29922',
+      'border-opacity': 1,
+    },
+  });
+
   // Culled elements (hidden via viewport culling)
   styles.push({
     selector: '.culled',
@@ -1267,6 +1285,7 @@ function updateBreadcrumbs() {
 function setLayout(layoutName) {
   if (!LAYOUT_CONFIGS[layoutName]) return;
 
+  var previousLayout = currentLayout;
   currentLayout = layoutName;
   localStorage.setItem('laminark-layout', layoutName);
 
@@ -1276,13 +1295,44 @@ function setLayout(layoutName) {
     btn.classList.toggle('active', btn.getAttribute('data-layout') === layoutName);
   });
 
+  // Clear community colors when switching away from communities layout
+  if (previousLayout === 'communities' && layoutName !== 'communities') {
+    clearCommunityColors();
+  }
+
   // Re-run layout if not in focus mode
   if (!isFocusMode && cy && cy.nodes().length > 0) {
-    var layoutConfig = LAYOUT_CONFIGS[layoutName];
-    cy.layout(Object.assign({}, layoutConfig)).run();
-    cy.one('layoutstop', function () {
-      cy.fit(undefined, 50);
-    });
+    if (layoutName === 'communities') {
+      // Fetch community data, then apply colors and layout
+      var params = new URLSearchParams();
+      if (window.laminarkState && window.laminarkState.currentProject) {
+        params.set('project', window.laminarkState.currentProject);
+      }
+      fetch('/api/graph/communities' + (params.toString() ? '?' + params.toString() : ''))
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.communities) {
+            applyCommunityColors(data.communities);
+          }
+          var layoutConfig = LAYOUT_CONFIGS[layoutName];
+          cy.layout(Object.assign({}, layoutConfig)).run();
+          cy.one('layoutstop', function () {
+            cy.fit(undefined, 50);
+          });
+        })
+        .catch(function (err) {
+          console.error('[laminark:graph] Failed to fetch communities:', err);
+          // Fallback: run layout without community colors
+          var layoutConfig = LAYOUT_CONFIGS[layoutName];
+          cy.layout(Object.assign({}, layoutConfig)).run();
+        });
+    } else {
+      var layoutConfig = LAYOUT_CONFIGS[layoutName];
+      cy.layout(Object.assign({}, layoutConfig)).run();
+      cy.one('layoutstop', function () {
+        cy.fit(undefined, 50);
+      });
+    }
   }
 }
 
@@ -1298,6 +1348,195 @@ function initLayoutSelector() {
     btn.addEventListener('click', function () {
       setLayout(btn.getAttribute('data-layout'));
     });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Search functions
+// ---------------------------------------------------------------------------
+
+/**
+ * Searches loaded Cytoscape nodes by label. Returns matching node data.
+ * @param {string} query - Search query
+ * @returns {Array<{id: string, label: string, type: string}>}
+ */
+function searchNodes(query) {
+  if (!cy || !query) return [];
+
+  var lowerQuery = query.toLowerCase();
+  var results = [];
+
+  cy.nodes().forEach(function (node) {
+    var label = (node.data('label') || '').toLowerCase();
+    if (label.indexOf(lowerQuery) >= 0) {
+      results.push({
+        id: node.data('id'),
+        label: node.data('label'),
+        type: node.data('type'),
+      });
+    }
+  });
+
+  // Sort: exact > prefix > contains
+  results.sort(function (a, b) {
+    var aLower = a.label.toLowerCase();
+    var bLower = b.label.toLowerCase();
+    var aExact = aLower === lowerQuery;
+    var bExact = bLower === lowerQuery;
+    if (aExact && !bExact) return -1;
+    if (!aExact && bExact) return 1;
+    var aPrefix = aLower.startsWith(lowerQuery);
+    var bPrefix = bLower.startsWith(lowerQuery);
+    if (aPrefix && !bPrefix) return -1;
+    if (!aPrefix && bPrefix) return 1;
+    return 0;
+  });
+
+  return results.slice(0, 20);
+}
+
+/**
+ * Highlights matching nodes and dims the rest.
+ * @param {string[]} matchIds - Node IDs to highlight
+ */
+function highlightSearchMatches(matchIds) {
+  if (!cy) return;
+  var idSet = new Set(matchIds);
+
+  cy.elements().forEach(function (ele) {
+    if (ele.isNode()) {
+      if (idSet.has(ele.data('id'))) {
+        ele.removeClass('search-dimmed');
+        ele.addClass('search-match');
+      } else {
+        ele.addClass('search-dimmed');
+        ele.removeClass('search-match');
+      }
+    } else {
+      // Dim edges connected to dimmed nodes
+      var src = ele.source();
+      var tgt = ele.target();
+      if (idSet.has(src.data('id')) && idSet.has(tgt.data('id'))) {
+        ele.removeClass('search-dimmed');
+      } else {
+        ele.addClass('search-dimmed');
+      }
+    }
+  });
+}
+
+/**
+ * Clears search highlight, restoring all nodes to normal.
+ */
+function clearSearchHighlight() {
+  if (!cy) return;
+  cy.elements().removeClass('search-dimmed').removeClass('search-match');
+}
+
+// ---------------------------------------------------------------------------
+// Cluster/community highlight
+// ---------------------------------------------------------------------------
+
+/**
+ * Highlights a cluster of nodes and dims the rest.
+ * @param {string[]} nodeIds - Node IDs in the cluster
+ */
+function highlightCluster(nodeIds) {
+  if (!cy) return;
+  var idSet = new Set(nodeIds);
+
+  cy.elements().forEach(function (ele) {
+    if (ele.isNode()) {
+      if (idSet.has(ele.data('id'))) {
+        ele.removeClass('search-dimmed');
+        ele.addClass('search-match');
+      } else {
+        ele.addClass('search-dimmed');
+        ele.removeClass('search-match');
+      }
+    } else {
+      var src = ele.source();
+      var tgt = ele.target();
+      if (idSet.has(src.data('id')) && idSet.has(tgt.data('id'))) {
+        ele.removeClass('search-dimmed');
+      } else {
+        ele.addClass('search-dimmed');
+      }
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Community layout + coloring
+// ---------------------------------------------------------------------------
+
+/**
+ * Community layout config: COSE with variable edge lengths.
+ * Intra-community edges are short (80px), inter-community edges are long (250px).
+ */
+var communityNodeMap = {}; // nodeId -> communityId, populated by applyCommunityColors
+
+LAYOUT_CONFIGS.communities = {
+  name: 'cose',
+  animate: true,
+  animationDuration: 500,
+  nodeRepulsion: function () { return 600000; },
+  idealEdgeLength: function (edge) {
+    var srcId = edge.source().data('id');
+    var tgtId = edge.target().data('id');
+    var srcComm = communityNodeMap[srcId];
+    var tgtComm = communityNodeMap[tgtId];
+    if (srcComm !== undefined && tgtComm !== undefined && srcComm === tgtComm) {
+      return 80;
+    }
+    return 250;
+  },
+  gravity: 0.3,
+  numIter: 1200,
+  nodeDimensionsIncludeLabels: true,
+};
+
+/**
+ * Applies community colors to graph nodes.
+ * @param {Array<{id: number, color: string, nodeIds: string[]}>} communities
+ */
+function applyCommunityColors(communities) {
+  if (!cy) return;
+
+  // Build node -> community map
+  communityNodeMap = {};
+  communities.forEach(function (comm) {
+    comm.nodeIds.forEach(function (nodeId) {
+      communityNodeMap[nodeId] = comm.id;
+    });
+  });
+
+  // Apply colors
+  communities.forEach(function (comm) {
+    comm.nodeIds.forEach(function (nodeId) {
+      var node = cy.getElementById(nodeId);
+      if (node.length > 0) {
+        node.data('communityColor', comm.color);
+        node.style('background-color', comm.color);
+      }
+    });
+  });
+}
+
+/**
+ * Restores type-based colors, clearing community colors.
+ */
+function clearCommunityColors() {
+  if (!cy) return;
+  communityNodeMap = {};
+
+  cy.nodes().forEach(function (node) {
+    var type = node.data('type');
+    var style = ENTITY_STYLES[type];
+    if (style) {
+      node.style('background-color', style.color);
+    }
+    node.removeData('communityColor');
   });
 }
 
@@ -1336,4 +1575,10 @@ window.laminarkGraph = {
   isFocusMode: function () { return isFocusMode; },
   ENTITY_STYLES: ENTITY_STYLES,
   getCy: function () { return cy; },
+  searchNodes: searchNodes,
+  highlightSearchMatches: highlightSearchMatches,
+  clearSearchHighlight: clearSearchHighlight,
+  highlightCluster: highlightCluster,
+  applyCommunityColors: applyCommunityColors,
+  clearCommunityColors: clearCommunityColors,
 };

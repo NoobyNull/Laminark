@@ -31,11 +31,13 @@
     var cards = [
       { label: 'Observations', value: stats.observations, id: 'stat-observations' },
       { label: 'Embeddings', value: stats.observationEmbeddings, id: 'stat-embeddings' },
+      { label: 'Staleness Flags', value: stats.stalenessFlags || 0, id: 'stat-staleness' },
       { label: 'Graph Nodes', value: stats.graphNodes, id: 'stat-nodes' },
       { label: 'Graph Edges', value: stats.graphEdges, id: 'stat-edges' },
       { label: 'Sessions', value: stats.sessions, id: 'stat-sessions' },
       { label: 'Context Stashes', value: stats.contextStashes, id: 'stat-stashes' },
       { label: 'Shift Decisions', value: stats.shiftDecisions, id: 'stat-shifts' },
+      { label: 'Notifications', value: stats.pendingNotifications || 0, id: 'stat-notifications' },
       { label: 'Projects', value: stats.projects, id: 'stat-projects' },
     ];
 
@@ -92,18 +94,20 @@
 
   function getAffectedCount(type) {
     if (!currentStats) return 0;
+    var s = currentStats;
     switch (type) {
       case 'observations':
-        return currentStats.observations + currentStats.observationEmbeddings;
+        return s.observations + s.observationEmbeddings + (s.stalenessFlags || 0);
       case 'graph':
-        return currentStats.graphNodes + currentStats.graphEdges;
+        return s.graphNodes + s.graphEdges;
       case 'sessions':
-        return currentStats.sessions + currentStats.contextStashes + currentStats.shiftDecisions + currentStats.thresholdHistory;
+        return s.sessions + s.contextStashes + s.shiftDecisions + s.thresholdHistory + (s.pendingNotifications || 0);
       case 'all':
-        return currentStats.observations + currentStats.observationEmbeddings +
-          currentStats.graphNodes + currentStats.graphEdges +
-          currentStats.sessions + currentStats.contextStashes +
-          currentStats.shiftDecisions + currentStats.thresholdHistory;
+        return s.observations + s.observationEmbeddings + (s.stalenessFlags || 0) +
+          s.graphNodes + s.graphEdges +
+          s.sessions + s.contextStashes +
+          s.shiftDecisions + s.thresholdHistory + (s.pendingNotifications || 0) +
+          s.projects;
       default:
         return 0;
     }

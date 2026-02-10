@@ -681,6 +681,471 @@ function escapeHtml(text) {
 }
 
 // ---------------------------------------------------------------------------
+// Graph Search
+// ---------------------------------------------------------------------------
+
+function initSearch() {
+  var searchInput = document.getElementById('graph-search');
+  var dropdown = document.getElementById('search-results');
+  if (!searchInput || !dropdown) return;
+
+  var debounceTimer = null;
+  var activeIndex = -1;
+  var currentResults = [];
+
+  function renderDropdown(results) {
+    currentResults = results;
+    activeIndex = -1;
+
+    if (results.length === 0 && searchInput.value.trim().length > 0) {
+      dropdown.innerHTML = '<div class="search-no-results">No matches found</div>';
+      dropdown.classList.remove('hidden');
+      return;
+    }
+
+    if (results.length === 0) {
+      dropdown.classList.add('hidden');
+      return;
+    }
+
+    dropdown.innerHTML = '';
+    results.forEach(function (r, idx) {
+      var item = document.createElement('div');
+      item.className = 'search-result-item';
+      item.setAttribute('data-index', idx);
+
+      var dot = document.createElement('span');
+      dot.className = 'search-result-dot';
+      var style = (window.laminarkGraph && window.laminarkGraph.ENTITY_STYLES[r.type]) || { color: '#8b949e' };
+      dot.style.background = style.color;
+      item.appendChild(dot);
+
+      var labelWrap = document.createElement('div');
+      labelWrap.style.flex = '1';
+      labelWrap.style.minWidth = '0';
+
+      var label = document.createElement('div');
+      label.className = 'search-result-label';
+      label.textContent = r.label;
+      labelWrap.appendChild(label);
+
+      if (r.snippet) {
+        var snippet = document.createElement('div');
+        snippet.className = 'search-result-snippet';
+        snippet.textContent = r.snippet;
+        labelWrap.appendChild(snippet);
+      }
+
+      item.appendChild(labelWrap);
+
+      var typeBadge = document.createElement('span');
+      typeBadge.className = 'search-result-type';
+      typeBadge.textContent = r.type;
+      item.appendChild(typeBadge);
+
+      if (r.matchSource) {
+        var src = document.createElement('span');
+        src.className = 'search-result-source';
+        src.textContent = r.matchSource;
+        item.appendChild(src);
+      }
+
+      item.addEventListener('click', function () {
+        selectResult(r);
+      });
+
+      dropdown.appendChild(item);
+    });
+
+    dropdown.classList.remove('hidden');
+  }
+
+  function selectResult(r) {
+    dropdown.classList.add('hidden');
+    searchInput.value = r.label;
+
+    if (window.laminarkGraph) {
+      window.laminarkGraph.selectAndCenterNode(r.id);
+      window.laminarkGraph.highlightSearchMatches([r.id]);
+    }
+  }
+
+  function clearSearch() {
+    searchInput.value = '';
+    dropdown.classList.add('hidden');
+    currentResults = [];
+    activeIndex = -1;
+    if (window.laminarkGraph) {
+      window.laminarkGraph.clearSearchHighlight();
+    }
+  }
+
+  // Debounced client-side search on keyup
+  searchInput.addEventListener('input', function () {
+    var query = searchInput.value.trim();
+
+    if (debounceTimer) clearTimeout(debounceTimer);
+
+    if (!query) {
+      clearSearch();
+      return;
+    }
+
+    debounceTimer = setTimeout(function () {
+      // Client-side search on loaded Cytoscape data
+      var results = [];
+      if (window.laminarkGraph && window.laminarkGraph.searchNodes) {
+        var clientResults = window.laminarkGraph.searchNodes(query);
+        results = clientResults.map(function (r) {
+          return {
+            id: r.id,
+            label: r.label,
+            type: r.type,
+            matchSource: null,
+            snippet: null,
+          };
+        });
+      }
+
+      // Highlight matching nodes in graph
+      if (results.length > 0 && window.laminarkGraph) {
+        window.laminarkGraph.highlightSearchMatches(results.map(function (r) { return r.id; }));
+      }
+
+      renderDropdown(results);
+    }, 250);
+  });
+
+  // Enter triggers server-side search
+  searchInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      var query = searchInput.value.trim();
+      if (!query) return;
+
+      var params = new URLSearchParams({ q: query, limit: '20' });
+      if (window.laminarkState.currentProject) {
+        params.set('project', window.laminarkState.currentProject);
+      }
+
+      fetch('/api/graph/search?' + params.toString())
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          renderDropdown(data.results || []);
+
+          // Highlight all matching nodes in graph
+          if (data.results && data.results.length > 0 && window.laminarkGraph) {
+            window.laminarkGraph.highlightSearchMatches(
+              data.results.map(function (r) { return r.id; })
+            );
+          }
+        })
+        .catch(function (err) {
+          console.error('[laminark] Search failed:', err);
+        });
+    } else if (e.key === 'Escape') {
+      clearSearch();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (currentResults.length > 0) {
+        activeIndex = Math.min(activeIndex + 1, currentResults.length - 1);
+        updateActiveItem();
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (currentResults.length > 0) {
+        activeIndex = Math.max(activeIndex - 1, 0);
+        updateActiveItem();
+      }
+    }
+
+    // Enter on active dropdown item
+    if (e.key === 'Enter' && activeIndex >= 0 && currentResults[activeIndex]) {
+      selectResult(currentResults[activeIndex]);
+    }
+  });
+
+  function updateActiveItem() {
+    var items = dropdown.querySelectorAll('.search-result-item');
+    items.forEach(function (item, idx) {
+      item.classList.toggle('active', idx === activeIndex);
+    });
+  }
+
+  // Close dropdown on outside click
+  document.addEventListener('click', function (e) {
+    if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+      dropdown.classList.add('hidden');
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Graph Analysis Panel
+// ---------------------------------------------------------------------------
+
+var analysisOpen = false;
+
+function initAnalysis() {
+  var btn = document.getElementById('analysis-btn');
+  var panel = document.getElementById('analysis-panel');
+  var closeBtn = document.getElementById('analysis-close');
+  if (!btn || !panel) return;
+
+  btn.addEventListener('click', function () {
+    analysisOpen = !analysisOpen;
+    btn.classList.toggle('active', analysisOpen);
+    if (analysisOpen) {
+      panel.classList.remove('hidden');
+      loadAnalysis();
+    } else {
+      panel.classList.add('hidden');
+      // Clear any cluster highlights
+      if (window.laminarkGraph) {
+        window.laminarkGraph.clearSearchHighlight();
+      }
+    }
+  });
+
+  if (closeBtn) {
+    closeBtn.addEventListener('click', function () {
+      analysisOpen = false;
+      panel.classList.add('hidden');
+      btn.classList.remove('active');
+      if (window.laminarkGraph) {
+        window.laminarkGraph.clearSearchHighlight();
+      }
+    });
+  }
+}
+
+function loadAnalysis() {
+  var body = document.getElementById('analysis-body');
+  if (!body) return;
+
+  body.innerHTML = '<p class="empty-state">Loading analysis...</p>';
+
+  var params = new URLSearchParams();
+  if (window.laminarkState.currentProject) {
+    params.set('project', window.laminarkState.currentProject);
+  }
+
+  fetch('/api/graph/analysis' + (params.toString() ? '?' + params.toString() : ''))
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      renderAnalysis(body, data);
+    })
+    .catch(function (err) {
+      console.error('[laminark] Analysis failed:', err);
+      body.innerHTML = '<p class="empty-state">Failed to load analysis</p>';
+    });
+}
+
+function renderAnalysis(container, data) {
+  container.innerHTML = '';
+
+  var entityStyles = (window.laminarkGraph && window.laminarkGraph.ENTITY_STYLES) || {};
+
+  // Recent activity
+  if (data.recentActivity) {
+    var actSection = document.createElement('div');
+    actSection.className = 'analysis-section';
+
+    var actTitle = document.createElement('div');
+    actTitle.className = 'analysis-section-title';
+    actTitle.textContent = 'Recent Activity';
+    actSection.appendChild(actTitle);
+
+    var rows = [
+      { label: 'Last 24 hours', value: data.recentActivity.lastDay },
+      { label: 'Last 7 days', value: data.recentActivity.lastWeek },
+    ];
+
+    rows.forEach(function (r) {
+      var row = document.createElement('div');
+      row.className = 'analysis-stat-row';
+      var lbl = document.createElement('span');
+      lbl.className = 'analysis-stat-label';
+      lbl.textContent = r.label;
+      var val = document.createElement('span');
+      val.className = 'analysis-stat-value';
+      val.textContent = r.value + ' new entities';
+      row.appendChild(lbl);
+      row.appendChild(val);
+      actSection.appendChild(row);
+    });
+
+    container.appendChild(actSection);
+  }
+
+  // Entity type distribution
+  if (data.entityTypes && data.entityTypes.length > 0) {
+    var etSection = document.createElement('div');
+    etSection.className = 'analysis-section';
+
+    var etTitle = document.createElement('div');
+    etTitle.className = 'analysis-section-title';
+    etTitle.textContent = 'Entity Types';
+    etSection.appendChild(etTitle);
+
+    var maxCount = data.entityTypes[0].count;
+
+    data.entityTypes.forEach(function (et) {
+      var row = document.createElement('div');
+      row.className = 'analysis-bar-row';
+
+      var label = document.createElement('span');
+      label.className = 'analysis-bar-label';
+      label.textContent = et.type;
+      row.appendChild(label);
+
+      var track = document.createElement('div');
+      track.className = 'analysis-bar-track';
+      var fill = document.createElement('div');
+      fill.className = 'analysis-bar-fill';
+      fill.style.width = Math.round((et.count / maxCount) * 100) + '%';
+      fill.style.background = (entityStyles[et.type] || { color: '#8b949e' }).color;
+      track.appendChild(fill);
+      row.appendChild(track);
+
+      var count = document.createElement('span');
+      count.className = 'analysis-bar-count';
+      count.textContent = et.count;
+      row.appendChild(count);
+
+      etSection.appendChild(row);
+    });
+
+    container.appendChild(etSection);
+  }
+
+  // Relationship type distribution
+  if (data.relationshipTypes && data.relationshipTypes.length > 0) {
+    var rtSection = document.createElement('div');
+    rtSection.className = 'analysis-section';
+
+    var rtTitle = document.createElement('div');
+    rtTitle.className = 'analysis-section-title';
+    rtTitle.textContent = 'Relationship Types';
+    rtSection.appendChild(rtTitle);
+
+    var maxRel = data.relationshipTypes[0].count;
+
+    data.relationshipTypes.forEach(function (rt) {
+      var row = document.createElement('div');
+      row.className = 'analysis-bar-row';
+
+      var label = document.createElement('span');
+      label.className = 'analysis-bar-label';
+      label.textContent = rt.type;
+      row.appendChild(label);
+
+      var track = document.createElement('div');
+      track.className = 'analysis-bar-track';
+      var fill = document.createElement('div');
+      fill.className = 'analysis-bar-fill';
+      fill.style.width = Math.round((rt.count / maxRel) * 100) + '%';
+      fill.style.background = '#8b949e';
+      track.appendChild(fill);
+      row.appendChild(track);
+
+      var count = document.createElement('span');
+      count.className = 'analysis-bar-count';
+      count.textContent = rt.count;
+      row.appendChild(count);
+
+      rtSection.appendChild(row);
+    });
+
+    container.appendChild(rtSection);
+  }
+
+  // Top 10 entities by degree
+  if (data.topEntities && data.topEntities.length > 0) {
+    var teSection = document.createElement('div');
+    teSection.className = 'analysis-section';
+
+    var teTitle = document.createElement('div');
+    teTitle.className = 'analysis-section-title';
+    teTitle.textContent = 'Most Connected Entities';
+    teSection.appendChild(teTitle);
+
+    data.topEntities.forEach(function (ent) {
+      var item = document.createElement('div');
+      item.className = 'analysis-entity-item';
+
+      var dot = document.createElement('span');
+      dot.className = 'analysis-entity-dot';
+      dot.style.background = (entityStyles[ent.type] || { color: '#8b949e' }).color;
+      item.appendChild(dot);
+
+      var name = document.createElement('span');
+      name.className = 'analysis-entity-name';
+      name.textContent = ent.label;
+      item.appendChild(name);
+
+      var degree = document.createElement('span');
+      degree.className = 'analysis-entity-degree';
+      degree.textContent = ent.degree + ' links';
+      item.appendChild(degree);
+
+      item.addEventListener('click', function () {
+        if (window.laminarkGraph) {
+          window.laminarkGraph.selectAndCenterNode(ent.id);
+        }
+      });
+
+      teSection.appendChild(item);
+    });
+
+    container.appendChild(teSection);
+  }
+
+  // Connected components / clusters
+  if (data.components && data.components.length > 0) {
+    var ccSection = document.createElement('div');
+    ccSection.className = 'analysis-section';
+
+    var ccTitle = document.createElement('div');
+    ccTitle.className = 'analysis-section-title';
+    ccTitle.textContent = 'Clusters (' + data.components.length + ')';
+    ccSection.appendChild(ccTitle);
+
+    data.components.forEach(function (comp) {
+      var card = document.createElement('div');
+      card.className = 'analysis-cluster-card';
+
+      var label = document.createElement('div');
+      label.className = 'analysis-cluster-label';
+      label.textContent = comp.label;
+      card.appendChild(label);
+
+      var meta = document.createElement('div');
+      meta.className = 'analysis-cluster-meta';
+      meta.textContent = comp.nodeCount + ' nodes, ' + comp.edgeCount + ' edges';
+      card.appendChild(meta);
+
+      card.addEventListener('click', function () {
+        if (window.laminarkGraph) {
+          window.laminarkGraph.highlightCluster(comp.nodeIds);
+        }
+      });
+
+      ccSection.appendChild(card);
+    });
+
+    container.appendChild(ccSection);
+  }
+
+  if (!data.entityTypes?.length && !data.topEntities?.length) {
+    var empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'No graph data to analyze yet.';
+    container.appendChild(empty);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Initialization
 // ---------------------------------------------------------------------------
 
@@ -692,6 +1157,8 @@ document.addEventListener('DOMContentLoaded', async function () {
   initFilters();
   initTimeRange();
   initDetailPanel();
+  initSearch();
+  initAnalysis();
   connectSSE();
 
   // Initialize activity feed

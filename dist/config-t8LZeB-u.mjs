@@ -27,7 +27,7 @@ function isDebugEnabled() {
 		return true;
 	}
 	try {
-		const raw = readFileSync(join(homedir(), ".laminark", "config.json"), "utf-8");
+		const raw = readFileSync(join(getConfigDir(), "config.json"), "utf-8");
 		if (JSON.parse(raw).debug === true) {
 			_debugCached = true;
 			return true;
@@ -43,21 +43,22 @@ function isDebugEnabled() {
 */
 const DEFAULT_BUSY_TIMEOUT = 5e3;
 /**
-* Returns the Laminark configuration directory (~/.laminark/).
+* Returns the Laminark data directory.
+* Default: ~/.claude/plugins/cache/laminark/data/
 * Creates the directory recursively if it does not exist.
 *
 * Supports LAMINARK_DATA_DIR env var override for testing --
 * redirects all data storage to a custom directory without
-* affecting the real ~/.laminark/ data.
+* affecting the real plugin data.
 */
 function getConfigDir() {
-	const dir = process.env.LAMINARK_DATA_DIR || join(homedir(), ".laminark");
+	const dir = process.env.LAMINARK_DATA_DIR || join(homedir(), ".claude", "plugins", "cache", "laminark", "data");
 	mkdirSync(dir, { recursive: true });
 	return dir;
 }
 /**
 * Returns the path to the single Laminark database file.
-* User decision: single database at ~/.laminark/data.db for ALL projects.
+* Single database at ~/.claude/plugins/cache/laminark/data/data.db for ALL projects.
 */
 function getDbPath() {
 	return join(getConfigDir(), "data.db");
@@ -86,4 +87,4 @@ function getDatabaseConfig() {
 
 //#endregion
 export { isDebugEnabled as a, getProjectHash as i, getDatabaseConfig as n, getDbPath as r, getConfigDir as t };
-//# sourceMappingURL=config-CtH17VYQ.mjs.map
+//# sourceMappingURL=config-t8LZeB-u.mjs.map

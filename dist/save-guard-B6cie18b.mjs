@@ -1,4 +1,4 @@
-import { a as isDebugEnabled } from "./config-CtH17VYQ.mjs";
+import { a as isDebugEnabled } from "./config-t8LZeB-u.mjs";
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
 import { mkdirSync } from "node:fs";
@@ -985,4 +985,4 @@ var SaveGuard = class {
 
 //#endregion
 export { rowToObservation as a, runMigrations as c, ObservationRepository as i, debug as l, jaccardSimilarity as n, openDatabase as o, SessionRepository as r, MIGRATIONS as s, SaveGuard as t, debugTimed as u };
-//# sourceMappingURL=save-guard-DjH8DWnb.mjs.map
+//# sourceMappingURL=save-guard-B6cie18b.mjs.map
