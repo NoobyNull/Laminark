@@ -2,7 +2,7 @@
   "mcpServers": {
     "laminark": {
       "command": "bash",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/ensure-deps.sh", "node", "${CLAUDE_PLUGIN_ROOT}/dist/index.js"]
+      "args": ["./scripts/ensure-deps.sh", "node", "./dist/index.js"]
     }
   }
 }

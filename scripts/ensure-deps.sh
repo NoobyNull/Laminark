@@ -8,4 +8,5 @@ if [ ! -d "$PLUGIN_ROOT/node_modules/better-sqlite3" ]; then
   TMPDIR="$NPM_TMP" npm install --prefix "$PLUGIN_ROOT" --production --silent --cache "$NPM_TMP/cache" 2>/dev/null
   rm -rf "$NPM_TMP"
 fi
+cd "$PLUGIN_ROOT"
 exec "$@"
