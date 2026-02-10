@@ -4339,10 +4339,10 @@ function broadcast(event, data) {
 *
 * @module web/routes/api
 */
-function getDb(c) {
+function getDb$1(c) {
 	return c.get("db");
 }
-function getProjectHash$1(c) {
+function getProjectHash$2(c) {
 	return c.req.query("project") || c.get("defaultProject") || null;
 }
 const apiRoutes = new Hono();
@@ -4352,7 +4352,7 @@ const apiRoutes = new Hono();
 * Returns list of known projects from project_metadata table.
 */
 apiRoutes.get("/projects", (c) => {
-	const db = getDb(c);
+	const db = getDb$1(c);
 	const defaultProject = c.get("defaultProject") || null;
 	let projects = [];
 	try {
@@ -4377,11 +4377,11 @@ apiRoutes.get("/projects", (c) => {
 *   ?since=ISO8601       - only entities created after this timestamp
 */
 apiRoutes.get("/graph", (c) => {
-	const db = getDb(c);
+	const db = getDb$1(c);
 	const typeFilter = c.req.query("type");
 	const sinceFilter = c.req.query("since");
 	const untilFilter = c.req.query("until");
-	const projectFilter = getProjectHash$1(c);
+	const projectFilter = getProjectHash$2(c);
 	let nodesSql = "SELECT id, name, type, observation_ids, created_at FROM graph_nodes";
 	const nodeParams = [];
 	const nodeConditions = [];
@@ -4459,14 +4459,14 @@ apiRoutes.get("/graph", (c) => {
 *   ?limit=N       - max observations (default 500)
 */
 apiRoutes.get("/timeline", (c) => {
-	const db = getDb(c);
+	const db = getDb$1(c);
 	const from = c.req.query("from");
 	const to = c.req.query("to");
 	const limitStr = c.req.query("limit");
 	const limit = limitStr ? Math.min(parseInt(limitStr, 10) || 500, 2e3) : 500;
 	const offsetStr = c.req.query("offset");
 	const offset = offsetStr ? Math.max(parseInt(offsetStr, 10) || 0, 0) : 0;
-	const projectFilter = getProjectHash$1(c);
+	const projectFilter = getProjectHash$2(c);
 	let sessions = [];
 	try {
 		let sessionsSql = "SELECT id, started_at, ended_at, summary FROM sessions";
@@ -4568,7 +4568,7 @@ apiRoutes.get("/timeline", (c) => {
 * and relationships. Powers the detail panel.
 */
 apiRoutes.get("/node/:id", (c) => {
-	const db = getDb(c);
+	const db = getDb$1(c);
 	const nodeId = c.req.param("id");
 	let nodeRow;
 	try {
@@ -4630,7 +4630,7 @@ apiRoutes.get("/node/:id", (c) => {
 *   ?depth=1  - hop count (1 or 2, default 1)
 */
 apiRoutes.get("/node/:id/neighborhood", (c) => {
-	const db = getDb(c);
+	const db = getDb$1(c);
 	const centerId = c.req.param("id");
 	const depthParam = c.req.query("depth");
 	const depth = Math.min(Math.max(parseInt(depthParam || "1", 10) || 1, 1), 2);
@@ -4711,6 +4711,137 @@ function safeParseJson(json) {
 }
 
 //#endregion
+//#region src/web/routes/admin.ts
+/**
+* Admin API routes for database statistics and reset operations.
+*
+* @module web/routes/admin
+*/
+function getDb(c) {
+	return c.get("db");
+}
+function getProjectHash$1(c) {
+	return c.req.query("project") || c.get("defaultProject") || null;
+}
+function tableCount(db, table, where, params) {
+	try {
+		const sql = where ? `SELECT COUNT(*) AS cnt FROM ${table} WHERE ${where}` : `SELECT COUNT(*) AS cnt FROM ${table}`;
+		return db.prepare(sql).get(...params || [])?.cnt ?? 0;
+	} catch {
+		return 0;
+	}
+}
+const adminRoutes = new Hono();
+/**
+* GET /api/admin/stats
+*
+* Returns row counts per table group, optionally scoped to a project.
+*/
+adminRoutes.get("/stats", (c) => {
+	const db = getDb(c);
+	const project = c.req.query("project") || getProjectHash$1(c);
+	const projectWhere = project ? "project_hash = ?" : void 0;
+	const projectIdWhere = project ? "project_id = ?" : void 0;
+	const projectParams = project ? [project] : void 0;
+	const observations = tableCount(db, "observations", projectWhere, projectParams);
+	const observationsFts = tableCount(db, "observations_fts");
+	const observationEmbeddings = tableCount(db, "observation_embeddings");
+	const graphNodes = tableCount(db, "graph_nodes", projectWhere, projectParams);
+	const graphEdges = tableCount(db, "graph_edges", projectWhere, projectParams);
+	const sessions = tableCount(db, "sessions", projectWhere, projectParams);
+	const contextStashes = tableCount(db, "context_stashes", projectIdWhere, projectParams);
+	const thresholdHistory = tableCount(db, "threshold_history", projectIdWhere, projectParams);
+	const shiftDecisions = tableCount(db, "shift_decisions", projectIdWhere, projectParams);
+	const projects = tableCount(db, "project_metadata");
+	return c.json({
+		observations,
+		observationsFts,
+		observationEmbeddings,
+		graphNodes,
+		graphEdges,
+		sessions,
+		contextStashes,
+		thresholdHistory,
+		shiftDecisions,
+		projects,
+		scopedToProject: project || null
+	});
+});
+/**
+* POST /api/admin/reset
+*
+* Hard-deletes data by group inside a transaction.
+* Body: { type: 'observations'|'graph'|'sessions'|'all', scope: 'current'|'all', projectHash?: string }
+*/
+adminRoutes.post("/reset", async (c) => {
+	const db = getDb(c);
+	const body = await c.req.json();
+	const { type, scope } = body;
+	const project = body.projectHash || getProjectHash$1(c);
+	const validTypes = [
+		"observations",
+		"graph",
+		"sessions",
+		"all"
+	];
+	if (!validTypes.includes(type)) return c.json({ error: `Invalid type. Must be one of: ${validTypes.join(", ")}` }, 400);
+	const scoped = scope === "current" && project;
+	const deleted = [];
+	const run = (sql, params) => {
+		try {
+			db.prepare(sql).run(...params || []);
+		} catch {}
+	};
+	db.transaction(() => {
+		if (type === "observations" || type === "all") {
+			if (scoped) {
+				run(`DELETE FROM observations_fts WHERE rowid IN (SELECT rowid FROM observations WHERE project_hash = ?)`, [project]);
+				run("DELETE FROM observation_embeddings WHERE observation_id IN (SELECT id FROM observations WHERE project_hash = ?)", [project]);
+				run("DELETE FROM observations WHERE project_hash = ?", [project]);
+			} else {
+				run("DELETE FROM observations_fts");
+				run("DELETE FROM observation_embeddings");
+				run("DELETE FROM observations");
+			}
+			deleted.push("observations", "observations_fts", "observation_embeddings");
+		}
+		if (type === "graph" || type === "all") {
+			if (scoped) {
+				run("DELETE FROM graph_edges WHERE project_hash = ?", [project]);
+				run("DELETE FROM graph_nodes WHERE project_hash = ?", [project]);
+			} else {
+				run("DELETE FROM graph_edges");
+				run("DELETE FROM graph_nodes");
+			}
+			deleted.push("graph_nodes", "graph_edges");
+		}
+		if (type === "sessions" || type === "all") {
+			if (scoped) {
+				run("DELETE FROM shift_decisions WHERE project_id = ?", [project]);
+				run("DELETE FROM threshold_history WHERE project_id = ?", [project]);
+				run("DELETE FROM context_stashes WHERE project_id = ?", [project]);
+				run("DELETE FROM sessions WHERE project_hash = ?", [project]);
+			} else {
+				run("DELETE FROM shift_decisions");
+				run("DELETE FROM threshold_history");
+				run("DELETE FROM context_stashes");
+				run("DELETE FROM sessions");
+			}
+			deleted.push("sessions", "context_stashes", "threshold_history", "shift_decisions");
+		}
+		if (type === "all" && !scoped) {
+			run("DELETE FROM project_metadata");
+			deleted.push("project_metadata");
+		}
+	})();
+	return c.json({
+		ok: true,
+		deleted,
+		scope: scoped ? "project" : "all"
+	});
+});
+
+//#endregion
 //#region src/web/server.ts
 /**
 * Hono web server for the Laminark visualization UI.
@@ -4749,6 +4880,7 @@ function createWebServer(db, uiRoot, defaultProjectHash) {
 	});
 	app.route("/api", apiRoutes);
 	app.route("/api", sseRoutes);
+	app.route("/api/admin", adminRoutes);
 	app.use("/*", async (c, next) => {
 		const reqPath = c.req.path === "/" ? "/index.html" : c.req.path;
 		const filePath = path.join(uiRoot, reqPath);

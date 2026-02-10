@@ -26,6 +26,7 @@ type AppEnv = {
 import { debug } from '../shared/debug.js';
 import { apiRoutes } from './routes/api.js';
 import { sseRoutes } from './routes/sse.js';
+import { adminRoutes } from './routes/admin.js';
 
 /**
  * Creates a configured Hono app with middleware, static serving,
@@ -69,6 +70,7 @@ export function createWebServer(db: BetterSqlite3.Database, uiRoot: string, defa
   // Mount API and SSE routes
   app.route('/api', apiRoutes);
   app.route('/api', sseRoutes);
+  app.route('/api/admin', adminRoutes);
 
   // Serve static files from ui/ directory (absolute path so CWD doesn't matter)
   app.use('/*', async (c, next) => {

@@ -302,12 +302,21 @@ function initNavigation() {
 
       // Show/hide filter bar and time range bar (only for graph view)
       var isGraph = targetView === 'graph-view';
+      var mainContent = document.getElementById('main-content');
       if (filterBar) {
         filterBar.style.display = isGraph ? '' : 'none';
       }
       var timeRangeBar = document.getElementById('time-range-bar');
       if (timeRangeBar) {
         timeRangeBar.style.display = isGraph ? '' : 'none';
+      }
+      if (mainContent) {
+        mainContent.classList.toggle('no-bars', !isGraph);
+      }
+
+      // Refresh stats when switching to settings tab
+      if (targetView === 'settings-view' && window.laminarkSettings) {
+        window.laminarkSettings.refreshStats();
       }
 
       // Lazy initialization: only init each view when first activated
@@ -688,6 +697,11 @@ document.addEventListener('DOMContentLoaded', async function () {
   // Initialize activity feed
   if (window.laminarkActivity) {
     window.laminarkActivity.initActivityFeed();
+  }
+
+  // Initialize settings
+  if (window.laminarkSettings) {
+    window.laminarkSettings.initSettings();
   }
 
   // Fetch initial data
