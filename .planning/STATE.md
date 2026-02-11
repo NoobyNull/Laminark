@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-10)
 ## Current Position
 
 Phase: 9 of 16 (Global Installation)
-Plan: 2 of 2
-Status: Executing (checkpoint pending)
-Last activity: 2026-02-11 — 09-02 Tasks 1-2 complete, awaiting human-verify checkpoint
+Plan: 1 of 2 complete, 2 of 2 at checkpoint
+Status: Executing (09-01 complete, 09-02 checkpoint pending)
+Last activity: 2026-02-11 — 09-01 complete (dual-prefix self-referential filter), 09-02 awaiting human-verify
 
-Progress (v2.0): [░░░░░░░░░░] 0%
+Progress (v2.0): [█░░░░░░░░░] 3%
 
 ## Performance Metrics
 
@@ -40,7 +40,7 @@ Progress (v2.0): [░░░░░░░░░░] 0%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 09-global-installation | 1/2 | 3min | 3min |
 
 ## Accumulated Context
 
@@ -53,6 +53,8 @@ Recent decisions affecting current work:
 - [V2]: Tool registry needs scope awareness — built-in, global, project, team scopes with resolution rules
 - [V2]: Conversation-driven routing — map discussion patterns to appropriate tools from resolved scope set
 - [V2]: Zero new dependencies — all builds on existing Node.js + SQLite + Zod stack
+- [09-01]: Centralized dual-prefix detection in self-referential.ts — isLaminarksOwnTool() handles both mcp__laminark__ and mcp__plugin_laminark_laminark__
+- [09-01]: Test file convention: src/hooks/__tests__/*.test.ts (not tests/ directory)
 
 ### Pending Todos
 
@@ -63,7 +65,7 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
-- Global installation changes MCP prefix from `mcp__laminark__` to `mcp__plugin_laminark_laminark__` — dual-prefix support needed during migration
+- ~~Global installation changes MCP prefix from `mcp__laminark__` to `mcp__plugin_laminark_laminark__` — dual-prefix support needed during migration~~ RESOLVED by 09-01
 - Tool discovery must handle missing/malformed config files gracefully
 - Routing cold start — heuristic fallback needed before learned patterns accumulate
 - MCP Tool Search feature (`ENABLE_TOOL_SEARCH`) interaction with registry completeness is not fully understood
@@ -71,5 +73,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: 09-02-PLAN.md Task 3 checkpoint (human-verify: plugin-dir testing)
+Stopped at: Completed 09-01-PLAN.md (09-02 still at checkpoint)
 Resume file: None
