@@ -28,6 +28,10 @@ export interface Migration {
  * Migration 010: Project metadata table for project selector UI.
  * Migration 011: Add project_hash to graph tables and backfill from observations.
  * Migration 012: Add classification and classified_at columns for LLM-based observation classification.
+ * Migration 013: Research buffer table for exploration tool event buffering.
+ * Migration 014: Add kind column to observations with backfill from source field.
+ * Migration 015: Update graph taxonomy -- remove Tool/Person nodes, tighten CHECK constraints.
+ * Migration 016: Tool registry table for discovered tools with scope-aware uniqueness.
  */
 export const MIGRATIONS: Migration[] = [
   {
@@ -302,6 +306,153 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE observations ADD COLUMN classified_at TEXT;
       CREATE INDEX idx_observations_classification
         ON observations(classification) WHERE classification IS NOT NULL;
+    `,
+  },
+  {
+    version: 13,
+    name: 'create_research_buffer',
+    up: `
+      CREATE TABLE research_buffer (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_hash TEXT NOT NULL,
+        session_id TEXT,
+        tool_name TEXT NOT NULL,
+        target TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX idx_research_buffer_session ON research_buffer(session_id, created_at DESC);
+    `,
+  },
+  {
+    version: 14,
+    name: 'add_observation_kind',
+    up: (db: BetterSqlite3.Database) => {
+      // Add kind column
+      db.exec("ALTER TABLE observations ADD COLUMN kind TEXT DEFAULT 'finding'");
+
+      // Backfill from source field
+      db.exec(`
+        UPDATE observations SET kind = 'change'
+        WHERE source LIKE 'hook:Write' OR source LIKE 'hook:Edit'
+      `);
+      db.exec(`
+        UPDATE observations SET kind = 'verification'
+        WHERE source LIKE 'hook:Bash'
+      `);
+      db.exec(`
+        UPDATE observations SET kind = 'reference'
+        WHERE source LIKE 'hook:WebFetch' OR source LIKE 'hook:WebSearch'
+      `);
+      db.exec(`
+        UPDATE observations SET kind = 'finding'
+        WHERE source IN ('mcp:save_memory', 'manual', 'slash:remember')
+          AND kind = 'finding'
+      `);
+
+      // Soft-delete old noise observations from Read/Glob/Grep hooks
+      db.exec(`
+        UPDATE observations
+        SET deleted_at = datetime('now'), updated_at = datetime('now')
+        WHERE (source LIKE 'hook:Read' OR source LIKE 'hook:Glob' OR source LIKE 'hook:Grep')
+          AND deleted_at IS NULL
+      `);
+
+      // Index for kind-based queries
+      db.exec('CREATE INDEX idx_observations_kind ON observations(kind)');
+    },
+  },
+  {
+    version: 15,
+    name: 'update_graph_taxonomy',
+    up: (db: BetterSqlite3.Database) => {
+      // Check if graph tables exist
+      const tableExists = (name: string) =>
+        !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
+
+      if (!tableExists('graph_nodes')) return;
+
+      // Delete old Tool and Person nodes (and their connected edges via CASCADE)
+      db.exec("DELETE FROM graph_nodes WHERE type IN ('Tool', 'Person')");
+
+      // Delete old relationship types that no longer exist
+      db.exec("DELETE FROM graph_edges WHERE type IN ('uses', 'depends_on', 'decided_by', 'part_of')");
+
+      // Recreate graph_nodes with updated CHECK constraint
+      db.exec(`
+        CREATE TABLE graph_nodes_new (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL CHECK(type IN ('Project','File','Decision','Problem','Solution','Reference')),
+          name TEXT NOT NULL,
+          metadata TEXT DEFAULT '{}',
+          observation_ids TEXT DEFAULT '[]',
+          project_hash TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        INSERT INTO graph_nodes_new SELECT * FROM graph_nodes;
+
+        DROP TABLE graph_nodes;
+        ALTER TABLE graph_nodes_new RENAME TO graph_nodes;
+
+        CREATE INDEX idx_graph_nodes_type ON graph_nodes(type);
+        CREATE INDEX idx_graph_nodes_name ON graph_nodes(name);
+        CREATE INDEX IF NOT EXISTS idx_graph_nodes_project ON graph_nodes(project_hash);
+      `);
+
+      // Recreate graph_edges with updated CHECK constraint
+      db.exec(`
+        CREATE TABLE graph_edges_new (
+          id TEXT PRIMARY KEY,
+          source_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
+          target_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
+          type TEXT NOT NULL CHECK(type IN ('related_to','solved_by','caused_by','modifies','informed_by','references','verified_by','preceded_by')),
+          weight REAL NOT NULL DEFAULT 1.0 CHECK(weight >= 0.0 AND weight <= 1.0),
+          metadata TEXT DEFAULT '{}',
+          project_hash TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        INSERT INTO graph_edges_new SELECT * FROM graph_edges;
+
+        DROP TABLE graph_edges;
+        ALTER TABLE graph_edges_new RENAME TO graph_edges;
+
+        CREATE INDEX idx_graph_edges_source ON graph_edges(source_id);
+        CREATE INDEX idx_graph_edges_target ON graph_edges(target_id);
+        CREATE INDEX idx_graph_edges_type ON graph_edges(type);
+        CREATE UNIQUE INDEX idx_graph_edges_unique ON graph_edges(source_id, target_id, type);
+        CREATE INDEX IF NOT EXISTS idx_graph_edges_project ON graph_edges(project_hash);
+      `);
+    },
+  },
+  {
+    version: 16,
+    name: 'create_tool_registry',
+    up: `
+      CREATE TABLE tool_registry (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        tool_type TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        source TEXT NOT NULL,
+        project_hash TEXT,
+        description TEXT,
+        server_name TEXT,
+        usage_count INTEGER NOT NULL DEFAULT 0,
+        last_used_at TEXT,
+        discovered_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE UNIQUE INDEX idx_tool_registry_name_project
+        ON tool_registry(name, COALESCE(project_hash, ''));
+      CREATE INDEX idx_tool_registry_scope
+        ON tool_registry(scope);
+      CREATE INDEX idx_tool_registry_project
+        ON tool_registry(project_hash) WHERE project_hash IS NOT NULL;
+      CREATE INDEX idx_tool_registry_usage
+        ON tool_registry(usage_count DESC, last_used_at DESC);
     `,
   },
 ];
