@@ -3,11 +3,68 @@ import type BetterSqlite3 from 'better-sqlite3';
 import type { ObservationRepository } from '../storage/observations.js';
 import type { SessionRepository } from '../storage/sessions.js';
 import type { ToolRegistryRepository } from '../storage/tool-registry.js';
+import type { DiscoveredTool } from '../shared/tool-types.js';
 import { generateSessionSummary } from '../curation/summarizer.js';
 import { assembleSessionContext } from '../context/injection.js';
 import { scanConfigForTools } from './config-scanner.js';
 import { extractPatterns, storePrecomputedPatterns } from '../routing/intent-patterns.js';
 import { debug } from '../shared/debug.js';
+
+/**
+ * STAL-01: Detects tools that have been removed from config since last scan.
+ *
+ * Compares currently scanned config tools against the registry and marks
+ * missing config-sourced tools as stale. Also cascades to individual MCP tools
+ * from removed MCP servers.
+ */
+function detectRemovedTools(
+  toolRegistry: ToolRegistryRepository,
+  scannedTools: DiscoveredTool[],
+  projectHash: string,
+): void {
+  // 1. Get all config-sourced tools currently marked active for this project (+ globals)
+  const registeredConfigTools = toolRegistry.getConfigSourcedTools(projectHash);
+
+  // 2. Build a Set of scanned tool names for O(1) lookup
+  const scannedNames = new Set(scannedTools.map(t => t.name));
+
+  // 3. Mark tools missing from scan as stale
+  //    IMPORTANT: For wildcard MCP server entries (mcp__X__*), also mark
+  //    individual tools from that server (mcp__X__specific_tool).
+  //    Extract server name from wildcard entries that disappeared.
+  const removedServers = new Set<string>();
+
+  for (const registered of registeredConfigTools) {
+    if (!scannedNames.has(registered.name)) {
+      toolRegistry.markStale(registered.name, registered.project_hash);
+
+      // Track removed MCP server names for individual tool cleanup
+      if (registered.tool_type === 'mcp_server' && registered.server_name) {
+        removedServers.add(registered.server_name);
+      }
+    }
+  }
+
+  // 4. Mark individual tools from removed MCP servers as stale
+  //    These are organically-discovered tools (source = 'hook:PostToolUse')
+  //    whose parent server was removed from config
+  if (removedServers.size > 0) {
+    for (const registered of toolRegistry.getAvailableForSession(projectHash)) {
+      if (
+        registered.server_name &&
+        removedServers.has(registered.server_name) &&
+        registered.tool_type === 'mcp_tool'
+      ) {
+        toolRegistry.markStale(registered.name, registered.project_hash);
+      }
+    }
+  }
+
+  // 5. Restore tools that reappeared in the scan
+  //    The upsert in the scan loop already sets status='active' (per Plan 01),
+  //    so we only need to handle tools that were previously stale
+  //    and are now scanned again. The upsert handles this automatically.
+}
 
 /**
  * Handles a SessionStart hook event.
@@ -48,6 +105,15 @@ export function handleSessionStart(
       for (const tool of tools) {
         toolRegistry.upsert(tool);
       }
+
+      // STAL-01: Detect tools removed from config
+      try {
+        detectRemovedTools(toolRegistry, tools, projectHash);
+        debug('session', 'Staleness detection completed');
+      } catch {
+        debug('session', 'Staleness detection failed (non-fatal)');
+      }
+
       const scanElapsed = Date.now() - scanStart;
       debug('session', 'Config scan completed', { toolsFound: tools.length, elapsed: scanElapsed });
       if (scanElapsed > 200) {
