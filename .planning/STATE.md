@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-10)
 
 ## Current Position
 
-Phase: 13 of 16 (Context Enhancement) -- COMPLETE
-Plan: 1 of 1 complete
-Status: Phase 13 complete
-Last activity: 2026-02-11 — 13-01 complete (relevance-ranked tool suggestions with 500-char sub-budget)
+Phase: 14 of 16 (Conversation Routing)
+Plan: 1 of 2 complete
+Status: Executing phase 14
+Last activity: 2026-02-11 — 14-01 complete (routing types and heuristic fallback for cold-start tool suggestions)
 
-Progress (v2.0): [██████░░░░] 62% (Phase 13 complete, 5/8 v2 phases done)
+Progress (v2.0): [██████░░░░] 68% (Phase 14 in progress, 14-01 done)
 
 ## Performance Metrics
 
@@ -45,6 +45,7 @@ Progress (v2.0): [██████░░░░] 62% (Phase 13 complete, 5/8 v2
 | 11-scope-resolution | 1/1 | 3min | 3min |
 | 12-usage-tracking | 1/1 | 2min | 2min |
 | 13-context-enhancement | 1/1 | 3min | 3min |
+| 14-conversation-routing | 1/2 | 2min | 2min |
 
 ## Accumulated Context
 
@@ -80,6 +81,9 @@ Recent decisions affecting current work:
 - [13-01]: Relevance score = frequency * 0.7 + recency * 0.3 computed in TypeScript, not SQL
 - [13-01]: MCP server entries aggregate usage from individual tool events via prefix regex
 - [13-01]: 7-day getUsageSince window matches the recency decay half-life
+- [14-01]: Heuristic functions are pure (no DB dependency) -- accept pre-fetched data for testability
+- [14-01]: Confidence scored as matchCount/toolKeywords.length (tool-side Jaccard overlap)
+- [14-01]: Stop word set covers 50 common English function words for keyword extraction
 
 ### Pending Todos
 
@@ -94,11 +98,11 @@ Recent decisions affecting current work:
 
 - ~~Global installation changes MCP prefix from `mcp__laminark__` to `mcp__plugin_laminark_laminark__` — dual-prefix support needed during migration~~ RESOLVED by 09-01
 - ~~Tool discovery must handle missing/malformed config files gracefully~~ RESOLVED by 10-02 (all scanners wrapped in try/catch)
-- Routing cold start — heuristic fallback needed before learned patterns accumulate
+- ~~Routing cold start — heuristic fallback needed before learned patterns accumulate~~ RESOLVED by 14-01 (keyword-based heuristic fallback)
 - MCP Tool Search feature (`ENABLE_TOOL_SEARCH`) interaction with registry completeness is not fully understood
 
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 13-01-PLAN.md -- Phase 13 complete. Relevance-ranked tool suggestions with 500-char sub-budget and MCP server usage aggregation.
+Stopped at: Completed 14-01-PLAN.md -- Routing types and heuristic fallback for cold-start tool suggestions. Phase 14 in progress (1/2 plans done).
 Resume file: None
