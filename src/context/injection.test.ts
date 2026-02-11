@@ -13,6 +13,7 @@ import type { Observation, Session } from '../shared/types.js';
 import { openDatabase } from '../storage/database.js';
 import { ObservationRepository } from '../storage/observations.js';
 import { SessionRepository } from '../storage/sessions.js';
+import { ToolRegistryRepository } from '../storage/tool-registry.js';
 import type { LaminarkDatabase } from '../storage/database.js';
 
 // ---------------------------------------------------------------------------
@@ -115,17 +116,15 @@ describe('formatContextIndex', () => {
       makeObservation({ id: 'eeee5555ffff6666', content: 'Updated API endpoint tests for auth flow', source: 'mcp:save_memory', createdAt: '2026-02-09T10:05:00Z' }),
     ];
 
-    const result = formatContextIndex(session, observations);
+    const result = formatContextIndex(session, { changes: observations, decisions: [], findings: [], references: [] });
 
-    expect(result).toContain('[Laminark Context - Session Recovery]');
-    expect(result).toContain('## Last Session (2026-02-09T10:00:00Z to 2026-02-09T11:30:00Z)');
+    expect(result).toContain('[Laminark - Session Context]');
+    expect(result).toContain('## Previous Session');
     expect(result).toContain(session.summary!);
-    expect(result).toContain('## Recent Memories (use search tool for full details)');
-    expect(result).toContain('[aaaa1111]');
-    expect(result).toContain('[cccc3333]');
-    expect(result).toContain('[eeee5555]');
-    expect(result).toContain('source: hook:Write');
-    expect(result).toContain('source: mcp:save_memory');
+    expect(result).toContain('## Recent Changes');
+    expect(result).toContain('Created user authentication module');
+    expect(result).toContain('Fixed database connection pooling issue');
+    expect(result).toContain('Updated API endpoint tests for auth flow');
   });
 
   it('shows only observations when session is null', () => {
@@ -133,16 +132,16 @@ describe('formatContextIndex', () => {
       makeObservation({ id: 'aaaa1111bbbb2222', content: 'Some observation', source: 'hook:Bash' }),
     ];
 
-    const result = formatContextIndex(null, observations);
+    const result = formatContextIndex(null, { changes: observations, decisions: [], findings: [], references: [] });
 
-    expect(result).toContain('[Laminark Context - Session Recovery]');
-    expect(result).not.toContain('## Last Session');
-    expect(result).toContain('## Recent Memories');
-    expect(result).toContain('[aaaa1111]');
+    expect(result).toContain('[Laminark - Session Context]');
+    expect(result).not.toContain('## Previous Session');
+    expect(result).toContain('## Recent Changes');
+    expect(result).toContain('Some observation');
   });
 
   it('returns welcome message when session is null and observations are empty', () => {
-    const result = formatContextIndex(null, []);
+    const result = formatContextIndex(null, { changes: [], decisions: [], findings: [], references: [] });
 
     expect(result).toContain('[Laminark] First session detected');
     expect(result).toContain('/laminark:remember');
@@ -151,7 +150,7 @@ describe('formatContextIndex', () => {
 
   it('returns welcome message when session has no summary and no observations', () => {
     const session = makeSession({ summary: null });
-    const result = formatContextIndex(session, []);
+    const result = formatContextIndex(session, { changes: [], decisions: [], findings: [], references: [] });
 
     // Session without a summary and no observations should show welcome
     // (session with null summary does not contribute content)
@@ -164,7 +163,7 @@ describe('formatContextIndex', () => {
       makeObservation({ id: 'aaaa1111bbbb2222', content: longContent }),
     ];
 
-    const result = formatContextIndex(null, observations);
+    const result = formatContextIndex(null, { changes: observations, decisions: [], findings: [], references: [] });
 
     // Should contain truncated content with "..."
     expect(result).toContain('A'.repeat(120) + '...');
@@ -177,15 +176,15 @@ describe('formatContextIndex', () => {
       makeObservation({ id: 'cccc3333dddd4444', content: 'Second observation' }),
     ];
 
-    const result = formatContextIndex(null, observations);
+    const result = formatContextIndex(null, { changes: observations, decisions: [], findings: [], references: [] });
     const lines = result.split('\n');
 
-    // Find observation lines (starting with "- [")
-    const obsLines = lines.filter((l) => l.startsWith('- ['));
+    // Find observation lines (starting with "- ")
+    const obsLines = lines.filter((l) => l.startsWith('- '));
     expect(obsLines).toHaveLength(2);
     // Each observation is self-contained on one line
-    expect(obsLines[0]).toContain('[aaaa1111]');
-    expect(obsLines[1]).toContain('[cccc3333]');
+    expect(obsLines[0]).toContain('First observation');
+    expect(obsLines[1]).toContain('Second observation');
   });
 });
 
@@ -223,7 +222,7 @@ describe('assembleSessionContext', () => {
 
     const result = assembleSessionContext(laminarkDb.db, 'test-project');
 
-    expect(result).toContain('[Laminark Context - Session Recovery]');
+    expect(result).toContain('[Laminark - Session Context]');
     expect(result).toContain('Worked on authentication and fixed login bug.');
   });
 
@@ -237,7 +236,6 @@ describe('assembleSessionContext', () => {
     const result = assembleSessionContext(laminarkDb.db, 'test-project');
 
     expect(result).toContain('Created the user model with Prisma schema');
-    expect(result).toContain('source: hook:Write');
   });
 
   it('total output stays under 6000 characters', () => {
@@ -321,5 +319,200 @@ describe('assembleSessionContext', () => {
     expect(obsA[0].content).toBe('Project A observation');
     expect(obsB).toHaveLength(1);
     expect(obsB[0].content).toBe('Project B observation');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tool ranking and sub-budget (Phase 13)
+// ---------------------------------------------------------------------------
+
+describe('tool ranking and sub-budget', () => {
+  let tmpDir: string;
+  let laminarkDb: LaminarkDatabase;
+  const PROJECT_HASH = 'test-project-13';
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'laminark-tool-rank-'));
+    process.env.LAMINARK_DATA_DIR = tmpDir;
+    laminarkDb = openDatabase({ dbPath: join(tmpDir, 'data.db'), busyTimeout: 5000 });
+  });
+
+  afterEach(() => {
+    laminarkDb.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+    delete process.env.LAMINARK_DATA_DIR;
+  });
+
+  it('tool section fits within 500-character sub-budget', () => {
+    const toolRegistry = new ToolRegistryRepository(laminarkDb.db);
+
+    // Register 25 tools to exceed the budget limit
+    for (let i = 0; i < 25; i++) {
+      toolRegistry.upsert({
+        name: `mcp__server${i}__tool_with_longer_name`,
+        toolType: 'mcp_server',
+        scope: 'global',
+        source: 'config:test',
+        projectHash: null,
+        description: null,
+        serverName: `server${i}`,
+      });
+    }
+
+    const result = assembleSessionContext(laminarkDb.db, PROJECT_HASH, toolRegistry);
+
+    // Extract tool section
+    const toolIdx = result.indexOf('## Available Tools');
+    if (toolIdx >= 0) {
+      // Tool section goes to end or next ## section
+      const afterTools = result.indexOf('\n\n##', toolIdx + 1);
+      const toolSection = afterTools >= 0
+        ? result.slice(toolIdx, afterTools)
+        : result.slice(toolIdx);
+      expect(toolSection.length).toBeLessThanOrEqual(500);
+    }
+  });
+
+  it('recently-used tools appear before unused tools', () => {
+    const toolRegistry = new ToolRegistryRepository(laminarkDb.db);
+
+    // Register 3 tools
+    toolRegistry.upsert({
+      name: 'tool-A-unused',
+      toolType: 'slash_command',
+      scope: 'project',
+      source: 'config:test',
+      projectHash: PROJECT_HASH,
+      description: null,
+      serverName: null,
+    });
+    toolRegistry.upsert({
+      name: 'tool-B-heavy',
+      toolType: 'slash_command',
+      scope: 'project',
+      source: 'config:test',
+      projectHash: PROJECT_HASH,
+      description: null,
+      serverName: null,
+    });
+    toolRegistry.upsert({
+      name: 'tool-C-moderate',
+      toolType: 'slash_command',
+      scope: 'project',
+      source: 'config:test',
+      projectHash: PROJECT_HASH,
+      description: null,
+      serverName: null,
+    });
+
+    // Create usage events for tool-B (5 uses) and tool-C (2 uses)
+    for (let i = 0; i < 5; i++) {
+      toolRegistry.recordOrCreate('tool-B-heavy', {
+        toolType: 'slash_command',
+        scope: 'project',
+        source: 'config:test',
+        projectHash: PROJECT_HASH,
+        description: null,
+        serverName: null,
+      }, 'session-rank-test', true);
+    }
+    for (let i = 0; i < 2; i++) {
+      toolRegistry.recordOrCreate('tool-C-moderate', {
+        toolType: 'slash_command',
+        scope: 'project',
+        source: 'config:test',
+        projectHash: PROJECT_HASH,
+        description: null,
+        serverName: null,
+      }, 'session-rank-test', true);
+    }
+
+    const result = assembleSessionContext(laminarkDb.db, PROJECT_HASH, toolRegistry);
+
+    const idxB = result.indexOf('tool-B-heavy');
+    const idxC = result.indexOf('tool-C-moderate');
+    const idxA = result.indexOf('tool-A-unused');
+
+    // All should be present
+    expect(idxB).toBeGreaterThan(-1);
+    expect(idxC).toBeGreaterThan(-1);
+    expect(idxA).toBeGreaterThan(-1);
+
+    // tool-B (5 uses) before tool-C (2 uses) before tool-A (0 uses)
+    expect(idxB).toBeLessThan(idxC);
+    expect(idxC).toBeLessThan(idxA);
+  });
+
+  it('tool section is empty string when no non-builtin tools exist', () => {
+    const toolRegistry = new ToolRegistryRepository(laminarkDb.db);
+
+    // Register only built-in tools
+    toolRegistry.upsert({
+      name: 'Read',
+      toolType: 'builtin',
+      scope: 'global',
+      source: 'builtin',
+      projectHash: null,
+      description: null,
+      serverName: null,
+    });
+    toolRegistry.upsert({
+      name: 'Write',
+      toolType: 'builtin',
+      scope: 'global',
+      source: 'builtin',
+      projectHash: null,
+      description: null,
+      serverName: null,
+    });
+
+    const result = assembleSessionContext(laminarkDb.db, PROJECT_HASH, toolRegistry);
+
+    expect(result).not.toContain('## Available Tools');
+  });
+
+  it('overall context stays under 6000 characters with tools', () => {
+    const toolRegistry = new ToolRegistryRepository(laminarkDb.db);
+
+    // Register 20 tools and create usage events
+    for (let i = 0; i < 20; i++) {
+      const name = `tool-load-${i}`;
+      toolRegistry.upsert({
+        name,
+        toolType: 'slash_command',
+        scope: 'project',
+        source: 'config:test',
+        projectHash: PROJECT_HASH,
+        description: null,
+        serverName: null,
+      });
+      toolRegistry.recordOrCreate(name, {
+        toolType: 'slash_command',
+        scope: 'project',
+        source: 'config:test',
+        projectHash: PROJECT_HASH,
+        description: null,
+        serverName: null,
+      }, 'session-budget-test', true);
+    }
+
+    // Create a session with a large summary
+    const sessionRepo = new SessionRepository(laminarkDb.db, PROJECT_HASH);
+    sessionRepo.create('sess-budget');
+    sessionRepo.end('sess-budget', 'Activity: ' + 'x'.repeat(2000));
+
+    // Create observations
+    const obsRepo = new ObservationRepository(laminarkDb.db, PROJECT_HASH);
+    for (let i = 0; i < 5; i++) {
+      obsRepo.createClassified({
+        content: `Observation ${i}: ${'detailed content '.repeat(10)}`,
+        source: 'hook:Bash',
+        kind: 'change',
+      }, 'discovery');
+    }
+
+    const result = assembleSessionContext(laminarkDb.db, PROJECT_HASH, toolRegistry);
+
+    expect(result.length).toBeLessThanOrEqual(6000);
   });
 });
