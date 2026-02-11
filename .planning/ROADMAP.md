@@ -179,7 +179,7 @@ Plans:
 **Milestone Goal:** Transform Laminark from a project-scoped memory plugin into a globally-installed tool intelligence layer that discovers, maps, and routes to available tools based on conversation context and scope awareness.
 
 - [x] **Phase 9: Global Installation** - Plugin manifest, global deployment, and project-aware session bootstrapping
-- [ ] **Phase 10: Tool Discovery and Registry** - Config parsing, tool enumeration, and scope-aware registry storage
+- [x] **Phase 10: Tool Discovery and Registry** - Config parsing, tool enumeration, and scope-aware registry storage
 - [ ] **Phase 11: Scope Resolution** - Prefix-based scope detection and per-session tool filtering
 - [ ] **Phase 12: Usage Tracking** - Organic tool usage recording from hook events with project and session context
 - [ ] **Phase 13: Context Enhancement** - Session start injection extended with ranked tool suggestions within budget
@@ -213,11 +213,11 @@ Plans:
   2. Every discovered tool is stored in a `tool_registry` table with its name, description, scope origin, and discovery timestamp
   3. When Claude invokes any tool during a session, Laminark records the tool name in the registry even if it was not found during config discovery (organic discovery via PostToolUse)
   4. The registry persists across sessions -- tools discovered yesterday are still queryable today
-**Plans**: 2 plans
+**Plans**: 2 plans (complete)
 
 Plans:
-- [ ] 10-01-PLAN.md -- Tool type definitions, migration 16 (tool_registry table), and ToolRegistryRepository
-- [ ] 10-02-PLAN.md -- Config scanner (DISC-01 through DISC-04), organic discovery (DISC-05), and handler/session-lifecycle wiring
+- [x] 10-01-PLAN.md -- Tool type definitions, migration 16 (tool_registry table), and ToolRegistryRepository
+- [x] 10-02-PLAN.md -- Config scanner (DISC-01 through DISC-04), organic discovery (DISC-05), and handler/session-lifecycle wiring
 
 ### Phase 11: Scope Resolution
 **Goal**: Tool suggestions and queries are filtered to only include tools actually available in the current session's resolved scope
@@ -299,7 +299,7 @@ Note: Phases 15 and 16 depend on Phases 10+12 (not on each other or on 13/14), s
 | 7. Knowledge Graph and Advanced Intelligence | v1.0 | 8/8 | Complete | 2026-02-08 |
 | 8. Web Visualization | v1.0 | 5/5 | Complete | 2026-02-08 |
 | 9. Global Installation | v2.0 | 2/2 | Complete | 2026-02-10 |
-| 10. Tool Discovery and Registry | v2.0 | 0/2 | Planned | - |
+| 10. Tool Discovery and Registry | v2.0 | 2/2 | Complete | 2026-02-11 |
 | 11. Scope Resolution | v2.0 | 0/TBD | Not started | - |
 | 12. Usage Tracking | v2.0 | 0/TBD | Not started | - |
 | 13. Context Enhancement | v2.0 | 0/TBD | Not started | - |
