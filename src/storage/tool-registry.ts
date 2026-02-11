@@ -23,6 +23,7 @@ export class ToolRegistryRepository {
   private readonly stmtGetByName: BetterSqlite3.Statement;
   private readonly stmtGetAll: BetterSqlite3.Statement;
   private readonly stmtCount: BetterSqlite3.Statement;
+  private readonly stmtGetAvailableForSession: BetterSqlite3.Statement;
 
   constructor(db: BetterSqlite3.Database) {
     this.db = db;
@@ -66,6 +67,24 @@ export class ToolRegistryRepository {
 
       this.stmtCount = db.prepare(`
         SELECT COUNT(*) AS count FROM tool_registry
+      `);
+
+      this.stmtGetAvailableForSession = db.prepare(`
+        SELECT * FROM tool_registry
+        WHERE
+          scope = 'global'
+          OR (scope = 'project' AND project_hash = ?)
+          OR (scope = 'plugin' AND (project_hash IS NULL OR project_hash = ?))
+        ORDER BY
+          CASE tool_type
+            WHEN 'mcp_server' THEN 0
+            WHEN 'slash_command' THEN 1
+            WHEN 'skill' THEN 2
+            WHEN 'plugin' THEN 3
+            ELSE 4
+          END,
+          usage_count DESC,
+          discovered_at DESC
       `);
 
       debug('tool-registry', 'ToolRegistryRepository initialized');
@@ -135,6 +154,14 @@ export class ToolRegistryRepository {
    */
   getForProject(projectHash: string): ToolRegistryRow[] {
     return this.stmtGetByScope.all(projectHash) as ToolRegistryRow[];
+  }
+
+  /**
+   * Returns tools available in the resolved scope for a given project.
+   * Implements SCOP-01/SCOP-02/SCOP-03 scope resolution rules.
+   */
+  getAvailableForSession(projectHash: string): ToolRegistryRow[] {
+    return this.stmtGetAvailableForSession.all(projectHash, projectHash) as ToolRegistryRow[];
   }
 
   /**
