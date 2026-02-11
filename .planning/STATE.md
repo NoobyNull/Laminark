@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-10)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
-**Current focus:** Milestone v2.0 — Phase 12 complete, ready for Phase 13
+**Current focus:** Milestone v2.0 — Phase 13 complete, ready for Phase 14
 
 ## Current Position
 
-Phase: 12 of 16 (Usage Tracking) -- COMPLETE
+Phase: 13 of 16 (Context Enhancement) -- COMPLETE
 Plan: 1 of 1 complete
-Status: Phase 12 complete
-Last activity: 2026-02-11 — 12-01 complete (per-event usage tracking with temporal queries)
+Status: Phase 13 complete
+Last activity: 2026-02-11 — 13-01 complete (relevance-ranked tool suggestions with 500-char sub-budget)
 
-Progress (v2.0): [█████░░░░░] 50% (Phase 12 complete, 4/8 v2 phases done)
+Progress (v2.0): [██████░░░░] 62% (Phase 13 complete, 5/8 v2 phases done)
 
 ## Performance Metrics
 
@@ -44,6 +44,7 @@ Progress (v2.0): [█████░░░░░] 50% (Phase 12 complete, 4/8 v2
 | 10-tool-discovery-registry | 2/2 | 4min | 2min |
 | 11-scope-resolution | 1/1 | 3min | 3min |
 | 12-usage-tracking | 1/1 | 2min | 2min |
+| 13-context-enhancement | 1/1 | 3min | 3min |
 
 ## Accumulated Context
 
@@ -75,6 +76,10 @@ Recent decisions affecting current work:
 - [12-01]: Event insert inside existing try/catch -- non-fatal, supplementary to aggregate counters
 - [12-01]: sessionId=undefined skips event insert -- backward compatible with callers not providing session
 - [12-01]: No transaction wrapping aggregate+event -- independent rows, acceptable if event fails alone
+- [13-01]: 500-char sub-budget is primary tool section limiter; MAX_TOOLS_IN_CONTEXT kept as safety constant
+- [13-01]: Relevance score = frequency * 0.7 + recency * 0.3 computed in TypeScript, not SQL
+- [13-01]: MCP server entries aggregate usage from individual tool events via prefix regex
+- [13-01]: 7-day getUsageSince window matches the recency decay half-life
 
 ### Pending Todos
 
@@ -95,5 +100,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 12-01-PLAN.md -- Phase 12 complete. Per-event usage tracking with tool_usage_events table and temporal query methods.
+Stopped at: Completed 13-01-PLAN.md -- Phase 13 complete. Relevance-ranked tool suggestions with 500-char sub-budget and MCP server usage aggregation.
 Resume file: None
