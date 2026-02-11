@@ -257,17 +257,21 @@ function getLastCompletedSession(
  * Ranks tools by relevance using a weighted combination of recent usage
  * frequency and recency. Tools with no recent usage score 0.
  *
- * Formula: score = (recentCount / maxRecentCount) * 0.7 + recency * 0.3
- * where recency = exp(-0.693 * ageDays / 7) (same half-life as graph/temporal.ts)
+ * Formula: score = eventCount / totalEvents (frequency share among peers)
+ *
+ * Uses event-count-based window (last N events) instead of time-based decay.
+ * This is immune to usage gaps — if you don't use the app for a week,
+ * your usage patterns are preserved because the window slides by event
+ * count, not calendar time.
  *
  * MCP server entries aggregate usage stats from their individual tool events
- * to ensure accurate scoring (Pitfall 4 from research).
+ * to ensure accurate scoring.
  */
 function rankToolsByRelevance(
   tools: ToolRegistryRow[],
   usageStats: ToolUsageStats[],
 ): ToolRegistryRow[] {
-  if (usageStats.length === 0) return tools; // No temporal data: keep existing order
+  if (usageStats.length === 0) return tools; // No event data: keep existing order
 
   // Build direct lookup: tool_name -> stats
   const statsMap = new Map<string, ToolUsageStats>();
@@ -276,7 +280,7 @@ function rankToolsByRelevance(
   }
 
   // Aggregate usage stats by MCP server prefix for server-level rows
-  const serverStats = new Map<string, { usage_count: number; last_used: string }>();
+  const serverStats = new Map<string, { usage_count: number }>();
   for (const stat of usageStats) {
     const match = stat.tool_name.match(/^mcp__([^_]+(?:_[^_]+)*)__/);
     if (match) {
@@ -284,44 +288,32 @@ function rankToolsByRelevance(
       const existing = serverStats.get(serverName);
       if (existing) {
         existing.usage_count += stat.usage_count;
-        if (stat.last_used > existing.last_used) {
-          existing.last_used = stat.last_used;
-        }
       } else {
-        serverStats.set(serverName, {
-          usage_count: stat.usage_count,
-          last_used: stat.last_used,
-        });
+        serverStats.set(serverName, { usage_count: stat.usage_count });
       }
     }
   }
 
-  // Normalize against max usage (floor of 1 prevents division by zero)
-  const allCounts = [...statsMap.values(), ...serverStats.values()].map(s => s.usage_count);
-  const maxUsage = Math.max(1, ...allCounts);
-  const now = Date.now();
+  // Total events across all tools (floor of 1 prevents division by zero)
+  const totalEvents = Math.max(1,
+    [...statsMap.values()].reduce((sum, s) => sum + s.usage_count, 0),
+  );
 
   const scored = tools.map(row => {
     // Look up stats directly by tool name first
-    let stat: { usage_count: number; last_used: string } | undefined = statsMap.get(row.name);
+    let count: number | undefined = statsMap.get(row.name)?.usage_count;
 
     // For MCP server rows, fall back to aggregated server stats
-    if (!stat && row.tool_type === 'mcp_server' && row.server_name) {
-      stat = serverStats.get(row.server_name);
+    if (count === undefined && row.tool_type === 'mcp_server' && row.server_name) {
+      count = serverStats.get(row.server_name)?.usage_count;
     }
 
-    if (!stat) {
+    if (count === undefined) {
       return { row, score: 0 };
     }
 
-    const normalizedFrequency = stat.usage_count / maxUsage;
-    const ageDays = Math.max(0, (now - new Date(stat.last_used).getTime()) / 86400000);
-    const recencyScore = Math.exp(-0.693 * ageDays / 7);
-
-    return {
-      row,
-      score: normalizedFrequency * 0.7 + recencyScore * 0.3,
-    };
+    // Frequency share: what fraction of recent events belong to this tool
+    return { row, score: count / totalEvents };
   });
 
   // Sort by score descending; ties broken by lifetime usage_count descending
@@ -435,7 +427,7 @@ export function assembleSessionContext(
   if (toolRegistry) {
     try {
       const availableTools = toolRegistry.getAvailableForSession(projectHash);
-      const usageStats = toolRegistry.getUsageSince(projectHash, '-7 days');
+      const usageStats = toolRegistry.getRecentUsage(projectHash, 200);
       const ranked = rankToolsByRelevance(availableTools, usageStats);
       toolSection = formatToolSection(ranked);
     } catch {
