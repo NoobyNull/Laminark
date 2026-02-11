@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-10)
 ## Current Position
 
 Phase: 9 of 16 (Global Installation)
-Plan: 1 of 2 complete, 2 of 2 at checkpoint
-Status: Executing (09-01 complete, 09-02 checkpoint pending)
-Last activity: 2026-02-11 — 09-01 complete (dual-prefix self-referential filter), 09-02 awaiting human-verify
+Plan: 2 of 2 complete
+Status: Phase 09 complete
+Last activity: 2026-02-11 — 09-02 complete (plugin configuration with CLAUDE_PLUGIN_ROOT paths, verified via claude --plugin-dir)
 
-Progress (v2.0): [█░░░░░░░░░] 3%
+Progress (v2.0): [█░░░░░░░░░] 12% (Phase 09 complete, 1/8 v2 phases)
 
 ## Performance Metrics
 
@@ -40,7 +40,7 @@ Progress (v2.0): [█░░░░░░░░░] 3%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 09-global-installation | 1/2 | 3min | 3min |
+| 09-global-installation | 2/2 | 6min | 3min |
 
 ## Accumulated Context
 
@@ -55,10 +55,13 @@ Recent decisions affecting current work:
 - [V2]: Zero new dependencies — all builds on existing Node.js + SQLite + Zod stack
 - [09-01]: Centralized dual-prefix detection in self-referential.ts — isLaminarksOwnTool() handles both mcp__laminark__ and mcp__plugin_laminark_laminark__
 - [09-01]: Test file convention: src/hooks/__tests__/*.test.ts (not tests/ directory)
+- [09-02]: Plugin manifest uses semver 1.0.0 (not internal version "7") for plugin system compatibility
+- [09-02]: All config paths use ${CLAUDE_PLUGIN_ROOT} for portability -- no relative ./ paths in hooks.json or .mcp.json
+- [09-02]: SessionStart hook is synchronous with statusMessage; all other hooks are async: true
 
 ### Pending Todos
 
-- [v2] Global installation mechanism for Laminark
+- ~~[v2] Global installation mechanism for Laminark~~ COMPLETE (Phase 09)
 - [v2] Tool discovery across config scopes
 - [v2] Scope-aware tool registry
 - [v2] Conversation-driven routing
@@ -73,5 +76,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 09-01-PLAN.md (09-02 still at checkpoint)
+Stopped at: Completed 09-02-PLAN.md (Phase 09 fully complete)
 Resume file: None
