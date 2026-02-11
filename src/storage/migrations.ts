@@ -32,6 +32,7 @@ export interface Migration {
  * Migration 014: Add kind column to observations with backfill from source field.
  * Migration 015: Update graph taxonomy -- remove Tool/Person nodes, tighten CHECK constraints.
  * Migration 016: Tool registry table for discovered tools with scope-aware uniqueness.
+ * Migration 017: Tool usage events table for per-event temporal tracking.
  */
 export const MIGRATIONS: Migration[] = [
   {
@@ -453,6 +454,27 @@ export const MIGRATIONS: Migration[] = [
         ON tool_registry(project_hash) WHERE project_hash IS NOT NULL;
       CREATE INDEX idx_tool_registry_usage
         ON tool_registry(usage_count DESC, last_used_at DESC);
+    `,
+  },
+  {
+    version: 17,
+    name: 'create_tool_usage_events',
+    up: `
+      CREATE TABLE tool_usage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tool_name TEXT NOT NULL,
+        session_id TEXT,
+        project_hash TEXT,
+        success INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX idx_tool_usage_events_tool
+        ON tool_usage_events(tool_name, created_at DESC);
+      CREATE INDEX idx_tool_usage_events_session
+        ON tool_usage_events(session_id) WHERE session_id IS NOT NULL;
+      CREATE INDEX idx_tool_usage_events_project_time
+        ON tool_usage_events(project_hash, created_at DESC);
     `,
   },
 ];
