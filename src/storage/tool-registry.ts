@@ -30,6 +30,11 @@ export class ToolRegistryRepository {
   private readonly stmtGetUsageForSession: BetterSqlite3.Statement;
   private readonly stmtGetUsageSince: BetterSqlite3.Statement;
   private readonly stmtGetRecentUsage: BetterSqlite3.Statement;
+  private readonly stmtMarkStale: BetterSqlite3.Statement;
+  private readonly stmtMarkDemoted: BetterSqlite3.Statement;
+  private readonly stmtMarkActive: BetterSqlite3.Statement;
+  private readonly stmtGetConfigSourced: BetterSqlite3.Statement;
+  private readonly stmtGetRecentEventsForTool: BetterSqlite3.Statement;
 
   constructor(db: BetterSqlite3.Database) {
     this.db = db;
@@ -42,6 +47,7 @@ export class ToolRegistryRepository {
         DO UPDATE SET
           description = COALESCE(excluded.description, tool_registry.description),
           source = excluded.source,
+          status = 'active',
           updated_at = datetime('now')
       `);
 
@@ -82,6 +88,12 @@ export class ToolRegistryRepository {
           OR (scope = 'project' AND project_hash = ?)
           OR (scope = 'plugin' AND (project_hash IS NULL OR project_hash = ?))
         ORDER BY
+          CASE status
+            WHEN 'active' THEN 0
+            WHEN 'stale' THEN 1
+            WHEN 'demoted' THEN 2
+            ELSE 3
+          END,
           CASE tool_type
             WHEN 'mcp_server' THEN 0
             WHEN 'slash_command' THEN 1
@@ -134,6 +146,40 @@ export class ToolRegistryRepository {
         )
         GROUP BY tool_name
         ORDER BY usage_count DESC
+      `);
+
+      this.stmtMarkStale = db.prepare(`
+        UPDATE tool_registry
+        SET status = 'stale', updated_at = datetime('now')
+        WHERE name = ? AND COALESCE(project_hash, '') = COALESCE(?, '')
+          AND status != 'stale'
+      `);
+
+      this.stmtMarkDemoted = db.prepare(`
+        UPDATE tool_registry
+        SET status = 'demoted', updated_at = datetime('now')
+        WHERE name = ? AND COALESCE(project_hash, '') = COALESCE(?, '')
+      `);
+
+      this.stmtMarkActive = db.prepare(`
+        UPDATE tool_registry
+        SET status = 'active', updated_at = datetime('now')
+        WHERE name = ? AND COALESCE(project_hash, '') = COALESCE(?, '')
+          AND status != 'active'
+      `);
+
+      this.stmtGetConfigSourced = db.prepare(`
+        SELECT * FROM tool_registry
+        WHERE source LIKE 'config:%'
+          AND status = 'active'
+          AND (project_hash = ? OR project_hash IS NULL)
+      `);
+
+      this.stmtGetRecentEventsForTool = db.prepare(`
+        SELECT success FROM tool_usage_events
+        WHERE tool_name = ? AND project_hash = ?
+        ORDER BY created_at DESC
+        LIMIT ?
       `);
 
       debug('tool-registry', 'ToolRegistryRepository initialized');
@@ -276,6 +322,75 @@ export class ToolRegistryRepository {
    */
   getRecentUsage(projectHash: string, limit: number = 200): ToolUsageStats[] {
     return this.stmtGetRecentUsage.all(projectHash, limit) as ToolUsageStats[];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Staleness management methods
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Marks a tool as stale (no longer in config but still in registry).
+   * Idempotent -- no-op if already stale.
+   */
+  markStale(name: string, projectHash: string | null): void {
+    try {
+      this.stmtMarkStale.run(name, projectHash);
+      debug('tool-registry', 'Marked tool stale', { name });
+    } catch (err) {
+      debug('tool-registry', 'Failed to mark tool stale', { name, error: String(err) });
+    }
+  }
+
+  /**
+   * Marks a tool as demoted (high failure rate detected).
+   */
+  markDemoted(name: string, projectHash: string | null): void {
+    try {
+      this.stmtMarkDemoted.run(name, projectHash);
+      debug('tool-registry', 'Marked tool demoted', { name });
+    } catch (err) {
+      debug('tool-registry', 'Failed to mark tool demoted', { name, error: String(err) });
+    }
+  }
+
+  /**
+   * Marks a tool as active (restored from stale/demoted).
+   * Idempotent -- no-op if already active.
+   */
+  markActive(name: string, projectHash: string | null): void {
+    try {
+      this.stmtMarkActive.run(name, projectHash);
+      debug('tool-registry', 'Marked tool active', { name });
+    } catch (err) {
+      debug('tool-registry', 'Failed to mark tool active', { name, error: String(err) });
+    }
+  }
+
+  /**
+   * Returns all config-sourced active tools for a given project (or global).
+   * Used by staleness detection to compare against current config state.
+   */
+  getConfigSourcedTools(projectHash: string): ToolRegistryRow[] {
+    try {
+      return this.stmtGetConfigSourced.all(projectHash) as ToolRegistryRow[];
+    } catch (err) {
+      debug('tool-registry', 'Failed to get config-sourced tools', { error: String(err) });
+      return [];
+    }
+  }
+
+  /**
+   * Returns recent success/failure events for a specific tool.
+   * Used by failure-driven demotion to check failure rate.
+   * @param limit - Number of recent events to check (default 5)
+   */
+  getRecentEventsForTool(toolName: string, projectHash: string, limit: number = 5): Array<{ success: number }> {
+    try {
+      return this.stmtGetRecentEventsForTool.all(toolName, projectHash, limit) as Array<{ success: number }>;
+    } catch (err) {
+      debug('tool-registry', 'Failed to get recent events for tool', { toolName, error: String(err) });
+      return [];
+    }
   }
 
   // ---------------------------------------------------------------------------
