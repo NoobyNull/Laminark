@@ -182,7 +182,7 @@ Plans:
 - [x] **Phase 10: Tool Discovery and Registry** - Config parsing, tool enumeration, and scope-aware registry storage
 - [x] **Phase 11: Scope Resolution** - Prefix-based scope detection and per-session tool filtering
 - [x] **Phase 12: Usage Tracking** - Organic tool usage recording from hook events with project and session context
-- [ ] **Phase 13: Context Enhancement** - Session start injection extended with ranked tool suggestions within budget
+- [x] **Phase 13: Context Enhancement** - Session start injection extended with ranked tool suggestions within budget
 - [ ] **Phase 14: Conversation Routing** - Intent-to-tool mapping with confidence thresholds and cold start heuristics
 - [ ] **Phase 15: Tool Search** - MCP tool for querying the registry by keyword, scope, and semantic meaning
 - [ ] **Phase 16: Staleness Management** - Config rescan, age-based deprioritization, and failure-driven demotion
@@ -254,10 +254,10 @@ Plans:
   1. Session start injection includes an "Available Tools" section listing the most relevant tools for the current project scope
   2. The tool suggestions section fits within a 500-character sub-budget and does not cause the overall context injection to exceed 6000 characters
   3. Tools are ranked by a relevance score combining usage frequency and recency, so the most-used recent tools appear first
-**Plans**: 1 plan
+**Plans**: 1 plan (complete)
 
 Plans:
-- [ ] 13-01-PLAN.md -- Relevance-ranked tool suggestions with 500-char sub-budget in session context (CTXT-01, CTXT-02, CTXT-03)
+- [x] 13-01-PLAN.md -- Relevance-ranked tool suggestions with 500-char sub-budget in session context (CTXT-01, CTXT-02, CTXT-03)
 
 ### Phase 14: Conversation Routing
 **Goal**: Laminark detects when the conversation is heading toward a task that a specific tool can handle and proactively suggests it, with graceful behavior when it lacks data
@@ -311,7 +311,7 @@ Note: Phases 15 and 16 depend on Phases 10+12 (not on each other or on 13/14), s
 | 10. Tool Discovery and Registry | v2.0 | 2/2 | Complete | 2026-02-11 |
 | 11. Scope Resolution | v2.0 | 1/1 | Complete | 2026-02-11 |
 | 12. Usage Tracking | v2.0 | 1/1 | Complete | 2026-02-11 |
-| 13. Context Enhancement | v2.0 | 0/TBD | Not started | - |
+| 13. Context Enhancement | v2.0 | 1/1 | Complete | 2026-02-11 |
 | 14. Conversation Routing | v2.0 | 0/TBD | Not started | - |
 | 15. Tool Search | v2.0 | 0/TBD | Not started | - |
 | 16. Staleness Management | v2.0 | 0/TBD | Not started | - |
