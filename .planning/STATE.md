@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-10)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
-**Current focus:** Milestone v2.0 — Phase 15 in progress (Tool Search)
+**Current focus:** Milestone v2.0 — Phase 15 complete (Tool Search), Phase 16 next
 
 ## Current Position
 
-Phase: 15 of 16 (Tool Search)
-Plan: 1 of 2 complete
-Status: Executing phase 15
-Last activity: 2026-02-11 — 15-01 complete (FTS5+vec0 migration, hybrid search methods on ToolRegistryRepository)
+Phase: 15 of 16 (Tool Search) -- COMPLETE
+Plan: 2 of 2 complete
+Status: Phase 15 complete, ready for phase 16
+Last activity: 2026-02-11 — 15-02 complete (discover_tools MCP tool, background tool embedding)
 
-Progress (v2.0): [████████░░] 80% (Phase 15 plan 1/2)
+Progress (v2.0): [█████████░] 90% (Phase 15 complete, Phase 16 remaining)
 
 ## Performance Metrics
 
@@ -46,7 +46,7 @@ Progress (v2.0): [████████░░] 80% (Phase 15 plan 1/2)
 | 12-usage-tracking | 1/1 | 2min | 2min |
 | 13-context-enhancement | 1/1 | 3min | 3min |
 | 14-conversation-routing | 2/2 | 5min | 2.5min |
-| 15-tool-search | 1/2 | 2min | 2min |
+| 15-tool-search | 2/2 | 4min | 2min |
 
 ## Accumulated Context
 
@@ -93,6 +93,10 @@ Recent decisions affecting current work:
 - [15-01]: Functional migration with try/catch for vec0 -- FTS5 always runs, vec0 degrades gracefully
 - [15-01]: sanitizeQuery duplicated from SearchEngine (not imported) -- ToolRegistryRepository is not observation-scoped
 - [15-01]: searchByVector returns snake_case tool_id matching SQL column convention
+- [15-02]: discover_tools uses enforceTokenBudget at 2000 tokens matching recall.ts pattern
+- [15-02]: Deduplication mirrors injection.ts formatToolSection -- server-level entries suppress individual mcp_tool entries
+- [15-02]: processUnembeddedTools piggybacks on existing 5-second setInterval -- no new timer
+- [15-02]: ToolRegistryRepository instance wrapped in try/catch at module level for pre-migration graceful degradation
 
 ### Pending Todos
 
@@ -102,16 +106,17 @@ Recent decisions affecting current work:
 - ~~[v2] Scope-filtered tool resolution~~ COMPLETE (Phase 11-01: getAvailableForSession + session context)
 - ~~[v2] Usage event tracking~~ COMPLETE (Phase 12-01: tool_usage_events + temporal queries)
 - ~~[v2] Conversation-driven routing~~ COMPLETE (Phase 14: types, heuristic, learned patterns, router, handler + session integration)
+- ~~[v2] Tool search and discovery~~ COMPLETE (Phase 15: FTS5+vec0 search foundation + discover_tools MCP tool + background embedding)
 
 ### Blockers/Concerns
 
 - ~~Global installation changes MCP prefix from `mcp__laminark__` to `mcp__plugin_laminark_laminark__` — dual-prefix support needed during migration~~ RESOLVED by 09-01
 - ~~Tool discovery must handle missing/malformed config files gracefully~~ RESOLVED by 10-02 (all scanners wrapped in try/catch)
 - ~~Routing cold start — heuristic fallback needed before learned patterns accumulate~~ RESOLVED by 14-01 (keyword-based heuristic fallback)
-- MCP Tool Search feature (`ENABLE_TOOL_SEARCH`) interaction with registry completeness is not fully understood
+- ~~MCP Tool Search feature (`ENABLE_TOOL_SEARCH`) interaction with registry completeness~~ RESOLVED by 15-02 (discover_tools searches all registered tools with hybrid search)
 
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 15-01-PLAN.md -- FTS5+vec0 migration, ToolSearchResult type, hybrid search methods on ToolRegistryRepository. Phase 15 plan 1/2 done.
+Stopped at: Completed 15-02-PLAN.md -- discover_tools MCP tool with hybrid search, background tool embedding. Phase 15 complete (2/2).
 Resume file: None
