@@ -268,11 +268,11 @@ Plans:
   2. Tool suggestions are delivered via the existing notification mechanism (context injection or hook notification) -- Laminark never auto-invokes tools on the user's behalf
   3. When confidence in a routing match is below threshold, no suggestion is made rather than showing a low-quality guess
   4. In a fresh installation with no usage history, heuristic fallback routing provides basic suggestions based on tool descriptions and the current conversation topic
-**Plans**: 2 plans
+**Plans**: 2 plans (complete)
 
 Plans:
-- [ ] 14-01-PLAN.md -- Routing types, configuration defaults, and heuristic fallback keyword matching (ROUT-04)
-- [ ] 14-02-PLAN.md -- Learned pattern extraction, ConversationRouter orchestrator, and handler/session-lifecycle wiring (ROUT-01, ROUT-02, ROUT-03)
+- [x] 14-01-PLAN.md -- Routing types, configuration defaults, and heuristic fallback keyword matching (ROUT-04)
+- [x] 14-02-PLAN.md -- Learned pattern extraction, ConversationRouter orchestrator, and handler/session-lifecycle wiring (ROUT-01, ROUT-02, ROUT-03)
 
 ### Phase 15: Tool Search
 **Goal**: Claude can explicitly search and explore the tool registry to find tools by keyword, scope, or semantic description
@@ -316,6 +316,6 @@ Note: Phases 15 and 16 depend on Phases 10+12 (not on each other or on 13/14), s
 | 11. Scope Resolution | v2.0 | 1/1 | Complete | 2026-02-11 |
 | 12. Usage Tracking | v2.0 | 1/1 | Complete | 2026-02-11 |
 | 13. Context Enhancement | v2.0 | 1/1 | Complete | 2026-02-11 |
-| 14. Conversation Routing | v2.0 | 0/2 | Planned | - |
+| 14. Conversation Routing | v2.0 | 2/2 | Complete | 2026-02-10 |
 | 15. Tool Search | v2.0 | 0/TBD | Not started | - |
 | 16. Staleness Management | v2.0 | 0/TBD | Not started | - |
