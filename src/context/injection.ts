@@ -4,7 +4,7 @@ import type { Observation, ObservationKind, Session } from '../shared/types.js';
 import type { ObservationRow } from '../shared/types.js';
 import { rowToObservation } from '../shared/types.js';
 import type { ToolRegistryRepository } from '../storage/tool-registry.js';
-import type { ToolRegistryRow } from '../shared/tool-types.js';
+import type { ToolRegistryRow, ToolUsageStats } from '../shared/tool-types.js';
 import { debug } from '../shared/debug.js';
 
 /**
@@ -23,6 +23,12 @@ const OBSERVATION_CONTENT_LIMIT = 120;
  * Keeps the tool section compact to preserve budget for observations.
  */
 const MAX_TOOLS_IN_CONTEXT = 10;
+
+/**
+ * Maximum character budget for the "## Available Tools" section.
+ * Prevents tool listings from consuming too much of the 6000-char overall budget.
+ */
+const TOOL_SECTION_BUDGET = 500;
 
 /**
  * Welcome message for first-ever session (no prior sessions or observations).
@@ -248,11 +254,91 @@ function getLastCompletedSession(
 }
 
 /**
+ * Ranks tools by relevance using a weighted combination of recent usage
+ * frequency and recency. Tools with no recent usage score 0.
+ *
+ * Formula: score = (recentCount / maxRecentCount) * 0.7 + recency * 0.3
+ * where recency = exp(-0.693 * ageDays / 7) (same half-life as graph/temporal.ts)
+ *
+ * MCP server entries aggregate usage stats from their individual tool events
+ * to ensure accurate scoring (Pitfall 4 from research).
+ */
+function rankToolsByRelevance(
+  tools: ToolRegistryRow[],
+  usageStats: ToolUsageStats[],
+): ToolRegistryRow[] {
+  if (usageStats.length === 0) return tools; // No temporal data: keep existing order
+
+  // Build direct lookup: tool_name -> stats
+  const statsMap = new Map<string, ToolUsageStats>();
+  for (const stat of usageStats) {
+    statsMap.set(stat.tool_name, stat);
+  }
+
+  // Aggregate usage stats by MCP server prefix for server-level rows
+  const serverStats = new Map<string, { usage_count: number; last_used: string }>();
+  for (const stat of usageStats) {
+    const match = stat.tool_name.match(/^mcp__([^_]+(?:_[^_]+)*)__/);
+    if (match) {
+      const serverName = match[1];
+      const existing = serverStats.get(serverName);
+      if (existing) {
+        existing.usage_count += stat.usage_count;
+        if (stat.last_used > existing.last_used) {
+          existing.last_used = stat.last_used;
+        }
+      } else {
+        serverStats.set(serverName, {
+          usage_count: stat.usage_count,
+          last_used: stat.last_used,
+        });
+      }
+    }
+  }
+
+  // Normalize against max usage (floor of 1 prevents division by zero)
+  const allCounts = [...statsMap.values(), ...serverStats.values()].map(s => s.usage_count);
+  const maxUsage = Math.max(1, ...allCounts);
+  const now = Date.now();
+
+  const scored = tools.map(row => {
+    // Look up stats directly by tool name first
+    let stat: { usage_count: number; last_used: string } | undefined = statsMap.get(row.name);
+
+    // For MCP server rows, fall back to aggregated server stats
+    if (!stat && row.tool_type === 'mcp_server' && row.server_name) {
+      stat = serverStats.get(row.server_name);
+    }
+
+    if (!stat) {
+      return { row, score: 0 };
+    }
+
+    const normalizedFrequency = stat.usage_count / maxUsage;
+    const ageDays = Math.max(0, (now - new Date(stat.last_used).getTime()) / 86400000);
+    const recencyScore = Math.exp(-0.693 * ageDays / 7);
+
+    return {
+      row,
+      score: normalizedFrequency * 0.7 + recencyScore * 0.3,
+    };
+  });
+
+  // Sort by score descending; ties broken by lifetime usage_count descending
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return b.row.usage_count - a.row.usage_count;
+  });
+
+  return scored.map(s => s.row);
+}
+
+/**
  * Formats available tools as a compact section for session context.
  *
  * Deduplicates MCP servers vs individual MCP tools (prefers server entries).
  * Excludes built-in tools (Claude already knows Read, Write, Edit, Bash, etc.).
- * Limits to MAX_TOOLS_IN_CONTEXT entries to preserve context budget.
+ * Enforces a 500-character sub-budget via incremental line checking.
  */
 function formatToolSection(tools: ToolRegistryRow[]): string {
   if (tools.length === 0) return '';
@@ -283,29 +369,38 @@ function formatToolSection(tools: ToolRegistryRow[]): string {
 
   if (displayable.length === 0) return '';
 
-  const limited = displayable.slice(0, MAX_TOOLS_IN_CONTEXT);
   const lines: string[] = ['## Available Tools'];
 
-  for (const tool of limited) {
+  for (const tool of displayable) {
     const scopeTag = tool.scope === 'project' ? 'project' : 'global';
     const usageStr = tool.usage_count > 0 ? `, ${tool.usage_count}x` : '';
 
+    let candidateLine: string;
     if (tool.tool_type === 'mcp_server') {
-      lines.push(`- MCP: ${tool.server_name ?? tool.name} (${scopeTag}${usageStr})`);
+      candidateLine = `- MCP: ${tool.server_name ?? tool.name} (${scopeTag}${usageStr})`;
     } else if (tool.tool_type === 'slash_command') {
-      lines.push(`- ${tool.name} (${scopeTag}${usageStr})`);
+      candidateLine = `- ${tool.name} (${scopeTag}${usageStr})`;
     } else if (tool.tool_type === 'skill') {
       const desc = tool.description ? ` - ${tool.description}` : '';
-      lines.push(`- skill: ${tool.name} (${scopeTag})${desc}`);
+      candidateLine = `- skill: ${tool.name} (${scopeTag})${desc}`;
     } else if (tool.tool_type === 'plugin') {
-      lines.push(`- plugin: ${tool.name} (${scopeTag})`);
+      candidateLine = `- plugin: ${tool.name} (${scopeTag})`;
     } else {
-      lines.push(`- ${tool.name} (${scopeTag}${usageStr})`);
+      candidateLine = `- ${tool.name} (${scopeTag}${usageStr})`;
     }
+
+    // Incremental budget check: stop if adding this line exceeds 500 chars
+    if ([...lines, candidateLine].join('\n').length > TOOL_SECTION_BUDGET) break;
+    lines.push(candidateLine);
   }
 
-  if (displayable.length > MAX_TOOLS_IN_CONTEXT) {
-    lines.push(`(${displayable.length - MAX_TOOLS_IN_CONTEXT} more available)`);
+  // Overflow indicator: show how many tools were dropped
+  const added = lines.length - 1; // subtract header line
+  if (displayable.length > added && added > 0) {
+    const overflow = `(${displayable.length - added} more available)`;
+    if ((lines.join('\n') + '\n' + overflow).length <= TOOL_SECTION_BUDGET) {
+      lines.push(overflow);
+    }
   }
 
   return lines.join('\n');
@@ -340,7 +435,9 @@ export function assembleSessionContext(
   if (toolRegistry) {
     try {
       const availableTools = toolRegistry.getAvailableForSession(projectHash);
-      toolSection = formatToolSection(availableTools);
+      const usageStats = toolRegistry.getUsageSince(projectHash, '-7 days');
+      const ranked = rankToolsByRelevance(availableTools, usageStats);
+      toolSection = formatToolSection(ranked);
     } catch {
       // Tool registry is supplementary -- never block context assembly
     }
