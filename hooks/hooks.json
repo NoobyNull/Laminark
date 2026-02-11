@@ -1,8 +1,21 @@
 {
+  "description": "Laminark: persistent adaptive memory for Claude Code",
   "hooks": {
-    "PostToolUse": [
+    "SessionStart": [
       {
         "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-deps.sh\" node \"${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js\"",
+            "statusMessage": "Loading Laminark memory context...",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
         "hooks": [
           {
             "type": "command",
@@ -15,32 +28,6 @@
     ],
     "PostToolUseFailure": [
       {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-deps.sh\" node \"${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js\"",
-            "async": true,
-            "timeout": 30
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-deps.sh\" node \"${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js\"",
-            "timeout": 30
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "matcher": "",
         "hooks": [
           {
             "type": "command",
@@ -58,7 +45,19 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-deps.sh\" node \"${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js\"",
             "async": true,
-            "timeout": 30
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-deps.sh\" node \"${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js\"",
+            "async": true,
+            "timeout": 15
           }
         ]
       }
