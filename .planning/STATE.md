@@ -5,14 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-10)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
-**Current focus:** Milestone v2.0 — Global Tool Intelligence
+**Current focus:** Milestone v2.0 — Phase 9: Global Installation
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 9 of 16 (Global Installation)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-02-10 — Milestone v2.0 started
+Status: Ready to plan
+Last activity: 2026-02-10 — v2.0 roadmap created
+
+Progress (v2.0): [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -34,6 +36,12 @@ Last activity: 2026-02-10 — Milestone v2.0 started
 | 07-knowledge-graph-and-advanced-intelligence | 8/8 | 34min | 4min |
 | 08-web-visualization | 5/5 | 25min | 5min |
 
+**V2 Velocity:**
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| - | - | - | - |
+
 ## Accumulated Context
 
 ### Decisions
@@ -44,10 +52,10 @@ Recent decisions affecting current work:
 - [V2]: Laminark must be global (~/.claude/), not project-scoped (.mcp.json) — to act as universal tool router
 - [V2]: Tool registry needs scope awareness — built-in, global, project, team scopes with resolution rules
 - [V2]: Conversation-driven routing — map discussion patterns to appropriate tools from resolved scope set
+- [V2]: Zero new dependencies — all builds on existing Node.js + SQLite + Zod stack
 
 ### Pending Todos
 
-- [database] Add cross-project memory sharing between Claude instances
 - [v2] Global installation mechanism for Laminark
 - [v2] Tool discovery across config scopes
 - [v2] Scope-aware tool registry
@@ -55,19 +63,13 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
-- Global installation changes how Laminark's MCP server is started — needs investigation of ~/.claude/ plugin lifecycle
+- Global installation changes MCP prefix from `mcp__laminark__` to `mcp__plugin_laminark_laminark__` — dual-prefix support needed during migration
 - Tool discovery must handle missing/malformed config files gracefully
-- Routing patterns need enough training data before they're useful — cold start problem
-
-### Quick Tasks Completed
-
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 1 | Add debug logging infrastructure with LAMINARK_DEBUG env var and config.json support | 2026-02-08 | aa7666c | [1-add-debug-logging-infrastructure-with-la](./quick/1-add-debug-logging-infrastructure-with-la/) |
-| 2 | Add laminark:status slash command showing connection info, memory count, and token stats | 2026-02-10 | 68a16b6 | - |
+- Routing cold start — heuristic fallback needed before learned patterns accumulate
+- MCP Tool Search feature (`ENABLE_TOOL_SEARCH`) interaction with registry completeness is not fully understood
 
 ## Session Continuity
 
 Last session: 2026-02-10
-Stopped at: V2 milestone initialization — research phase next
+Stopped at: V2 roadmap created — ready to plan Phase 9
 Resume file: None

@@ -1,10 +1,14 @@
 # Roadmap: Laminark
 
-## Overview
+## Milestones
 
-Laminark delivers persistent adaptive memory for Claude Code in 8 phases following the natural dependency chain: storage foundation, then interfaces, then capture, then intelligence, then visualization. Phases 1-3 produce a minimum viable plugin with keyword search and automatic observation capture. Phases 4-6 add semantic intelligence, session continuity, and adaptive topic detection. Phases 7-8 add the knowledge graph, advanced embedding strategies, and visual exploration. Every phase delivers a coherent, independently verifiable capability.
+- Done **v1.0 Persistent Adaptive Memory** - Phases 1-8 (shipped 2026-02-09)
+- In Progress **v2.0 Global Tool Intelligence** - Phases 9-16 (in progress)
 
 ## Phases
+
+<details>
+<summary>v1.0 Persistent Adaptive Memory (Phases 1-8) - SHIPPED 2026-02-09</summary>
 
 **Phase Numbering:**
 - Integer phases (1, 2, 3): Planned milestone work
@@ -16,12 +20,10 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: MCP Interface and Search** - Claude-facing tools with keyword search and progressive disclosure
 - [x] **Phase 3: Hook Integration and Capture** - Automatic observation capture via Claude Code hooks
 - [x] **Phase 4: Embedding Engine and Semantic Search** - Vector embeddings with pluggable strategy and hybrid search
-- [ ] **Phase 5: Session Context and Summaries** - Context continuity across sessions with progressive disclosure
-- [ ] **Phase 6: Topic Detection and Context Stashing** - Adaptive topic shift detection with automatic context preservation
-- [ ] **Phase 7: Knowledge Graph and Advanced Intelligence** - Entity extraction, relationship mapping, and Claude piggyback embeddings
-- [ ] **Phase 8: Web Visualization** - Interactive knowledge graph and timeline views in the browser
-
-## Phase Details
+- [x] **Phase 5: Session Context and Summaries** - Context continuity across sessions with progressive disclosure
+- [x] **Phase 6: Topic Detection and Context Stashing** - Adaptive topic shift detection with automatic context preservation
+- [x] **Phase 7: Knowledge Graph and Advanced Intelligence** - Entity extraction, relationship mapping, and Claude piggyback embeddings
+- [x] **Phase 8: Web Visualization** - Interactive knowledge graph and timeline views in the browser
 
 ### Phase 1: Storage Engine
 **Goal**: A durable, concurrent-safe SQLite database that stores observations with full-text indexing and never loses data
@@ -170,18 +172,129 @@ Plans:
 - [x] 08-04-PLAN.md -- Timeline view with session cards, observation entries, and topic shift markers
 - [x] 08-05-PLAN.md -- Live SSE updates end-to-end and viewport culling for 500+ node performance
 
+</details>
+
+### v2.0 Global Tool Intelligence (In Progress)
+
+**Milestone Goal:** Transform Laminark from a project-scoped memory plugin into a globally-installed tool intelligence layer that discovers, maps, and routes to available tools based on conversation context and scope awareness.
+
+- [ ] **Phase 9: Global Installation** - Plugin manifest, global deployment, and project-aware session bootstrapping
+- [ ] **Phase 10: Tool Discovery and Registry** - Config parsing, tool enumeration, and scope-aware registry storage
+- [ ] **Phase 11: Scope Resolution** - Prefix-based scope detection and per-session tool filtering
+- [ ] **Phase 12: Usage Tracking** - Organic tool usage recording from hook events with project and session context
+- [ ] **Phase 13: Context Enhancement** - Session start injection extended with ranked tool suggestions within budget
+- [ ] **Phase 14: Conversation Routing** - Intent-to-tool mapping with confidence thresholds and cold start heuristics
+- [ ] **Phase 15: Tool Search** - MCP tool for querying the registry by keyword, scope, and semantic meaning
+- [ ] **Phase 16: Staleness Management** - Config rescan, age-based deprioritization, and failure-driven demotion
+
+## Phase Details
+
+### Phase 9: Global Installation
+**Goal**: Laminark is present in every Claude Code session as a globally-installed plugin that detects and adapts to whichever project the user is working in
+**Depends on**: Phase 8 (v1.0 complete)
+**Requirements**: GLOB-01, GLOB-02, GLOB-03, GLOB-04, GLOB-05
+**Success Criteria** (what must be TRUE):
+  1. User opens any Claude Code session in any project directory and Laminark's MCP tools and hooks are available without per-project `.mcp.json` configuration
+  2. Laminark detects the current project directory on session start and scopes memory operations to that project automatically
+  3. The self-referential filter correctly ignores Laminark's own tool calls under both the legacy `mcp__laminark__` prefix and the new `mcp__plugin_laminark_laminark__` prefix
+  4. User can install Laminark globally via `claude plugin install` from the published npm package
+**Plans**: TBD
+
+### Phase 10: Tool Discovery and Registry
+**Goal**: Laminark knows what tools exist across all configuration scopes and stores them in a queryable registry with provenance metadata
+**Depends on**: Phase 9
+**Requirements**: DISC-01, DISC-02, DISC-03, DISC-04, DISC-05, DISC-06
+**Success Criteria** (what must be TRUE):
+  1. On session start, Laminark reads `.mcp.json`, `~/.claude.json`, `~/.claude/commands/`, `.claude/commands/`, `~/.claude/skills/`, `.claude/skills/`, and `~/.claude/plugins/installed_plugins.json` to enumerate available tools
+  2. Every discovered tool is stored in a `tool_registry` table with its name, description, scope origin, and discovery timestamp
+  3. When Claude invokes any tool during a session, Laminark records the tool name in the registry even if it was not found during config discovery (organic discovery via PostToolUse)
+  4. The registry persists across sessions -- tools discovered yesterday are still queryable today
+**Plans**: TBD
+
+### Phase 11: Scope Resolution
+**Goal**: Tool suggestions and queries are filtered to only include tools actually available in the current session's resolved scope
+**Depends on**: Phase 10
+**Requirements**: SCOP-01, SCOP-02, SCOP-03, SCOP-04
+**Success Criteria** (what must be TRUE):
+  1. Each tool in the registry has a scope classification (built-in, global, project, plugin) derived from its name prefix and config origin
+  2. Session start context only surfaces tools that are available in the current project's resolved scope (built-in + global + current project + team)
+  3. A tool registered from project A's `.mcp.json` is never suggested or surfaced when working in project B
+  4. Scope detection correctly parses tool_name prefixes: bare names are built-in, `mcp__` prefix is MCP server, `mcp__plugin_` prefix is plugin-provided
+**Plans**: TBD
+
+### Phase 12: Usage Tracking
+**Goal**: Laminark builds a usage profile of which tools are used, how often, and in what context, providing the data foundation for intelligent routing
+**Depends on**: Phase 10, Phase 11
+**Requirements**: UTRK-01, UTRK-02, UTRK-03
+**Success Criteria** (what must be TRUE):
+  1. Every PostToolUse hook event increments the tool's usage count and updates its last_used_at timestamp in the registry
+  2. Each usage event is recorded with its session ID and project association, enabling per-project and per-session usage analysis
+  3. Usage data accumulated across multiple sessions is queryable -- a tool used 50 times over the past week shows that history
+**Plans**: TBD
+
+### Phase 13: Context Enhancement
+**Goal**: Claude starts every session knowing not just what happened last time, but what tools are available and most relevant to the current context
+**Depends on**: Phase 11, Phase 12
+**Requirements**: CTXT-01, CTXT-02, CTXT-03
+**Success Criteria** (what must be TRUE):
+  1. Session start injection includes an "Available Tools" section listing the most relevant tools for the current project scope
+  2. The tool suggestions section fits within a 500-character sub-budget and does not cause the overall context injection to exceed 6000 characters
+  3. Tools are ranked by a relevance score combining usage frequency and recency, so the most-used recent tools appear first
+**Plans**: TBD
+
+### Phase 14: Conversation Routing
+**Goal**: Laminark detects when the conversation is heading toward a task that a specific tool can handle and proactively suggests it, with graceful behavior when it lacks data
+**Depends on**: Phase 12, Phase 13
+**Requirements**: ROUT-01, ROUT-02, ROUT-03, ROUT-04
+**Success Criteria** (what must be TRUE):
+  1. When the user discusses a topic that historically led to using a specific tool, Laminark detects the pattern match and surfaces a suggestion
+  2. Tool suggestions are delivered via the existing notification mechanism (context injection or hook notification) -- Laminark never auto-invokes tools on the user's behalf
+  3. When confidence in a routing match is below threshold, no suggestion is made rather than showing a low-quality guess
+  4. In a fresh installation with no usage history, heuristic fallback routing provides basic suggestions based on tool descriptions and the current conversation topic
+**Plans**: TBD
+
+### Phase 15: Tool Search
+**Goal**: Claude can explicitly search and explore the tool registry to find tools by keyword, scope, or semantic description
+**Depends on**: Phase 10, Phase 12
+**Requirements**: SRCH-01, SRCH-02, SRCH-03
+**Success Criteria** (what must be TRUE):
+  1. Claude can call a `discover_tools` MCP tool to search the registry by keyword and optionally filter by scope
+  2. Tool descriptions are indexed for semantic search using the existing hybrid search infrastructure (FTS5 + vector), so "file manipulation" finds tools described as "read and write files"
+  3. Search results include each tool's scope, total usage count, and last used timestamp, giving Claude enough context to recommend the right tool
+**Plans**: TBD
+
+### Phase 16: Staleness Management
+**Goal**: The tool registry stays accurate over time by detecting removed tools, deprioritizing stale entries, and demoting tools that consistently fail
+**Depends on**: Phase 10, Phase 12
+**Requirements**: STAL-01, STAL-02, STAL-03
+**Success Criteria** (what must be TRUE):
+  1. On each session start, config rescan compares current config files against the registry and marks tools that no longer appear in any config as stale
+  2. Tools not seen (neither discovered nor used) in 30+ days are automatically deprioritized in ranking and suggestions
+  3. When a PostToolUseFailure event occurs, the failing tool is deprioritized in future suggestions until a successful use resets its standing
+**Plans**: TBD
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
+Phases execute in numeric order: 9 -> 10 -> 11 -> 12 -> 13 -> 14 -> 15 -> 16
 
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 1. Storage Engine | 4/4 | Complete | 2026-02-08 |
-| 2. MCP Interface and Search | 3/3 | Complete | 2026-02-08 |
-| 3. Hook Integration and Capture | 3/3 | Complete | 2026-02-08 |
-| 4. Embedding Engine and Semantic Search | 4/4 | Complete | 2026-02-08 |
-| 5. Session Context and Summaries | 3/3 | Complete | 2026-02-08 |
-| 6. Topic Detection and Context Stashing | 7/7 | Complete | 2026-02-08 |
-| 7. Knowledge Graph and Advanced Intelligence | 8/8 | Complete | 2026-02-08 |
-| 8. Web Visualization | 5/5 | Complete | 2026-02-08 |
+Note: Phases 15 and 16 depend on Phases 10+12 (not on each other or on 13/14), so they could execute in parallel with 13/14 if needed. The linear order above is the default sequence.
+
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 1. Storage Engine | v1.0 | 4/4 | Complete | 2026-02-08 |
+| 2. MCP Interface and Search | v1.0 | 3/3 | Complete | 2026-02-08 |
+| 3. Hook Integration and Capture | v1.0 | 3/3 | Complete | 2026-02-08 |
+| 4. Embedding Engine and Semantic Search | v1.0 | 4/4 | Complete | 2026-02-08 |
+| 5. Session Context and Summaries | v1.0 | 3/3 | Complete | 2026-02-08 |
+| 6. Topic Detection and Context Stashing | v1.0 | 7/7 | Complete | 2026-02-08 |
+| 7. Knowledge Graph and Advanced Intelligence | v1.0 | 8/8 | Complete | 2026-02-08 |
+| 8. Web Visualization | v1.0 | 5/5 | Complete | 2026-02-08 |
+| 9. Global Installation | v2.0 | 0/TBD | Not started | - |
+| 10. Tool Discovery and Registry | v2.0 | 0/TBD | Not started | - |
+| 11. Scope Resolution | v2.0 | 0/TBD | Not started | - |
+| 12. Usage Tracking | v2.0 | 0/TBD | Not started | - |
+| 13. Context Enhancement | v2.0 | 0/TBD | Not started | - |
+| 14. Conversation Routing | v2.0 | 0/TBD | Not started | - |
+| 15. Tool Search | v2.0 | 0/TBD | Not started | - |
+| 16. Staleness Management | v2.0 | 0/TBD | Not started | - |
