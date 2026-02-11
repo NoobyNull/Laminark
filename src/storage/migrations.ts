@@ -33,6 +33,7 @@ export interface Migration {
  * Migration 015: Update graph taxonomy -- remove Tool/Person nodes, tighten CHECK constraints.
  * Migration 016: Tool registry table for discovered tools with scope-aware uniqueness.
  * Migration 017: Tool usage events table for per-event temporal tracking.
+ * Migration 018: Tool registry FTS5 + vec0 tables for hybrid search on tool descriptions.
  */
 export const MIGRATIONS: Migration[] = [
   {
@@ -476,6 +477,57 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_tool_usage_events_project_time
         ON tool_usage_events(project_hash, created_at DESC);
     `,
+  },
+  {
+    version: 18,
+    name: 'create_tool_registry_search',
+    up: (db: BetterSqlite3.Database) => {
+      // FTS5 external content table for tool registry (always created)
+      db.exec(`
+        CREATE VIRTUAL TABLE tool_registry_fts USING fts5(
+          name,
+          description,
+          content='tool_registry',
+          content_rowid='id',
+          tokenize='porter unicode61'
+        );
+
+        -- Sync trigger: INSERT
+        CREATE TRIGGER tool_registry_ai AFTER INSERT ON tool_registry BEGIN
+          INSERT INTO tool_registry_fts(rowid, name, description)
+            VALUES (new.id, new.name, new.description);
+        END;
+
+        -- Sync trigger: UPDATE (delete old entry, insert new)
+        CREATE TRIGGER tool_registry_au AFTER UPDATE ON tool_registry BEGIN
+          INSERT INTO tool_registry_fts(tool_registry_fts, rowid, name, description)
+            VALUES('delete', old.id, old.name, old.description);
+          INSERT INTO tool_registry_fts(rowid, name, description)
+            VALUES (new.id, new.name, new.description);
+        END;
+
+        -- Sync trigger: DELETE
+        CREATE TRIGGER tool_registry_ad AFTER DELETE ON tool_registry BEGIN
+          INSERT INTO tool_registry_fts(tool_registry_fts, rowid, name, description)
+            VALUES('delete', old.id, old.name, old.description);
+        END;
+
+        -- Rebuild to index existing tool_registry rows
+        INSERT INTO tool_registry_fts(tool_registry_fts) VALUES('rebuild');
+      `);
+
+      // vec0 table for tool embeddings (conditional on sqlite-vec availability)
+      try {
+        db.exec(`
+          CREATE VIRTUAL TABLE IF NOT EXISTS tool_registry_embeddings USING vec0(
+            tool_id INTEGER PRIMARY KEY,
+            embedding float[384] distance_metric=cosine
+          );
+        `);
+      } catch {
+        // sqlite-vec not available -- skip silently, vector search will degrade gracefully
+      }
+    },
   },
 ];
 
