@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-10)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
-**Current focus:** Milestone v2.0 — Phase 16 in progress (Staleness Management), Plan 01 complete
+**Current focus:** Milestone v2.0 -- Phase 16 COMPLETE (Staleness Management)
 
 ## Current Position
 
-Phase: 16 of 16 (Staleness Management) -- IN PROGRESS
-Plan: 1 of 2 complete
-Status: Plan 16-01 complete (staleness data model + storage methods), Plan 16-02 next
-Last activity: 2026-02-11 — 16-01 complete (migration 19, staleness methods on ToolRegistryRepository)
+Phase: 16 of 16 (Staleness Management) -- COMPLETE
+Plan: 2 of 2 complete
+Status: Phase 16 complete. All v2.0 phases complete.
+Last activity: 2026-02-11 — 16-02 complete (staleness wiring: config detection, failure demotion, ranking penalties, routing exclusion, search display)
 
-Progress (v2.0): [█████████▒] 95% (Phase 16 plan 1/2 complete)
+Progress (v2.0): [██████████] 100% (Phase 16 plan 2/2 complete)
 
 ## Performance Metrics
 
@@ -47,7 +47,7 @@ Progress (v2.0): [█████████▒] 95% (Phase 16 plan 1/2 complet
 | 13-context-enhancement | 1/1 | 3min | 3min |
 | 14-conversation-routing | 2/2 | 5min | 2.5min |
 | 15-tool-search | 2/2 | 4min | 2min |
-| 16-staleness-management | 1/2 | 2min | 2min |
+| 16-staleness-management | 2/2 | 4min | 2min |
 
 ## Accumulated Context
 
@@ -102,6 +102,11 @@ Recent decisions affecting current work:
 - [16-01]: getConfigSourcedTools returns project-level AND global tools for complete staleness comparison
 - [16-01]: Status ordering prepended before tool_type ordering in getAvailableForSession
 - [16-01]: Upsert ON CONFLICT restores active status for re-discovered tools
+- [16-02]: detectRemovedTools runs inside config scan timing for accurate performance monitoring
+- [16-02]: MCP server removal cascades to individual mcp_tool entries from same server_name
+- [16-02]: Age penalty computed in JS using MAX(last_used_at/discovered_at, updated_at) not SQL
+- [16-02]: Router uses strict t.status === 'active' for forward-compatibility with new statuses
+- [16-02]: Stacking score penalties: 0.25x for status (stale/demoted) and 0.5x for 30+ day age
 
 ### Pending Todos
 
@@ -123,5 +128,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 16-01-PLAN.md -- staleness data model with migration 19, 5 new methods on ToolRegistryRepository. Phase 16 plan 1/2 complete.
+Stopped at: Completed 16-02-PLAN.md -- staleness wiring complete. Phase 16 complete. All v2.0 phases complete.
 Resume file: None
