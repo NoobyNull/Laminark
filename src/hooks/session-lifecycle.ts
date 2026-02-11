@@ -60,7 +60,7 @@ export function handleSessionStart(
 
   // Assemble context from prior sessions and observations
   const startTime = Date.now();
-  const context = assembleSessionContext(db, projectHash);
+  const context = assembleSessionContext(db, projectHash, toolRegistry);
   const elapsed = Date.now() - startTime;
 
   if (elapsed > 500) {
