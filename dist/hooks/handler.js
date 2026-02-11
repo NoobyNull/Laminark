@@ -1,9 +1,38 @@
 import { i as getProjectHash, n as getDatabaseConfig } from "../config-t8LZeB-u.mjs";
-import { a as rowToObservation, i as ObservationRepository, l as debug, o as openDatabase, r as SessionRepository, t as SaveGuard } from "../save-guard-B6cie18b.mjs";
-import { readFileSync } from "node:fs";
+import { c as ObservationRepository, i as SaveGuard, l as rowToObservation, n as NotificationStore, p as debug, r as ResearchBufferRepository, s as SessionRepository, t as ToolRegistryRepository, u as openDatabase } from "../tool-registry-Dk6m-4H_.mjs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
 
+//#region src/hooks/self-referential.ts
+/**
+* Self-referential tool detection for Laminark.
+*
+* Laminark's MCP tools appear with different prefixes depending on
+* how Claude Code discovers the server:
+*
+* - Project-scoped (.mcp.json): `mcp__laminark__<tool>`
+* - Global plugin (~/.claude/plugins/): `mcp__plugin_laminark_laminark__<tool>`
+*
+* Both prefixes must be detected to prevent Laminark from capturing
+* its own tool calls as observations, which would create a feedback loop.
+*/
+/**
+* All known prefixes for Laminark's own MCP tools.
+* Order: project-scoped first (most common), plugin-scoped second.
+*/
+const LAMINARK_PREFIXES = ["mcp__laminark__", "mcp__plugin_laminark_laminark__"];
+/**
+* Returns true if the given tool name belongs to Laminark.
+*
+* Checks against all known Laminark MCP prefixes to detect self-referential
+* tool calls regardless of installation method (project-scoped or global plugin).
+*/
+function isLaminarksOwnTool(toolName) {
+	return LAMINARK_PREFIXES.some((prefix) => toolName.startsWith(prefix));
+}
+
+//#endregion
 //#region src/hooks/capture.ts
 /**
 * Truncates a string to maxLength, appending '...' if truncated.
@@ -25,127 +54,61 @@ function extractObservation(payload) {
 		case "Write": return `[Write] Created ${tool_input.file_path}\n${truncate$1(String(tool_input.content ?? ""), 200)}`;
 		case "Edit": return `[Edit] Modified ${tool_input.file_path}: replaced "${truncate$1(String(tool_input.old_string ?? ""), 80)}" with "${truncate$1(String(tool_input.new_string ?? ""), 80)}"`;
 		case "Bash": return `[Bash] $ ${truncate$1(String(tool_input.command ?? ""), 100)}\n${truncate$1(JSON.stringify(tool_response ?? ""), 200)}`;
-		case "Read": return `[Read] ${tool_input.file_path}`;
+		case "Read":
 		case "Glob":
-		case "Grep": return `[${tool_name}] pattern=${tool_input.pattern ?? ""} in ${tool_input.path ?? "cwd"}`;
+		case "Grep": return null;
+		case "WebFetch": return `[WebFetch] ${String(tool_input.url ?? "")}\nPrompt: ${truncate$1(String(tool_input.prompt ?? ""), 100)}\n${truncate$1(JSON.stringify(tool_response ?? ""), 300)}`;
+		case "WebSearch": return `[WebSearch] "${String(tool_input.query ?? "")}"\n${truncate$1(JSON.stringify(tool_response ?? ""), 300)}`;
 		default: return `[${tool_name}] ${truncate$1(JSON.stringify(tool_input), 200)}`;
 	}
 }
 
 //#endregion
 //#region src/curation/summarizer.ts
-/** Matches file paths like src/foo/bar.ts, ./config.json, /etc/hosts */
-const FILE_PATH_RE = /(?:^|[\s"'`(])([a-zA-Z0-9_./-]+\.[a-zA-Z]{1,10})(?=[\s"'`),;:]|$)/g;
-/** Keywords indicating a decision or choice was made */
-const DECISION_KEYWORDS = [
-	"decided",
-	"chose",
-	"will use",
-	"going with",
-	"selected",
-	"opted for",
-	"switching to",
-	"prefer"
-];
-/** Keywords indicating a problem was encountered */
-const PROBLEM_KEYWORDS = [
-	"error",
-	"failed",
-	"bug",
-	"issue",
-	"fix",
-	"broken",
-	"crash",
-	"wrong",
-	"missing",
-	"undefined"
-];
-/** Keywords indicating a solution was applied */
-const SOLUTION_KEYWORDS = [
-	"fixed",
-	"resolved",
-	"solved",
-	"working now",
-	"corrected",
-	"patched",
-	"addressed"
-];
 /**
-* Extracts unique file paths from observation content.
-* Filters out common false positives like version numbers (e.g., "v1.0").
+* Groups observations by their kind field.
 */
-function extractFilePaths(observations) {
-	const paths = /* @__PURE__ */ new Set();
-	const falsePositiveRe = /^[vV]?\d+\.\d/;
+function groupByKind(observations) {
+	const groups = {
+		change: [],
+		reference: [],
+		finding: [],
+		decision: [],
+		verification: []
+	};
 	for (const obs of observations) {
-		const text = obs.content;
-		let match;
-		FILE_PATH_RE.lastIndex = 0;
-		while ((match = FILE_PATH_RE.exec(text)) !== null) {
-			const path = match[1];
-			if (path.length > 3 && !falsePositiveRe.test(path)) paths.add(path);
-		}
+		const kind = obs.kind ?? "finding";
+		if (groups[kind]) groups[kind].push(obs);
+		else groups.finding.push(obs);
 	}
-	return Array.from(paths).slice(0, 15);
+	return groups;
 }
 /**
-* Extracts observations that contain decision-related keywords.
-* Returns the first sentence or first 120 characters of matching content.
+* Extracts a snippet from observation content (first line, max 120 chars).
 */
-function extractDecisions(observations) {
-	const decisions = [];
-	for (const obs of observations) {
-		const lower = obs.content.toLowerCase();
-		if (DECISION_KEYWORDS.some((kw) => lower.includes(kw))) {
-			const firstSentence = obs.content.split(/[.!?\n]/)[0].trim();
-			const snippet = firstSentence.length > 120 ? firstSentence.slice(0, 117) + "..." : firstSentence;
-			if (snippet.length > 5) decisions.push(snippet);
-		}
-	}
-	return decisions.slice(0, 8);
-}
-/**
-* Extracts key activities from observations by summarizing tool usage
-* and notable actions. Prioritizes: explicit saves > problems/solutions > tool actions.
-*/
-function extractKeyActivities(observations) {
-	const activities = [];
-	const seen = /* @__PURE__ */ new Set();
-	for (const obs of observations) {
-		const lower = obs.content.toLowerCase();
-		const isProblem = PROBLEM_KEYWORDS.some((kw) => lower.includes(kw));
-		const isSolution = SOLUTION_KEYWORDS.some((kw) => lower.includes(kw));
-		let label = null;
-		if (isSolution) label = "Resolved";
-		else if (isProblem) label = "Issue";
-		else if (obs.source.startsWith("mcp:")) label = "Saved";
-		else label = "Action";
-		const firstLine = obs.content.split("\n")[0].trim();
-		const snippet = firstLine.length > 100 ? firstLine.slice(0, 97) + "..." : firstLine;
-		if (snippet.length > 5 && !seen.has(snippet)) {
-			seen.add(snippet);
-			activities.push(`[${label}] ${snippet}`);
-		}
-	}
-	return activities.slice(0, 10);
+function snippet(content, maxLen = 120) {
+	const firstLine = content.split("\n")[0].trim();
+	if (firstLine.length <= maxLen) return firstLine;
+	return firstLine.slice(0, maxLen - 3) + "...";
 }
 /**
 * Compresses an array of session observations into a structured text summary.
 *
-* This is a deterministic heuristic summarizer -- no LLM call. It extracts:
-* - Key activities (significant actions, max 10)
-* - Decisions and insights (keyword-matched, max 8)
-* - File paths mentioned (regex-extracted, max 15)
+* Kind-aware: groups observations by their `kind` field instead of heuristic
+* keyword matching. Produces structured sections:
+* - Changes (kind='change'): file modifications
+* - Decisions (kind='decision'): choices made
+* - Verifications (kind='verification'): test/build results
+* - References (kind='reference'): external resources consulted
+* - Findings (kind='finding'): manual saves and insights
 *
 * Target output: under 500 tokens (~2000 characters).
-* If the raw extraction exceeds this budget, sections are truncated by priority:
-* decisions > activities > files.
+* If the raw extraction exceeds this budget, sections are trimmed by priority:
+* references first, then findings, then verifications, then changes.
 */
 function compressObservations(observations) {
 	if (observations.length === 0) return "";
-	const activities = extractKeyActivities(observations);
-	const decisions = extractDecisions(observations);
-	const filePaths = extractFilePaths(observations);
+	const groups = groupByKind(observations);
 	const sections = [];
 	sections.push("## Session Summary");
 	const sorted = [...observations].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -153,43 +116,51 @@ function compressObservations(observations) {
 	const endedAt = sorted[sorted.length - 1].createdAt;
 	sections.push(`**Duration:** ${startedAt} to ${endedAt}`);
 	sections.push(`**Observations:** ${observations.length}`);
-	if (activities.length > 0) {
+	if (groups.change.length > 0) {
 		sections.push("");
-		sections.push("### Key Activities");
-		for (const activity of activities) sections.push(`- ${activity}`);
+		sections.push("### Changes");
+		for (const obs of groups.change.slice(0, 10)) sections.push(`- ${snippet(obs.content)}`);
 	}
-	if (decisions.length > 0) {
+	if (groups.decision.length > 0) {
 		sections.push("");
-		sections.push("### Decisions & Insights");
-		for (const decision of decisions) sections.push(`- ${decision}`);
+		sections.push("### Decisions");
+		for (const obs of groups.decision.slice(0, 5)) sections.push(`- ${snippet(obs.content)}`);
 	}
-	if (filePaths.length > 0) {
+	if (groups.verification.length > 0) {
 		sections.push("");
-		sections.push("### Files Touched");
-		for (const fp of filePaths) sections.push(`- ${fp}`);
+		sections.push("### Verifications");
+		for (const obs of groups.verification.slice(0, 5)) sections.push(`- ${snippet(obs.content)}`);
+	}
+	if (groups.reference.length > 0) {
+		sections.push("");
+		sections.push("### References");
+		for (const obs of groups.reference.slice(0, 3)) sections.push(`- ${snippet(obs.content)}`);
+	}
+	if (groups.finding.length > 0) {
+		sections.push("");
+		sections.push("### Findings");
+		for (const obs of groups.finding.slice(0, 5)) sections.push(`- ${snippet(obs.content)}`);
 	}
 	let result = sections.join("\n");
 	if (result.length > 2e3) {
-		const trimmedFilePaths = filePaths.slice(0, 5);
-		const trimmedActivities = activities.slice(0, 5);
 		const trimSections = [];
 		trimSections.push("## Session Summary");
 		trimSections.push(`**Duration:** ${startedAt} to ${endedAt}`);
 		trimSections.push(`**Observations:** ${observations.length}`);
-		if (trimmedActivities.length > 0) {
+		if (groups.change.length > 0) {
 			trimSections.push("");
-			trimSections.push("### Key Activities");
-			for (const activity of trimmedActivities) trimSections.push(`- ${activity}`);
+			trimSections.push("### Changes");
+			for (const obs of groups.change.slice(0, 5)) trimSections.push(`- ${snippet(obs.content)}`);
 		}
-		if (decisions.length > 0) {
+		if (groups.decision.length > 0) {
 			trimSections.push("");
-			trimSections.push("### Decisions & Insights");
-			for (const decision of decisions.slice(0, 5)) trimSections.push(`- ${decision}`);
+			trimSections.push("### Decisions");
+			for (const obs of groups.decision.slice(0, 3)) trimSections.push(`- ${snippet(obs.content)}`);
 		}
-		if (trimmedFilePaths.length > 0) {
+		if (groups.verification.length > 0) {
 			trimSections.push("");
-			trimSections.push("### Files Touched");
-			for (const fp of trimmedFilePaths) trimSections.push(`- ${fp}`);
+			trimSections.push("### Verifications");
+			for (const obs of groups.verification.slice(0, 3)) trimSections.push(`- ${snippet(obs.content)}`);
 		}
 		result = trimSections.join("\n");
 	}
@@ -244,6 +215,11 @@ const MAX_CONTEXT_CHARS = 6e3;
 */
 const OBSERVATION_CONTENT_LIMIT = 120;
 /**
+* Maximum character budget for the "## Available Tools" section.
+* Prevents tool listings from consuming too much of the 6000-char overall budget.
+*/
+const TOOL_SECTION_BUDGET = 500;
+/**
 * Welcome message for first-ever session (no prior sessions or observations).
 */
 const WELCOME_MESSAGE = `[Laminark] First session detected. Memory system is active and capturing observations.
@@ -281,77 +257,71 @@ function truncate(text, maxLen) {
 	return normalized.slice(0, maxLen) + "...";
 }
 /**
-* Formats the context using progressive disclosure.
+* Queries recent observations filtered by kind with a time window.
+*/
+function getRecentByKind(db, projectHash, kind, limit, sinceDays) {
+	const since = (/* @__PURE__ */ new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1e3)).toISOString();
+	return db.prepare(`SELECT * FROM observations
+       WHERE project_hash = ? AND kind = ? AND deleted_at IS NULL
+         AND created_at >= ?
+       ORDER BY created_at DESC, rowid DESC
+       LIMIT ?`).all(projectHash, kind, since, limit).map(rowToObservation);
+}
+/**
+* Formats the context using structured kind-aware sections.
 *
 * Produces a compact index suitable for Claude's context window:
-* - Last session summary (if available)
-* - Recent observation index with truncated content and IDs for drill-down
-*
-* @param lastSession - The most recent completed session (with summary), or null
-* @param recentObservations - Recent high-value observations
-* @returns Formatted context string
+* - Last session summary
+* - Recent changes (with provenance context)
+* - Active decisions
+* - Reference docs
+* - Findings
 */
-function formatContextIndex(lastSession, recentObservations) {
-	if (!lastSession && recentObservations.length === 0) return WELCOME_MESSAGE;
-	const lines = ["[Laminark Context - Session Recovery]", ""];
+function formatContextIndex(lastSession, sections) {
+	if (!(lastSession?.summary || sections.changes.length > 0 || sections.decisions.length > 0 || sections.findings.length > 0 || sections.references.length > 0)) return WELCOME_MESSAGE;
+	const lines = ["[Laminark - Session Context]", ""];
 	if (lastSession && lastSession.summary) {
-		const timeRange = lastSession.endedAt ? `${lastSession.startedAt} to ${lastSession.endedAt}` : lastSession.startedAt;
-		lines.push(`## Last Session (${timeRange})`);
+		lines.push("## Previous Session");
 		lines.push(lastSession.summary);
 		lines.push("");
 	}
-	if (recentObservations.length > 0) {
-		lines.push("## Recent Memories (use search tool for full details)");
-		for (const obs of recentObservations) {
-			const shortId = obs.id.slice(0, 8);
+	if (sections.changes.length > 0) {
+		lines.push("## Recent Changes");
+		for (const obs of sections.changes) {
 			const content = truncate(obs.content, OBSERVATION_CONTENT_LIMIT);
 			const relTime = formatRelativeTime(obs.createdAt);
-			lines.push(`- [${shortId}] ${content} (source: ${obs.source}, ${relTime})`);
+			lines.push(`- ${content} (${relTime})`);
+		}
+		lines.push("");
+	}
+	if (sections.decisions.length > 0) {
+		lines.push("## Active Decisions");
+		for (const obs of sections.decisions) {
+			const content = truncate(obs.content, OBSERVATION_CONTENT_LIMIT);
+			lines.push(`- ${content}`);
+		}
+		lines.push("");
+	}
+	if (sections.references.length > 0) {
+		lines.push("## Reference Docs");
+		for (const obs of sections.references) {
+			const content = truncate(obs.content, OBSERVATION_CONTENT_LIMIT);
+			lines.push(`- ${content}`);
+		}
+		lines.push("");
+	}
+	if (sections.findings.length > 0) {
+		lines.push("## Recent Findings");
+		for (const obs of sections.findings) {
+			const shortId = obs.id.slice(0, 8);
+			const content = truncate(obs.content, OBSERVATION_CONTENT_LIMIT);
+			lines.push(`- [${shortId}] ${content}`);
 		}
 	}
 	return lines.join("\n");
 }
 /**
-* Queries recent high-value observations for context injection.
-*
-* Priority ordering:
-* 1. Observations from source "mcp:save_memory" (user explicitly saved)
-* 2. Observations from source "slash:remember" (user explicitly saved via slash command)
-* 3. Most recent observations regardless of source
-*
-* Excludes deleted observations. Scoped to projectHash.
-*
-* @param db - better-sqlite3 database connection
-* @param projectHash - Project scope identifier
-* @param limit - Maximum observations to return (default 5)
-* @returns Array of high-value observations
-*/
-function getHighValueObservations(db, projectHash, limit = 5) {
-	debug("context", "Querying high-value observations", {
-		projectHash,
-		limit
-	});
-	const rows = db.prepare(`SELECT * FROM observations
-       WHERE project_hash = ? AND deleted_at IS NULL
-         AND classification IS NOT NULL AND classification != 'noise'
-       ORDER BY
-         CASE
-           WHEN source = 'mcp:save_memory' THEN 0
-           WHEN source = 'slash:remember' THEN 0
-           ELSE 1
-         END ASC,
-         created_at DESC,
-         rowid DESC
-       LIMIT ?`).all(projectHash, limit);
-	debug("context", "High-value observations retrieved", { count: rows.length });
-	return rows.map(rowToObservation);
-}
-/**
 * Gets the most recent completed session with a non-null summary.
-*
-* @param db - better-sqlite3 database connection
-* @param projectHash - Project scope identifier
-* @returns The last session with a summary, or null
 */
 function getLastCompletedSession(db, projectHash) {
 	const row = db.prepare(`SELECT * FROM sessions
@@ -368,36 +338,172 @@ function getLastCompletedSession(db, projectHash) {
 	};
 }
 /**
+* Ranks tools by relevance using a weighted combination of recent usage
+* frequency and recency. Tools with no recent usage score 0.
+*
+* Formula: score = eventCount / totalEvents (frequency share among peers)
+*
+* Uses event-count-based window (last N events) instead of time-based decay.
+* This is immune to usage gaps — if you don't use the app for a week,
+* your usage patterns are preserved because the window slides by event
+* count, not calendar time.
+*
+* MCP server entries aggregate usage stats from their individual tool events
+* to ensure accurate scoring.
+*/
+function rankToolsByRelevance(tools, usageStats) {
+	if (usageStats.length === 0) return tools;
+	const statsMap = /* @__PURE__ */ new Map();
+	for (const stat of usageStats) statsMap.set(stat.tool_name, stat);
+	const serverStats = /* @__PURE__ */ new Map();
+	for (const stat of usageStats) {
+		const match = stat.tool_name.match(/^mcp__([^_]+(?:_[^_]+)*)__/);
+		if (match) {
+			const serverName = match[1];
+			const existing = serverStats.get(serverName);
+			if (existing) existing.usage_count += stat.usage_count;
+			else serverStats.set(serverName, { usage_count: stat.usage_count });
+		}
+	}
+	const totalEvents = Math.max(1, [...statsMap.values()].reduce((sum, s) => sum + s.usage_count, 0));
+	const scored = tools.map((row) => {
+		let count = statsMap.get(row.name)?.usage_count;
+		if (count === void 0 && row.tool_type === "mcp_server" && row.server_name) count = serverStats.get(row.server_name)?.usage_count;
+		if (count === void 0) return {
+			row,
+			score: 0
+		};
+		let score = count / totalEvents;
+		if (row.status === "stale" || row.status === "demoted") score *= .25;
+		const lastUsed = row.last_used_at || row.discovered_at;
+		const lastSeen = new Date(Math.max(new Date(lastUsed).getTime(), new Date(row.updated_at).getTime()));
+		if ((Date.now() - lastSeen.getTime()) / (1e3 * 60 * 60 * 24) > 30) score *= .5;
+		return {
+			row,
+			score
+		};
+	});
+	scored.sort((a, b) => {
+		if (b.score !== a.score) return b.score - a.score;
+		return b.row.usage_count - a.row.usage_count;
+	});
+	return scored.map((s) => s.row);
+}
+/**
+* Formats available tools as a compact section for session context.
+*
+* Deduplicates MCP servers vs individual MCP tools (prefers server entries).
+* Excludes built-in tools (Claude already knows Read, Write, Edit, Bash, etc.).
+* Enforces a 500-character sub-budget via incremental line checking.
+*/
+function formatToolSection(tools) {
+	if (tools.length === 0) return "";
+	const seenServers = /* @__PURE__ */ new Set();
+	const deduped = [];
+	for (const tool of tools) if (tool.tool_type === "mcp_server") {
+		seenServers.add(tool.server_name ?? tool.name);
+		deduped.push(tool);
+	}
+	for (const tool of tools) if (tool.tool_type !== "mcp_server") {
+		if (tool.tool_type === "mcp_tool" && tool.server_name && seenServers.has(tool.server_name)) continue;
+		deduped.push(tool);
+	}
+	const displayable = deduped.filter((t) => t.tool_type !== "builtin");
+	if (displayable.length === 0) return "";
+	const lines = ["## Available Tools"];
+	for (const tool of displayable) {
+		const scopeTag = tool.scope === "project" ? "project" : "global";
+		const usageStr = tool.usage_count > 0 ? `, ${tool.usage_count}x` : "";
+		let candidateLine;
+		if (tool.tool_type === "mcp_server") candidateLine = `- MCP: ${tool.server_name ?? tool.name} (${scopeTag}${usageStr})`;
+		else if (tool.tool_type === "slash_command") candidateLine = `- ${tool.name} (${scopeTag}${usageStr})`;
+		else if (tool.tool_type === "skill") {
+			const desc = tool.description ? ` - ${tool.description}` : "";
+			candidateLine = `- skill: ${tool.name} (${scopeTag})${desc}`;
+		} else if (tool.tool_type === "plugin") candidateLine = `- plugin: ${tool.name} (${scopeTag})`;
+		else candidateLine = `- ${tool.name} (${scopeTag}${usageStr})`;
+		if ([...lines, candidateLine].join("\n").length > TOOL_SECTION_BUDGET) break;
+		lines.push(candidateLine);
+	}
+	const added = lines.length - 1;
+	if (displayable.length > added && added > 0) {
+		const overflow = `(${displayable.length - added} more available)`;
+		if ((lines.join("\n") + "\n" + overflow).length <= TOOL_SECTION_BUDGET) lines.push(overflow);
+	}
+	return lines.join("\n");
+}
+/**
 * Assembles the complete context string for SessionStart injection.
 *
-* This is the main entry point for context injection. It queries the database
-* for the last completed session summary and recent high-value observations,
-* then formats them into a compact progressive disclosure index.
-*
-* Performance: All queries are synchronous (better-sqlite3). Expected execution
-* time is under 100ms (2-3 simple SELECT queries on indexed columns).
+* Kind-aware: queries changes (last 24h), decisions (last 7d),
+* findings (last 7d), and references (last 3d) separately,
+* then assembles them into structured sections.
 *
 * Token budget: Total output stays under 2000 tokens (~6000 characters).
-* If content exceeds budget, observations are trimmed (session summary preserved).
-*
-* @param db - better-sqlite3 database connection
-* @param projectHash - Project scope identifier
-* @returns Formatted context string for injection into Claude's context window
 */
-function assembleSessionContext(db, projectHash) {
+function assembleSessionContext(db, projectHash, toolRegistry) {
 	debug("context", "Assembling session context", { projectHash });
 	const lastSession = getLastCompletedSession(db, projectHash);
-	const observations = getHighValueObservations(db, projectHash, 5);
-	let context = formatContextIndex(lastSession, observations);
+	const changes = getRecentByKind(db, projectHash, "change", 10, 1);
+	const decisions = getRecentByKind(db, projectHash, "decision", 5, 7);
+	const findings = getRecentByKind(db, projectHash, "finding", 5, 7);
+	const references = getRecentByKind(db, projectHash, "reference", 3, 3);
+	let toolSection = "";
+	if (toolRegistry) try {
+		toolSection = formatToolSection(rankToolsByRelevance(toolRegistry.getAvailableForSession(projectHash), toolRegistry.getRecentUsage(projectHash, 200)));
+	} catch {}
+	let context = formatContextIndex(lastSession, {
+		changes,
+		decisions,
+		findings,
+		references
+	});
+	if (toolSection) context = context + "\n\n" + toolSection;
 	if (context.length > MAX_CONTEXT_CHARS) {
-		debug("context", "Context exceeds budget, trimming observations", {
+		debug("context", "Context exceeds budget, trimming", {
 			length: context.length,
 			budget: MAX_CONTEXT_CHARS
 		});
-		let trimmedObs = observations.slice();
-		while (trimmedObs.length > 0 && context.length > MAX_CONTEXT_CHARS) {
-			trimmedObs = trimmedObs.slice(0, -1);
-			context = formatContextIndex(lastSession, trimmedObs);
+		if (toolSection) {
+			context = formatContextIndex(lastSession, {
+				changes,
+				decisions,
+				findings,
+				references
+			});
+			toolSection = "";
+		}
+	}
+	if (context.length > MAX_CONTEXT_CHARS) {
+		let trimmedRefs = references.slice();
+		let trimmedFindings = findings.slice();
+		let trimmedChanges = changes.slice();
+		while (context.length > MAX_CONTEXT_CHARS && trimmedRefs.length > 0) {
+			trimmedRefs = trimmedRefs.slice(0, -1);
+			context = formatContextIndex(lastSession, {
+				changes: trimmedChanges,
+				decisions,
+				findings: trimmedFindings,
+				references: trimmedRefs
+			});
+		}
+		if (context.length > MAX_CONTEXT_CHARS) while (context.length > MAX_CONTEXT_CHARS && trimmedFindings.length > 0) {
+			trimmedFindings = trimmedFindings.slice(0, -1);
+			context = formatContextIndex(lastSession, {
+				changes: trimmedChanges,
+				decisions,
+				findings: trimmedFindings,
+				references: trimmedRefs
+			});
+		}
+		if (context.length > MAX_CONTEXT_CHARS) while (context.length > MAX_CONTEXT_CHARS && trimmedChanges.length > 0) {
+			trimmedChanges = trimmedChanges.slice(0, -1);
+			context = formatContextIndex(lastSession, {
+				changes: trimmedChanges,
+				decisions,
+				findings: trimmedFindings,
+				references: trimmedRefs
+			});
 		}
 	}
 	debug("context", "Session context assembled", { length: context.length });
@@ -405,7 +511,443 @@ function assembleSessionContext(db, projectHash) {
 }
 
 //#endregion
+//#region src/hooks/config-scanner.ts
+/**
+* Extracts a description from YAML frontmatter in a Markdown file.
+* Reads only the first 500 bytes for performance.
+*/
+function extractDescription(filePath) {
+	try {
+		const fmMatch = readFileSync(filePath, {
+			encoding: "utf-8",
+			flag: "r"
+		}).slice(0, 500).match(/^---\n([\s\S]*?)\n---/);
+		if (!fmMatch) return null;
+		const descMatch = fmMatch[1].match(/description:\s*(.+)/);
+		return descMatch ? descMatch[1].trim() : null;
+	} catch {
+		return null;
+	}
+}
+/**
+* Scans an .mcp.json file for MCP server entries.
+* Each server key becomes a wildcard tool entry (individual tool names are not in config).
+*/
+function scanMcpJson(filePath, scope, projectHash, tools) {
+	try {
+		if (!existsSync(filePath)) return;
+		const raw = readFileSync(filePath, "utf-8");
+		const mcpServers = JSON.parse(raw).mcpServers;
+		if (!mcpServers || typeof mcpServers !== "object") return;
+		for (const serverName of Object.keys(mcpServers)) tools.push({
+			name: `mcp__${serverName}__*`,
+			toolType: "mcp_server",
+			scope,
+			source: `config:${filePath}`,
+			projectHash,
+			description: null,
+			serverName
+		});
+	} catch (err) {
+		debug("scanner", "Failed to scan MCP config", {
+			filePath,
+			error: String(err)
+		});
+	}
+}
+/**
+* Scans ~/.claude.json for MCP servers (top-level and per-project).
+*/
+function scanClaudeJson(filePath, tools) {
+	try {
+		if (!existsSync(filePath)) return;
+		const raw = readFileSync(filePath, "utf-8");
+		const config = JSON.parse(raw);
+		const topServers = config.mcpServers;
+		if (topServers && typeof topServers === "object") for (const serverName of Object.keys(topServers)) tools.push({
+			name: `mcp__${serverName}__*`,
+			toolType: "mcp_server",
+			scope: "global",
+			source: "config:~/.claude.json",
+			projectHash: null,
+			description: null,
+			serverName
+		});
+		const projects = config.projects;
+		if (projects && typeof projects === "object") for (const projectEntry of Object.values(projects)) {
+			const projServers = projectEntry.mcpServers;
+			if (projServers && typeof projServers === "object") for (const serverName of Object.keys(projServers)) tools.push({
+				name: `mcp__${serverName}__*`,
+				toolType: "mcp_server",
+				scope: "global",
+				source: "config:~/.claude.json",
+				projectHash: null,
+				description: null,
+				serverName
+			});
+		}
+	} catch (err) {
+		debug("scanner", "Failed to scan claude.json", {
+			filePath,
+			error: String(err)
+		});
+	}
+}
+/**
+* Scans a commands directory for slash command .md files.
+* Supports one level of subdirectory nesting for namespaced commands.
+*/
+function scanCommands(dirPath, scope, projectHash, tools) {
+	try {
+		if (!existsSync(dirPath)) return;
+		const entries = readdirSync(dirPath, { withFileTypes: true });
+		for (const entry of entries) if (entry.isFile() && entry.name.endsWith(".md")) {
+			const cmdName = `/${basename(entry.name, ".md")}`;
+			const description = extractDescription(join(dirPath, entry.name));
+			tools.push({
+				name: cmdName,
+				toolType: "slash_command",
+				scope,
+				source: `config:${dirPath}`,
+				projectHash,
+				description,
+				serverName: null
+			});
+		} else if (entry.isDirectory()) {
+			const subDir = join(dirPath, entry.name);
+			try {
+				const subEntries = readdirSync(subDir, { withFileTypes: true });
+				for (const subEntry of subEntries) if (subEntry.isFile() && subEntry.name.endsWith(".md")) {
+					const cmdName = `/${entry.name}:${basename(subEntry.name, ".md")}`;
+					const description = extractDescription(join(subDir, subEntry.name));
+					tools.push({
+						name: cmdName,
+						toolType: "slash_command",
+						scope,
+						source: `config:${dirPath}`,
+						projectHash,
+						description,
+						serverName: null
+					});
+				}
+			} catch {}
+		}
+	} catch (err) {
+		debug("scanner", "Failed to scan commands directory", {
+			dirPath,
+			error: String(err)
+		});
+	}
+}
+/**
+* Scans a skills directory for skill subdirectories containing SKILL.md.
+*/
+function scanSkills(dirPath, scope, projectHash, tools) {
+	try {
+		if (!existsSync(dirPath)) return;
+		const entries = readdirSync(dirPath, { withFileTypes: true });
+		for (const entry of entries) if (entry.isDirectory()) {
+			const skillMdPath = join(dirPath, entry.name, "SKILL.md");
+			if (existsSync(skillMdPath)) {
+				const description = extractDescription(skillMdPath);
+				tools.push({
+					name: entry.name,
+					toolType: "skill",
+					scope,
+					source: `config:${dirPath}`,
+					projectHash,
+					description,
+					serverName: null
+				});
+			}
+		}
+	} catch (err) {
+		debug("scanner", "Failed to scan skills directory", {
+			dirPath,
+			error: String(err)
+		});
+	}
+}
+/**
+* Scans installed_plugins.json for installed Claude plugins.
+* Version 2 format: { version: 2, plugins: { "name@marketplace": [{ scope, installPath, version }] } }
+*/
+function scanInstalledPlugins(filePath, tools) {
+	try {
+		if (!existsSync(filePath)) return;
+		const raw = readFileSync(filePath, "utf-8");
+		const plugins = JSON.parse(raw).plugins;
+		if (!plugins || typeof plugins !== "object") return;
+		for (const [key, installations] of Object.entries(plugins)) {
+			const pluginName = key.split("@")[0];
+			if (!Array.isArray(installations)) continue;
+			for (const install of installations) {
+				const inst = install;
+				const instScope = inst.scope === "user" ? "global" : "project";
+				tools.push({
+					name: pluginName,
+					toolType: "plugin",
+					scope: instScope,
+					source: "config:installed_plugins.json",
+					projectHash: null,
+					description: null,
+					serverName: null
+				});
+				if (typeof inst.installPath === "string") scanMcpJson(join(inst.installPath, ".mcp.json"), "plugin", null, tools);
+			}
+		}
+	} catch (err) {
+		debug("scanner", "Failed to scan installed plugins", {
+			filePath,
+			error: String(err)
+		});
+	}
+}
+/**
+* Scans all Claude Code config surfaces for tool discovery.
+* Called during SessionStart to proactively populate the tool registry.
+*
+* All filesystem operations are synchronous (SessionStart hook is synchronous).
+* Every scanner is wrapped in try/catch -- malformed configs never crash the hook.
+*
+* Config surfaces scanned:
+*   DISC-01: .mcp.json (project) + ~/.claude.json (global)
+*   DISC-02: .claude/commands (project) + ~/.claude/commands (global)
+*   DISC-03: .claude/skills (project) + ~/.claude/skills (global)
+*   DISC-04: installed_plugins.json (global plugins)
+*/
+function scanConfigForTools(cwd, projectHash) {
+	const tools = [];
+	const home = homedir();
+	scanMcpJson(join(cwd, ".mcp.json"), "project", projectHash, tools);
+	scanClaudeJson(join(home, ".claude.json"), tools);
+	scanCommands(join(cwd, ".claude", "commands"), "project", projectHash, tools);
+	scanCommands(join(home, ".claude", "commands"), "global", null, tools);
+	scanSkills(join(cwd, ".claude", "skills"), "project", projectHash, tools);
+	scanSkills(join(home, ".claude", "skills"), "global", null, tools);
+	scanInstalledPlugins(join(home, ".claude", "plugins", "installed_plugins.json"), tools);
+	return tools;
+}
+
+//#endregion
+//#region src/hooks/tool-name-parser.ts
+/**
+* Infers the tool type from a tool name seen in PostToolUse.
+*
+* - MCP tools have the `mcp__` prefix
+* - Built-in tools are PascalCase single words (Write, Edit, Bash, Read, etc.)
+* - Anything else is unknown
+*/
+function inferToolType(toolName) {
+	if (toolName.startsWith("mcp__")) return "mcp_tool";
+	if (/^[A-Z][a-zA-Z]+$/.test(toolName)) return "builtin";
+	return "unknown";
+}
+/**
+* Infers the scope of a tool from its name.
+*
+* - Plugin MCP tools (mcp__plugin_*) are plugin-scoped
+* - Other MCP tools default to project-scoped (conservative; may be global but unknown from name alone)
+* - Non-MCP tools (builtins) are always global
+*/
+function inferScope(toolName) {
+	if (toolName.startsWith("mcp__plugin_")) return "plugin";
+	if (toolName.startsWith("mcp__")) return "project";
+	return "global";
+}
+/**
+* Extracts the MCP server name from a tool name.
+*
+* Plugin MCP tools: `mcp__plugin_<pluginName>_<serverName>__<tool>`
+*   Example: `mcp__plugin_laminark_laminark__recall` -> server is `laminark`
+*
+* Project MCP tools: `mcp__<serverName>__<tool>`
+*   Example: `mcp__playwright__browser_screenshot` -> server is `playwright`
+*
+* Returns null for non-MCP tools.
+*/
+function extractServerName(toolName) {
+	const pluginMatch = toolName.match(/^mcp__plugin_([^_]+(?:_[^_]+)*)_([^_]+(?:_[^_]+)*)__/);
+	if (pluginMatch) return pluginMatch[2];
+	const projectMatch = toolName.match(/^mcp__([^_]+(?:_[^_]+)*)__/);
+	if (projectMatch) return projectMatch[1];
+	return null;
+}
+
+//#endregion
+//#region src/routing/intent-patterns.ts
+/**
+* Extracts tool sequence patterns from historical tool_usage_events.
+*
+* Scans all successful tool usage events for the project, groups them by session,
+* and identifies recurring sliding-window patterns where a specific sequence of
+* preceding tool calls led to a target tool activation.
+*
+* Runs at SessionStart and stores results in the routing_patterns table for
+* cheap PostToolUse lookup.
+*
+* @param db - Database connection
+* @param projectHash - Project identifier
+* @param windowSize - Number of preceding tools to consider (default 5)
+* @returns Extracted patterns sorted by frequency descending
+*/
+function extractPatterns(db, projectHash, windowSize = 5) {
+	const events = db.prepare(`
+    SELECT tool_name, session_id
+    FROM tool_usage_events
+    WHERE project_hash = ? AND success = 1
+    ORDER BY session_id, created_at
+  `).all(projectHash);
+	const sessions = /* @__PURE__ */ new Map();
+	for (const evt of events) {
+		if (!sessions.has(evt.session_id)) sessions.set(evt.session_id, []);
+		sessions.get(evt.session_id).push(evt.tool_name);
+	}
+	const patternCounts = /* @__PURE__ */ new Map();
+	for (const [, toolSequence] of sessions) for (let i = windowSize; i < toolSequence.length; i++) {
+		const target = toolSequence[i];
+		const preceding = toolSequence.slice(i - windowSize, i);
+		if (inferToolType(target) === "builtin") continue;
+		if (isLaminarksOwnTool(target)) continue;
+		const key = `${target}:${preceding.join(",")}`;
+		const existing = patternCounts.get(key);
+		if (existing) existing.count++;
+		else patternCounts.set(key, {
+			target,
+			preceding,
+			count: 1
+		});
+	}
+	return Array.from(patternCounts.values()).filter((p) => p.count >= 2).map((p) => ({
+		targetTool: p.target,
+		precedingTools: p.preceding,
+		frequency: p.count
+	})).sort((a, b) => b.frequency - a.frequency);
+}
+/**
+* Stores pre-computed routing patterns in the routing_patterns table.
+*
+* Creates the table inline (CREATE TABLE IF NOT EXISTS), deletes old patterns
+* for the project, and inserts new ones in a transaction.
+*
+* @param db - Database connection
+* @param projectHash - Project identifier
+* @param patterns - Pre-computed patterns from extractPatterns()
+*/
+function storePrecomputedPatterns(db, projectHash, patterns) {
+	db.exec(`
+    CREATE TABLE IF NOT EXISTS routing_patterns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_hash TEXT NOT NULL,
+      target_tool TEXT NOT NULL,
+      preceding_tools TEXT NOT NULL,
+      frequency INTEGER NOT NULL,
+      computed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+	db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_routing_patterns_project ON routing_patterns(project_hash)
+  `);
+	const deleteStmt = db.prepare("DELETE FROM routing_patterns WHERE project_hash = ?");
+	const insertStmt = db.prepare("INSERT INTO routing_patterns (project_hash, target_tool, preceding_tools, frequency) VALUES (?, ?, ?, ?)");
+	db.transaction(() => {
+		deleteStmt.run(projectHash);
+		for (const pattern of patterns) insertStmt.run(projectHash, pattern.targetTool, JSON.stringify(pattern.precedingTools), pattern.frequency);
+	})();
+	debug("routing", "Stored pre-computed patterns", {
+		projectHash,
+		count: patterns.length
+	});
+}
+/**
+* Evaluates the current session's recent tool sequence against pre-computed patterns.
+*
+* Queries the current session's recent tool names, compares against stored patterns,
+* and returns the best match if it exceeds the confidence threshold and the target
+* tool is in the suggestable set.
+*
+* @param db - Database connection
+* @param sessionId - Current session identifier
+* @param projectHash - Project identifier
+* @param suggestableToolNames - Set of tool names available for suggestion (availability gate)
+* @param confidenceThreshold - Minimum confidence to return a suggestion
+* @returns Best matching suggestion, or null if none qualifies
+*/
+function evaluateLearnedPatterns(db, sessionId, projectHash, suggestableToolNames, confidenceThreshold) {
+	const currentTools = db.prepare(`
+    SELECT tool_name FROM tool_usage_events
+    WHERE session_id = ? AND project_hash = ?
+    ORDER BY created_at DESC
+    LIMIT 10
+  `).all(sessionId, projectHash).map((e) => e.tool_name).reverse();
+	if (currentTools.length === 0) return null;
+	const storedPatterns = db.prepare(`
+    SELECT target_tool, preceding_tools, frequency
+    FROM routing_patterns
+    WHERE project_hash = ?
+    ORDER BY frequency DESC
+  `).all(projectHash);
+	if (storedPatterns.length === 0) return null;
+	let bestMatch = null;
+	for (const row of storedPatterns) {
+		if (!suggestableToolNames.has(row.target_tool)) continue;
+		const overlap = computeSequenceOverlap(currentTools, JSON.parse(row.preceding_tools));
+		if (overlap > (bestMatch?.confidence ?? 0)) bestMatch = {
+			targetTool: row.target_tool,
+			confidence: overlap,
+			frequency: row.frequency
+		};
+	}
+	if (!bestMatch || bestMatch.confidence < confidenceThreshold) return null;
+	return {
+		toolName: bestMatch.targetTool,
+		toolDescription: null,
+		confidence: bestMatch.confidence,
+		tier: "learned",
+		reason: `Tool sequence pattern match (seen ${bestMatch.frequency}x in similar contexts)`
+	};
+}
+/**
+* Computes Jaccard-like overlap between the current session's recent tool set
+* and a pattern's preceding tools set.
+*
+* Takes the last N tools from the current sequence (where N = pattern length),
+* converts both to sets, and counts how many pattern tools appear in the current set.
+*
+* @param currentTools - Current session's recent tool names (chronological order)
+* @param patternTools - Pattern's preceding tools
+* @returns Overlap score from 0.0 to 1.0
+*/
+function computeSequenceOverlap(currentTools, patternTools) {
+	if (patternTools.length === 0) return 0;
+	const current = new Set(currentTools.slice(-patternTools.length));
+	const pattern = new Set(patternTools);
+	let matches = 0;
+	for (const tool of pattern) if (current.has(tool)) matches++;
+	return matches / pattern.size;
+}
+
+//#endregion
 //#region src/hooks/session-lifecycle.ts
+/**
+* STAL-01: Detects tools that have been removed from config since last scan.
+*
+* Compares currently scanned config tools against the registry and marks
+* missing config-sourced tools as stale. Also cascades to individual MCP tools
+* from removed MCP servers.
+*/
+function detectRemovedTools(toolRegistry, scannedTools, projectHash) {
+	const registeredConfigTools = toolRegistry.getConfigSourcedTools(projectHash);
+	const scannedNames = new Set(scannedTools.map((t) => t.name));
+	const removedServers = /* @__PURE__ */ new Set();
+	for (const registered of registeredConfigTools) if (!scannedNames.has(registered.name)) {
+		toolRegistry.markStale(registered.name, registered.project_hash);
+		if (registered.tool_type === "mcp_server" && registered.server_name) removedServers.add(registered.server_name);
+	}
+	if (removedServers.size > 0) {
+		for (const registered of toolRegistry.getAvailableForSession(projectHash)) if (registered.server_name && removedServers.has(registered.server_name) && registered.tool_type === "mcp_tool") toolRegistry.markStale(registered.name, registered.project_hash);
+	}
+}
 /**
 * Handles a SessionStart hook event.
 *
@@ -419,7 +961,7 @@ function assembleSessionContext(db, projectHash) {
 *
 * @returns Context string to write to stdout, or null if no context available
 */
-function handleSessionStart(input, sessionRepo, db, projectHash) {
+function handleSessionStart(input, sessionRepo, db, projectHash, toolRegistry) {
 	const sessionId = input.session_id;
 	if (!sessionId) {
 		debug("session", "SessionStart missing session_id, skipping");
@@ -427,8 +969,43 @@ function handleSessionStart(input, sessionRepo, db, projectHash) {
 	}
 	sessionRepo.create(sessionId);
 	debug("session", "Session started", { sessionId });
+	if (toolRegistry) {
+		const cwd = input.cwd;
+		try {
+			const scanStart = Date.now();
+			const tools = scanConfigForTools(cwd, projectHash);
+			for (const tool of tools) toolRegistry.upsert(tool);
+			try {
+				detectRemovedTools(toolRegistry, tools, projectHash);
+				debug("session", "Staleness detection completed");
+			} catch {
+				debug("session", "Staleness detection failed (non-fatal)");
+			}
+			const scanElapsed = Date.now() - scanStart;
+			debug("session", "Config scan completed", {
+				toolsFound: tools.length,
+				elapsed: scanElapsed
+			});
+			if (scanElapsed > 200) debug("session", "Config scan slow (>200ms budget)", { elapsed: scanElapsed });
+		} catch {
+			debug("session", "Config scan failed (non-fatal)");
+		}
+	}
+	if (toolRegistry) try {
+		const precomputeStart = Date.now();
+		const patterns = extractPatterns(db, projectHash, 5);
+		storePrecomputedPatterns(db, projectHash, patterns);
+		const precomputeElapsed = Date.now() - precomputeStart;
+		debug("session", "Routing patterns pre-computed", {
+			patternCount: patterns.length,
+			elapsed: precomputeElapsed
+		});
+		if (precomputeElapsed > 50) debug("session", "Pattern pre-computation slow (>50ms)", { elapsed: precomputeElapsed });
+	} catch {
+		debug("session", "Pattern pre-computation failed (non-fatal)");
+	}
 	const startTime = Date.now();
-	const context = assembleSessionContext(db, projectHash);
+	const context = assembleSessionContext(db, projectHash, toolRegistry);
 	const elapsed = Date.now() - startTime;
 	if (elapsed > 500) debug("session", "Context assembly slow", {
 		elapsed,
@@ -708,14 +1285,101 @@ function isNoise(content) {
 * Write and Edit observations are high-signal by definition --
 * they represent intentional code changes. Content pattern matching
 * must NEVER reject these tools (see research pitfall #3).
+*
+* WebFetch and WebSearch are reference material -- always valuable.
 */
-const HIGH_SIGNAL_TOOLS = new Set(["Write", "Edit"]);
+const HIGH_SIGNAL_TOOLS = new Set([
+	"Write",
+	"Edit",
+	"WebFetch",
+	"WebSearch"
+]);
 /**
-* Prefix for Laminark's own MCP tools.
-* Self-referential observations are noise -- Laminark should not
-* observe its own operations.
+* Navigation/exploration Bash commands that produce noise observations.
+* Matched against the start of the command string (after trimming).
 */
-const LAMINARK_MCP_PREFIX = "mcp__laminark__";
+const NAVIGATION_BASH_PREFIXES = [
+	"ls",
+	"cd ",
+	"pwd",
+	"cat ",
+	"head ",
+	"tail ",
+	"echo ",
+	"wc ",
+	"which ",
+	"find ",
+	"tree",
+	"file "
+];
+/**
+* Git read-only commands that are navigation (not mutations).
+*/
+const NAVIGATION_GIT_PATTERNS = [
+	/^git\s+status\b/,
+	/^git\s+log\b/,
+	/^git\s+diff\b(?!.*--)/,
+	/^git\s+branch\b(?!\s+-[dDmM])/,
+	/^git\s+show\b/,
+	/^git\s+remote\b/,
+	/^git\s+stash\s+list\b/
+];
+/**
+* Commands that are always meaningful and should be admitted.
+*/
+const MEANINGFUL_BASH_PATTERNS = [
+	/^npm\s+test\b/,
+	/^npx\s+vitest\b/,
+	/^npx\s+jest\b/,
+	/^vitest\b/,
+	/^jest\b/,
+	/^pytest\b/,
+	/^cargo\s+test\b/,
+	/^go\s+test\b/,
+	/^make\s+test\b/,
+	/^npm\s+run\s+build\b/,
+	/^npx\s+tsc\b/,
+	/^cargo\s+build\b/,
+	/^make\b/,
+	/^go\s+build\b/,
+	/^gradle\b/,
+	/^mvn\b/,
+	/^git\s+commit\b/,
+	/^git\s+push\b/,
+	/^git\s+merge\b/,
+	/^git\s+rebase\b/,
+	/^git\s+cherry-pick\b/,
+	/^git\s+reset\b/,
+	/^git\s+revert\b/,
+	/^git\s+checkout\s+-b\b/,
+	/^git\s+switch\s+-c\b/,
+	/^git\s+stash\s+(?:push|pop|apply|drop)\b/,
+	/^docker\b/,
+	/^kubectl\b/,
+	/^terraform\b/,
+	/^helm\b/,
+	/^npm\s+install\b/,
+	/^npm\s+i\b/,
+	/^yarn\s+add\b/,
+	/^pnpm\s+add\b/,
+	/^pip\s+install\b/,
+	/^cargo\s+add\b/
+];
+/**
+* Determines if a Bash command is meaningful enough to capture.
+*
+* Navigation commands (ls, cd, pwd, cat, git status, git log, etc.) are
+* filtered out. Test runners, build commands, git mutations, and container
+* commands are always admitted. Unknown commands default to admit.
+*/
+function isMeaningfulBashCommand(command) {
+	const trimmed = command.trim();
+	if (!trimmed) return false;
+	for (const pattern of MEANINGFUL_BASH_PATTERNS) if (pattern.test(trimmed)) return true;
+	for (const prefix of NAVIGATION_BASH_PREFIXES) if (trimmed.startsWith(prefix) || trimmed === prefix.trim()) return false;
+	for (const pattern of NAVIGATION_GIT_PATTERNS) if (pattern.test(trimmed)) return false;
+	return true;
+}
 /**
 * Maximum content length before requiring decision/error indicators.
 * Content over this threshold with no meaningful indicators is likely
@@ -752,7 +1416,7 @@ const DECISION_OR_ERROR_INDICATORS = [
 * @returns true if the observation should be stored, false to reject
 */
 function shouldAdmit(toolName, content) {
-	if (toolName.startsWith(LAMINARK_MCP_PREFIX)) {
+	if (isLaminarksOwnTool(toolName)) {
 		debug("hook", "Observation rejected", {
 			tool: toolName,
 			reason: "self-referential"
@@ -790,6 +1454,324 @@ function shouldAdmit(toolName, content) {
 }
 
 //#endregion
+//#region src/routing/types.ts
+/**
+* Default routing configuration values.
+* Threshold and rate limits tuned to avoid over-suggestion (Clippy problem).
+*/
+const DEFAULT_ROUTING_CONFIG = {
+	confidenceThreshold: .6,
+	maxSuggestionsPerSession: 2,
+	minEventsForLearned: 20,
+	suggestionCooldown: 5,
+	minCallsBeforeFirstSuggestion: 3,
+	patternWindowSize: 5
+};
+
+//#endregion
+//#region src/routing/heuristic-fallback.ts
+/**
+* Stop words filtered from keyword extraction.
+* Common English function words that carry no discriminative signal for tool matching.
+*/
+const STOP_WORDS = new Set([
+	"the",
+	"a",
+	"an",
+	"is",
+	"are",
+	"was",
+	"were",
+	"be",
+	"been",
+	"being",
+	"have",
+	"has",
+	"had",
+	"do",
+	"does",
+	"did",
+	"will",
+	"would",
+	"could",
+	"should",
+	"may",
+	"might",
+	"can",
+	"shall",
+	"to",
+	"of",
+	"in",
+	"for",
+	"on",
+	"with",
+	"at",
+	"by",
+	"from",
+	"as",
+	"into",
+	"through",
+	"and",
+	"but",
+	"or",
+	"nor",
+	"not",
+	"so",
+	"yet",
+	"this",
+	"that",
+	"these",
+	"those",
+	"it",
+	"its"
+]);
+/**
+* Tokenizes text into lowercase keywords for matching.
+*
+* Replaces non-alphanumeric characters (except hyphens and underscores) with spaces,
+* splits on whitespace, filters words shorter than 3 characters and stop words,
+* and returns unique keywords.
+*/
+function extractKeywords(text) {
+	const words = text.toLowerCase().replace(/[^a-z0-9\s\-_]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+	return [...new Set(words)];
+}
+/**
+* Extracts keywords from a tool's description, server name, and parsed name.
+*
+* - Description text is tokenized via extractKeywords
+* - Server name is added as a keyword (lowercase)
+* - Slash commands are parsed by splitting on `:`, `-`, `_`
+* - Skills are parsed by splitting on `-` and `_`
+*
+* Returns a deduplicated array of keywords.
+*/
+function extractToolKeywords(tool) {
+	const sources = [];
+	if (tool.description) sources.push(...extractKeywords(tool.description));
+	if (tool.server_name) sources.push(tool.server_name.toLowerCase());
+	if (tool.tool_type === "slash_command") {
+		const parts = tool.name.replace(/^\//, "").split(/[:\-_]/).filter((p) => p.length > 0);
+		sources.push(...parts.map((p) => p.toLowerCase()));
+	}
+	if (tool.tool_type === "skill") {
+		const parts = tool.name.split(/[\-_]/).filter((p) => p.length > 0);
+		sources.push(...parts.map((p) => p.toLowerCase()));
+	}
+	return [...new Set(sources)];
+}
+/**
+* Evaluates heuristic keyword matching between recent observations and available tools.
+*
+* This is the cold-start routing tier (ROUT-04). It works with zero accumulated usage
+* history by matching keywords from recent session observations against tool descriptions
+* and names.
+*
+* Returns the highest-confidence match above the threshold, or null if no match qualifies.
+*
+* @param recentObservations - Recent observation content strings from the current session
+* @param suggestableTools - Scope-filtered, non-builtin, non-Laminark tools
+* @param confidenceThreshold - Minimum score to return a suggestion (0.0-1.0)
+*/
+function evaluateHeuristic(recentObservations, suggestableTools, confidenceThreshold) {
+	if (recentObservations.length < 2) return null;
+	const contextKeywords = new Set(recentObservations.flatMap((obs) => extractKeywords(obs)));
+	if (contextKeywords.size === 0) return null;
+	let bestMatch = null;
+	for (const tool of suggestableTools) {
+		const toolKeywords = extractToolKeywords(tool);
+		if (toolKeywords.length === 0) continue;
+		const score = toolKeywords.filter((kw) => contextKeywords.has(kw)).length / toolKeywords.length;
+		if (score > (bestMatch?.score ?? 0)) bestMatch = {
+			tool,
+			score
+		};
+	}
+	if (!bestMatch || bestMatch.score < confidenceThreshold) return null;
+	return {
+		toolName: bestMatch.tool.name,
+		toolDescription: bestMatch.tool.description,
+		confidence: bestMatch.score,
+		tier: "heuristic",
+		reason: "Keywords match between current work and tool description"
+	};
+}
+
+//#endregion
+//#region src/routing/conversation-router.ts
+/**
+* ConversationRouter orchestrates tool suggestion routing.
+*
+* Combines two tiers of suggestion:
+* - Learned patterns: historical tool sequence matching (ROUT-01)
+* - Heuristic fallback: keyword-based cold-start matching (ROUT-04)
+*
+* Suggestions are gated by confidence threshold (ROUT-03) and rate limits,
+* then delivered via NotificationStore (ROUT-02).
+*
+* Instantiated per-evaluation in the PostToolUse handler. No long-lived state --
+* state persists across invocations via the routing_state SQLite table.
+*/
+var ConversationRouter = class {
+	db;
+	projectHash;
+	config;
+	constructor(db, projectHash, config) {
+		this.db = db;
+		this.projectHash = projectHash;
+		this.config = {
+			...DEFAULT_ROUTING_CONFIG,
+			...config
+		};
+		db.exec(`
+      CREATE TABLE IF NOT EXISTS routing_state (
+        session_id TEXT NOT NULL,
+        project_hash TEXT NOT NULL,
+        suggestions_made INTEGER NOT NULL DEFAULT 0,
+        last_suggestion_at TEXT,
+        tool_calls_since_suggestion INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (session_id, project_hash)
+      )
+    `);
+	}
+	/**
+	* Evaluates whether a tool suggestion should be surfaced for the current context.
+	*
+	* Called from PostToolUse handler after observation storage.
+	* Runs AFTER the self-referential filter -- never evaluates Laminark's own tools.
+	*
+	* The entire method is wrapped in try/catch -- routing is supplementary
+	* and must NEVER block or fail the core handler pipeline.
+	*
+	* @param sessionId - Current session identifier
+	* @param toolName - The tool just used
+	* @param toolRegistry - Tool registry for availability checking
+	*/
+	evaluate(sessionId, toolName, toolRegistry) {
+		try {
+			this._evaluate(sessionId, toolName, toolRegistry);
+		} catch (err) {
+			debug("routing", "Routing evaluation failed (non-fatal)", { error: err instanceof Error ? err.message : String(err) });
+		}
+	}
+	_evaluate(sessionId, toolName, toolRegistry) {
+		if (inferToolType(toolName) === "builtin") return;
+		if (isLaminarksOwnTool(toolName)) return;
+		const state = this.getOrCreateState(sessionId);
+		state.toolCallsSinceSuggestion++;
+		this.updateState(sessionId, state);
+		if (state.suggestionsMade >= this.config.maxSuggestionsPerSession) {
+			debug("routing", "Rate limited: max suggestions reached", {
+				sessionId,
+				made: state.suggestionsMade
+			});
+			return;
+		}
+		if (state.toolCallsSinceSuggestion < this.config.suggestionCooldown) {
+			debug("routing", "Rate limited: cooldown active", {
+				sessionId,
+				callsSince: state.toolCallsSinceSuggestion,
+				cooldown: this.config.suggestionCooldown
+			});
+			return;
+		}
+		const totalCalls = this.getTotalCallsForSession(sessionId);
+		if (totalCalls < this.config.minCallsBeforeFirstSuggestion) {
+			debug("routing", "Too early: not enough tool calls", {
+				sessionId,
+				totalCalls
+			});
+			return;
+		}
+		const suggestableTools = toolRegistry.getAvailableForSession(this.projectHash).filter((t) => t.tool_type !== "builtin" && !isLaminarksOwnTool(t.name) && t.status === "active");
+		if (suggestableTools.length === 0) return;
+		const suggestableNames = new Set(suggestableTools.map((t) => t.name));
+		let suggestion = null;
+		if (this.countRecentEvents() >= this.config.minEventsForLearned) suggestion = evaluateLearnedPatterns(this.db, sessionId, this.projectHash, suggestableNames, this.config.confidenceThreshold);
+		if (!suggestion) suggestion = evaluateHeuristic(this.getRecentObservations(sessionId), suggestableTools, this.config.confidenceThreshold);
+		if (!suggestion) return;
+		if (suggestion.confidence < this.config.confidenceThreshold) return;
+		const notifStore = new NotificationStore(this.db);
+		const description = suggestion.toolDescription ? ` -- ${suggestion.toolDescription}` : "";
+		const usageHint = suggestion.tier === "learned" ? ` (${suggestion.reason})` : "";
+		const message = `Tool suggestion: ${suggestion.toolName}${description}${usageHint}`;
+		notifStore.add(this.projectHash, message);
+		debug("routing", "Suggestion delivered", {
+			tool: suggestion.toolName,
+			tier: suggestion.tier,
+			confidence: suggestion.confidence
+		});
+		state.suggestionsMade++;
+		state.lastSuggestionAt = (/* @__PURE__ */ new Date()).toISOString();
+		state.toolCallsSinceSuggestion = 0;
+		this.updateState(sessionId, state);
+	}
+	/**
+	* Gets or creates routing state for a session.
+	*/
+	getOrCreateState(sessionId) {
+		const row = this.db.prepare(`
+      SELECT suggestions_made, last_suggestion_at, tool_calls_since_suggestion
+      FROM routing_state
+      WHERE session_id = ? AND project_hash = ?
+    `).get(sessionId, this.projectHash);
+		if (row) return {
+			suggestionsMade: row.suggestions_made,
+			lastSuggestionAt: row.last_suggestion_at,
+			toolCallsSinceSuggestion: row.tool_calls_since_suggestion
+		};
+		this.db.prepare(`
+      INSERT INTO routing_state (session_id, project_hash, suggestions_made, tool_calls_since_suggestion)
+      VALUES (?, ?, 0, 0)
+    `).run(sessionId, this.projectHash);
+		return {
+			suggestionsMade: 0,
+			lastSuggestionAt: null,
+			toolCallsSinceSuggestion: 0
+		};
+	}
+	/**
+	* Updates routing state in the database.
+	*/
+	updateState(sessionId, state) {
+		this.db.prepare(`
+      UPDATE routing_state
+      SET suggestions_made = ?, last_suggestion_at = ?, tool_calls_since_suggestion = ?
+      WHERE session_id = ? AND project_hash = ?
+    `).run(state.suggestionsMade, state.lastSuggestionAt, state.toolCallsSinceSuggestion, sessionId, this.projectHash);
+	}
+	/**
+	* Returns total tool calls for the current session (from routing_state).
+	*/
+	getTotalCallsForSession(sessionId) {
+		return this.db.prepare(`
+      SELECT COUNT(*) as count FROM tool_usage_events
+      WHERE session_id = ? AND project_hash = ?
+    `).get(sessionId, this.projectHash).count;
+	}
+	/**
+	* Counts total tool_usage_events for this project (for learned pattern threshold).
+	*/
+	countRecentEvents() {
+		return this.db.prepare(`
+      SELECT COUNT(*) as count FROM tool_usage_events WHERE project_hash = ?
+    `).get(this.projectHash).count;
+	}
+	/**
+	* Gets recent observation content strings for heuristic matching.
+	*/
+	getRecentObservations(sessionId) {
+		return this.db.prepare(`
+      SELECT content FROM observations
+      WHERE project_hash = ? AND session_id = ? AND deleted_at IS NULL
+      ORDER BY created_at DESC
+      LIMIT 5
+    `).all(this.projectHash, sessionId).map((r) => r.content);
+	}
+};
+
+//#endregion
 //#region src/hooks/handler.ts
 /**
 * Hook handler entry point.
@@ -806,7 +1788,8 @@ function shouldAdmit(toolName, content) {
 * - Imports only storage modules -- NO @modelcontextprotocol/sdk (cold start overhead)
 *
 * Filter pipeline (PostToolUse/PostToolUseFailure):
-*   1. Self-referential filter (mcp__laminark__ prefix)
+*   0. Organic tool discovery (DISC-05: records ALL tools including Laminark's own)
+*   1. Self-referential filter (dual-prefix: mcp__laminark__ and mcp__plugin_laminark_laminark__)
 *   2. Extract observation text from payload
 *   3. Privacy filter: exclude sensitive files, redact secrets
 *   4. Admission filter: reject noise content
@@ -818,18 +1801,51 @@ async function readStdin() {
 	return Buffer.concat(chunks).toString("utf-8");
 }
 /**
+* Tools that are routed to the research buffer instead of creating observations.
+* These are high-volume exploration tools whose individual calls are noise,
+* but whose targets provide useful provenance context for subsequent changes.
+*/
+const RESEARCH_TOOLS = new Set([
+	"Read",
+	"Glob",
+	"Grep"
+]);
+/**
 * Processes a PostToolUse or PostToolUseFailure event through the full
-* filter pipeline: extract -> privacy -> admission -> store.
+* filter pipeline: route research tools -> extract -> privacy -> admission -> store.
 *
 * Exported for unit testing of the pipeline logic.
 */
-function processPostToolUseFiltered(input, obsRepo) {
+function processPostToolUseFiltered(input, obsRepo, researchBuffer, toolRegistry, projectHash, db) {
 	const toolName = input.tool_name;
+	const hookEventName = input.hook_event_name;
 	if (!toolName) {
 		debug("hook", "PostToolUse missing tool_name, skipping");
 		return;
 	}
-	if (toolName.startsWith("mcp__laminark__")) {
+	if (toolRegistry) try {
+		const sessionId = input.session_id;
+		const isFailure = hookEventName === "PostToolUseFailure";
+		toolRegistry.recordOrCreate(toolName, {
+			toolType: inferToolType(toolName),
+			scope: inferScope(toolName),
+			source: "hook:PostToolUse",
+			projectHash: projectHash ?? null,
+			description: null,
+			serverName: extractServerName(toolName)
+		}, sessionId ?? null, !isFailure);
+		if (isFailure) {
+			const failures = toolRegistry.getRecentEventsForTool(toolName, projectHash ?? "", 5).filter((e) => e.success === 0).length;
+			if (failures >= 3) {
+				toolRegistry.markDemoted(toolName, projectHash ?? null);
+				debug("hook", "Tool demoted due to failures", {
+					tool: toolName,
+					failures
+				});
+			}
+		} else toolRegistry.markActive(toolName, projectHash ?? null);
+	} catch {}
+	if (isLaminarksOwnTool(toolName)) {
 		debug("hook", "Skipping self-referential tool", { tool: toolName });
 		return;
 	}
@@ -841,6 +1857,22 @@ function processPostToolUseFiltered(input, obsRepo) {
 			filePath
 		});
 		return;
+	}
+	if (RESEARCH_TOOLS.has(toolName) && researchBuffer) {
+		const target = String(toolInput.file_path ?? toolInput.pattern ?? "");
+		researchBuffer.add({
+			sessionId: input.session_id ?? null,
+			toolName,
+			target
+		});
+		return;
+	}
+	if (toolName === "Bash" && hookEventName !== "PostToolUseFailure") {
+		const command = String(toolInput.command ?? "");
+		if (!isMeaningfulBashCommand(command)) {
+			debug("hook", "Bash command filtered as navigation", { command: command.slice(0, 60) });
+			return;
+		}
 	}
 	const payload = {
 		session_id: input.session_id,
@@ -856,10 +1888,17 @@ function processPostToolUseFiltered(input, obsRepo) {
 		debug("hook", "No observation extracted", { tool: toolName });
 		return;
 	}
-	const redacted = redactSensitiveContent(summary, filePath);
+	let redacted = redactSensitiveContent(summary, filePath);
 	if (redacted === null) {
 		debug("hook", "Observation excluded by privacy filter", { tool: toolName });
 		return;
+	}
+	if ((toolName === "Write" || toolName === "Edit") && researchBuffer && payload.session_id) {
+		const research = researchBuffer.getRecent(payload.session_id, 5);
+		if (research.length > 0) {
+			const lines = research.map((r) => `  - [${r.toolName}] ${r.target}`).join("\n");
+			redacted += `\nResearch context:\n${lines}`;
+		}
 	}
 	if (!shouldAdmit(toolName, redacted)) {
 		debug("hook", "Observation rejected by admission filter", { tool: toolName });
@@ -874,15 +1913,29 @@ function processPostToolUseFiltered(input, obsRepo) {
 		});
 		return;
 	}
+	let kind = "finding";
+	if (toolName === "Write" || toolName === "Edit") kind = "change";
+	else if (toolName === "WebFetch" || toolName === "WebSearch") kind = "reference";
+	else if (toolName === "Bash") {
+		const command = String(toolInput.command ?? "");
+		if (/^git\s+(commit|push|merge|rebase|cherry-pick)\b/.test(command.trim())) kind = "change";
+		else kind = "verification";
+	}
 	obsRepo.create({
 		content: redacted,
 		source: "hook:" + toolName,
+		kind,
 		sessionId: payload.session_id ?? null
 	});
 	debug("hook", "Captured observation", {
 		tool: toolName,
+		kind,
 		length: redacted.length
 	});
+	if (db && toolRegistry && projectHash) try {
+		const sessionId = input.session_id;
+		if (sessionId) new ConversationRouter(db, projectHash).evaluate(sessionId, toolName, toolRegistry);
+	} catch {}
 }
 async function main() {
 	const raw = await readStdin();
@@ -902,13 +1955,21 @@ async function main() {
 	try {
 		const obsRepo = new ObservationRepository(laminarkDb.db, projectHash);
 		const sessionRepo = new SessionRepository(laminarkDb.db, projectHash);
+		let researchBuffer;
+		try {
+			researchBuffer = new ResearchBufferRepository(laminarkDb.db, projectHash);
+		} catch {}
+		let toolRegistry;
+		try {
+			toolRegistry = new ToolRegistryRepository(laminarkDb.db);
+		} catch {}
 		switch (eventName) {
 			case "PostToolUse":
 			case "PostToolUseFailure":
-				processPostToolUseFiltered(input, obsRepo);
+				processPostToolUseFiltered(input, obsRepo, researchBuffer, toolRegistry, projectHash, laminarkDb.db);
 				break;
 			case "SessionStart": {
-				const context = handleSessionStart(input, sessionRepo, laminarkDb.db, projectHash);
+				const context = handleSessionStart(input, sessionRepo, laminarkDb.db, projectHash, toolRegistry);
 				if (context) process.stdout.write(context);
 				break;
 			}

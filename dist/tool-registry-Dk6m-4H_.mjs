@@ -73,6 +73,13 @@ function debugTimed(category, message, fn) {
 * Migration 010: Project metadata table for project selector UI.
 * Migration 011: Add project_hash to graph tables and backfill from observations.
 * Migration 012: Add classification and classified_at columns for LLM-based observation classification.
+* Migration 013: Research buffer table for exploration tool event buffering.
+* Migration 014: Add kind column to observations with backfill from source field.
+* Migration 015: Update graph taxonomy -- remove Tool/Person nodes, tighten CHECK constraints.
+* Migration 016: Tool registry table for discovered tools with scope-aware uniqueness.
+* Migration 017: Tool usage events table for per-event temporal tracking.
+* Migration 018: Tool registry FTS5 + vec0 tables for hybrid search on tool descriptions.
+* Migration 019: Add status column (active/stale/demoted) to tool_registry for staleness management.
 */
 const MIGRATIONS = [
 	{
@@ -331,6 +338,210 @@ const MIGRATIONS = [
       CREATE INDEX idx_observations_classification
         ON observations(classification) WHERE classification IS NOT NULL;
     `
+	},
+	{
+		version: 13,
+		name: "create_research_buffer",
+		up: `
+      CREATE TABLE research_buffer (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_hash TEXT NOT NULL,
+        session_id TEXT,
+        tool_name TEXT NOT NULL,
+        target TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX idx_research_buffer_session ON research_buffer(session_id, created_at DESC);
+    `
+	},
+	{
+		version: 14,
+		name: "add_observation_kind",
+		up: (db) => {
+			db.exec("ALTER TABLE observations ADD COLUMN kind TEXT DEFAULT 'finding'");
+			db.exec(`
+        UPDATE observations SET kind = 'change'
+        WHERE source LIKE 'hook:Write' OR source LIKE 'hook:Edit'
+      `);
+			db.exec(`
+        UPDATE observations SET kind = 'verification'
+        WHERE source LIKE 'hook:Bash'
+      `);
+			db.exec(`
+        UPDATE observations SET kind = 'reference'
+        WHERE source LIKE 'hook:WebFetch' OR source LIKE 'hook:WebSearch'
+      `);
+			db.exec(`
+        UPDATE observations SET kind = 'finding'
+        WHERE source IN ('mcp:save_memory', 'manual', 'slash:remember')
+          AND kind = 'finding'
+      `);
+			db.exec(`
+        UPDATE observations
+        SET deleted_at = datetime('now'), updated_at = datetime('now')
+        WHERE (source LIKE 'hook:Read' OR source LIKE 'hook:Glob' OR source LIKE 'hook:Grep')
+          AND deleted_at IS NULL
+      `);
+			db.exec("CREATE INDEX idx_observations_kind ON observations(kind)");
+		}
+	},
+	{
+		version: 15,
+		name: "update_graph_taxonomy",
+		up: (db) => {
+			const tableExists = (name) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
+			if (!tableExists("graph_nodes")) return;
+			db.exec("DELETE FROM graph_nodes WHERE type IN ('Tool', 'Person')");
+			db.exec("DELETE FROM graph_edges WHERE type IN ('uses', 'depends_on', 'decided_by', 'part_of')");
+			db.exec(`
+        CREATE TABLE graph_nodes_new (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL CHECK(type IN ('Project','File','Decision','Problem','Solution','Reference')),
+          name TEXT NOT NULL,
+          metadata TEXT DEFAULT '{}',
+          observation_ids TEXT DEFAULT '[]',
+          project_hash TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        INSERT INTO graph_nodes_new SELECT * FROM graph_nodes;
+
+        DROP TABLE graph_nodes;
+        ALTER TABLE graph_nodes_new RENAME TO graph_nodes;
+
+        CREATE INDEX idx_graph_nodes_type ON graph_nodes(type);
+        CREATE INDEX idx_graph_nodes_name ON graph_nodes(name);
+        CREATE INDEX IF NOT EXISTS idx_graph_nodes_project ON graph_nodes(project_hash);
+      `);
+			db.exec(`
+        CREATE TABLE graph_edges_new (
+          id TEXT PRIMARY KEY,
+          source_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
+          target_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
+          type TEXT NOT NULL CHECK(type IN ('related_to','solved_by','caused_by','modifies','informed_by','references','verified_by','preceded_by')),
+          weight REAL NOT NULL DEFAULT 1.0 CHECK(weight >= 0.0 AND weight <= 1.0),
+          metadata TEXT DEFAULT '{}',
+          project_hash TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        INSERT INTO graph_edges_new SELECT * FROM graph_edges;
+
+        DROP TABLE graph_edges;
+        ALTER TABLE graph_edges_new RENAME TO graph_edges;
+
+        CREATE INDEX idx_graph_edges_source ON graph_edges(source_id);
+        CREATE INDEX idx_graph_edges_target ON graph_edges(target_id);
+        CREATE INDEX idx_graph_edges_type ON graph_edges(type);
+        CREATE UNIQUE INDEX idx_graph_edges_unique ON graph_edges(source_id, target_id, type);
+        CREATE INDEX IF NOT EXISTS idx_graph_edges_project ON graph_edges(project_hash);
+      `);
+		}
+	},
+	{
+		version: 16,
+		name: "create_tool_registry",
+		up: `
+      CREATE TABLE tool_registry (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        tool_type TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        source TEXT NOT NULL,
+        project_hash TEXT,
+        description TEXT,
+        server_name TEXT,
+        usage_count INTEGER NOT NULL DEFAULT 0,
+        last_used_at TEXT,
+        discovered_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE UNIQUE INDEX idx_tool_registry_name_project
+        ON tool_registry(name, COALESCE(project_hash, ''));
+      CREATE INDEX idx_tool_registry_scope
+        ON tool_registry(scope);
+      CREATE INDEX idx_tool_registry_project
+        ON tool_registry(project_hash) WHERE project_hash IS NOT NULL;
+      CREATE INDEX idx_tool_registry_usage
+        ON tool_registry(usage_count DESC, last_used_at DESC);
+    `
+	},
+	{
+		version: 17,
+		name: "create_tool_usage_events",
+		up: `
+      CREATE TABLE tool_usage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tool_name TEXT NOT NULL,
+        session_id TEXT,
+        project_hash TEXT,
+        success INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX idx_tool_usage_events_tool
+        ON tool_usage_events(tool_name, created_at DESC);
+      CREATE INDEX idx_tool_usage_events_session
+        ON tool_usage_events(session_id) WHERE session_id IS NOT NULL;
+      CREATE INDEX idx_tool_usage_events_project_time
+        ON tool_usage_events(project_hash, created_at DESC);
+    `
+	},
+	{
+		version: 18,
+		name: "create_tool_registry_search",
+		up: (db) => {
+			db.exec(`
+        CREATE VIRTUAL TABLE tool_registry_fts USING fts5(
+          name,
+          description,
+          content='tool_registry',
+          content_rowid='id',
+          tokenize='porter unicode61'
+        );
+
+        -- Sync trigger: INSERT
+        CREATE TRIGGER tool_registry_ai AFTER INSERT ON tool_registry BEGIN
+          INSERT INTO tool_registry_fts(rowid, name, description)
+            VALUES (new.id, new.name, new.description);
+        END;
+
+        -- Sync trigger: UPDATE (delete old entry, insert new)
+        CREATE TRIGGER tool_registry_au AFTER UPDATE ON tool_registry BEGIN
+          INSERT INTO tool_registry_fts(tool_registry_fts, rowid, name, description)
+            VALUES('delete', old.id, old.name, old.description);
+          INSERT INTO tool_registry_fts(rowid, name, description)
+            VALUES (new.id, new.name, new.description);
+        END;
+
+        -- Sync trigger: DELETE
+        CREATE TRIGGER tool_registry_ad AFTER DELETE ON tool_registry BEGIN
+          INSERT INTO tool_registry_fts(tool_registry_fts, rowid, name, description)
+            VALUES('delete', old.id, old.name, old.description);
+        END;
+
+        -- Rebuild to index existing tool_registry rows
+        INSERT INTO tool_registry_fts(tool_registry_fts) VALUES('rebuild');
+      `);
+			try {
+				db.exec(`
+          CREATE VIRTUAL TABLE IF NOT EXISTS tool_registry_embeddings USING vec0(
+            tool_id INTEGER PRIMARY KEY,
+            embedding float[384] distance_metric=cosine
+          );
+        `);
+			} catch {}
+		}
+	},
+	{
+		version: 19,
+		name: "add_tool_registry_status",
+		up: `
+      ALTER TABLE tool_registry ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
+      CREATE INDEX idx_tool_registry_status ON tool_registry(status);
+    `
 	}
 ];
 /**
@@ -441,6 +652,7 @@ const ObservationRowSchema = z.object({
 	embedding: z.instanceof(Buffer).nullable(),
 	embedding_model: z.string().nullable(),
 	embedding_version: z.string().nullable(),
+	kind: z.string().default("finding"),
 	classification: z.string().nullable(),
 	classified_at: z.string().nullable(),
 	created_at: z.string(),
@@ -455,6 +667,7 @@ const ObservationInsertSchema = z.object({
 	content: z.string().min(1).max(1e5),
 	title: z.string().max(200).nullable().default(null),
 	source: z.string().default("unknown"),
+	kind: z.string().default("finding"),
 	sessionId: z.string().nullable().default(null),
 	embedding: z.instanceof(Float32Array).nullable().default(null),
 	embeddingModel: z.string().nullable().default(null),
@@ -473,6 +686,7 @@ function rowToObservation(row) {
 		title: row.title,
 		source: row.source,
 		sessionId: row.session_id,
+		kind: row.kind ?? "finding",
 		embedding: row.embedding ? new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.byteLength / 4) : null,
 		embeddingModel: row.embedding_model,
 		embeddingVersion: row.embedding_version,
@@ -509,8 +723,8 @@ var ObservationRepository = class {
 		this.db = db;
 		this.projectHash = projectHash;
 		this.stmtInsert = db.prepare(`
-      INSERT INTO observations (id, project_hash, content, title, source, session_id, embedding, embedding_model, embedding_version)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO observations (id, project_hash, content, title, source, kind, session_id, embedding, embedding_model, embedding_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 		this.stmtGetById = db.prepare(`
       SELECT * FROM observations
@@ -548,7 +762,7 @@ var ObservationRepository = class {
 			source: validated.source,
 			contentLength: validated.content.length
 		});
-		this.stmtInsert.run(id, this.projectHash, validated.content, validated.title, validated.source, validated.sessionId, embeddingBuffer, validated.embeddingModel, validated.embeddingVersion);
+		this.stmtInsert.run(id, this.projectHash, validated.content, validated.title, validated.source, validated.kind, validated.sessionId, embeddingBuffer, validated.embeddingModel, validated.embeddingVersion);
 		const row = this.stmtGetById.get(id, this.projectHash);
 		if (!row) throw new Error("Failed to retrieve newly created observation");
 		debug("obs", "Observation created", { id });
@@ -574,6 +788,10 @@ var ObservationRepository = class {
 		let sql = "SELECT * FROM observations WHERE project_hash = ? AND deleted_at IS NULL";
 		const params = [this.projectHash];
 		if (!includeUnclassified) sql += " AND classification IS NOT NULL AND classification != 'noise'";
+		if (options?.kind) {
+			sql += " AND kind = ?";
+			params.push(options.kind);
+		}
 		if (options?.sessionId) {
 			sql += " AND session_id = ?";
 			params.push(options.sessionId);
@@ -868,6 +1086,118 @@ var SessionRepository = class {
 };
 
 //#endregion
+//#region src/search/hybrid.ts
+/**
+* Hybrid search combining FTS5 keyword results and vec0 vector results
+* using reciprocal rank fusion (RRF).
+*
+* When both keyword and vector results are available, RRF merges the two
+* ranked lists into a single score-sorted list. When only keyword results
+* are available (worker not ready, no embeddings), falls back transparently.
+*/
+/**
+* Merges multiple ranked lists into a single fused ranking using RRF.
+*
+* For each document across all lists, computes:
+*   fusedScore = sum(1 / (k + rank + 1))
+* where rank is the 0-based position in each list.
+*
+* @param rankedLists - Arrays of ranked items, each with an `id` field
+* @param k - Smoothing constant (default 60, standard RRF value)
+* @returns Fused results sorted by fusedScore descending
+*/
+function reciprocalRankFusion(rankedLists, k = 60) {
+	const scores = /* @__PURE__ */ new Map();
+	for (const list of rankedLists) for (let rank = 0; rank < list.length; rank++) {
+		const item = list[rank];
+		const current = scores.get(item.id) ?? 0;
+		scores.set(item.id, current + 1 / (k + rank + 1));
+	}
+	const results = [];
+	for (const [id, fusedScore] of scores) results.push({
+		id,
+		fusedScore
+	});
+	results.sort((a, b) => b.fusedScore - a.fusedScore);
+	return results;
+}
+/**
+* Combines FTS5 keyword search and vec0 vector search using RRF.
+*
+* Falls back to keyword-only when:
+* - Worker is null or not ready
+* - Query embedding fails
+* - No vector results returned
+*
+* @returns SearchResult[] with matchType indicating source(s)
+*/
+async function hybridSearch(params) {
+	const { searchEngine, embeddingStore, worker, query, db, projectHash, options } = params;
+	const limit = options?.limit ?? 20;
+	return debugTimed("search", "Hybrid search", async () => {
+		const keywordResults = searchEngine.searchKeyword(query, {
+			limit,
+			sessionId: options?.sessionId
+		});
+		debug("search", "Keyword results", { count: keywordResults.length });
+		let vectorResults = [];
+		if (worker && worker.isReady()) {
+			const queryEmbedding = await worker.embed(query);
+			if (queryEmbedding) {
+				vectorResults = embeddingStore.search(queryEmbedding, limit * 2);
+				debug("search", "Vector results", { count: vectorResults.length });
+			} else debug("search", "Query embedding failed, keyword-only");
+		} else debug("search", "Worker not ready, keyword-only");
+		if (vectorResults.length === 0) {
+			debug("search", "Returning keyword-only results", { count: keywordResults.length });
+			return keywordResults;
+		}
+		const fused = reciprocalRankFusion([keywordResults.map((r) => ({ id: r.observation.id })), vectorResults.map((r) => ({ id: r.observationId }))]);
+		const keywordMap = /* @__PURE__ */ new Map();
+		for (const r of keywordResults) keywordMap.set(r.observation.id, r);
+		const vectorIdSet = new Set(vectorResults.map((r) => r.observationId));
+		const obsRepo = new ObservationRepository(db, projectHash);
+		const merged = [];
+		for (const item of fused) {
+			if (merged.length >= limit) break;
+			const fromKeyword = keywordMap.get(item.id);
+			const fromVector = vectorIdSet.has(item.id);
+			if (fromKeyword && fromVector) merged.push({
+				observation: fromKeyword.observation,
+				score: item.fusedScore,
+				matchType: "hybrid",
+				snippet: fromKeyword.snippet
+			});
+			else if (fromKeyword) merged.push({
+				observation: fromKeyword.observation,
+				score: item.fusedScore,
+				matchType: "fts",
+				snippet: fromKeyword.snippet
+			});
+			else if (fromVector) {
+				const obs = obsRepo.getById(item.id);
+				if (obs) {
+					const snippet = (obs.content ?? "").replace(/\n/g, " ").slice(0, 100);
+					merged.push({
+						observation: obs,
+						score: item.fusedScore,
+						matchType: "vector",
+						snippet
+					});
+				}
+			}
+		}
+		debug("search", "Hybrid search complete", {
+			keyword: keywordResults.length,
+			vector: vectorResults.length,
+			fused: merged.length,
+			hybrid: merged.filter((r) => r.matchType === "hybrid").length
+		});
+		return merged;
+	});
+}
+
+//#endregion
 //#region src/shared/similarity.ts
 /**
 * Text similarity utilities shared across modules.
@@ -984,5 +1314,622 @@ var SaveGuard = class {
 };
 
 //#endregion
-export { rowToObservation as a, runMigrations as c, ObservationRepository as i, debug as l, jaccardSimilarity as n, openDatabase as o, SessionRepository as r, MIGRATIONS as s, SaveGuard as t, debugTimed as u };
-//# sourceMappingURL=save-guard-B6cie18b.mjs.map
+//#region src/storage/research-buffer.ts
+/**
+* Lightweight buffer for exploration tool events (Read, Glob, Grep).
+*
+* Instead of creating full observations for these low-signal tools,
+* they are stored in a temporary buffer. When a Write/Edit observation
+* is created, the recent buffer entries are attached as research context,
+* creating provenance links between exploration and changes.
+*
+* Buffer entries are flushed after 30 minutes.
+*/
+var ResearchBufferRepository = class {
+	db;
+	projectHash;
+	stmtInsert;
+	stmtGetRecent;
+	stmtFlush;
+	constructor(db, projectHash) {
+		this.db = db;
+		this.projectHash = projectHash;
+		this.stmtInsert = db.prepare(`
+      INSERT INTO research_buffer (project_hash, session_id, tool_name, target)
+      VALUES (?, ?, ?, ?)
+    `);
+		this.stmtGetRecent = db.prepare(`
+      SELECT tool_name, target, created_at FROM research_buffer
+      WHERE session_id = ? AND project_hash = ?
+        AND created_at >= datetime('now', '-' || ? || ' minutes')
+      ORDER BY created_at DESC
+    `);
+		this.stmtFlush = db.prepare(`
+      DELETE FROM research_buffer
+      WHERE created_at < datetime('now', '-' || ? || ' minutes')
+    `);
+		debug("research-buffer", "ResearchBufferRepository initialized", { projectHash });
+	}
+	/**
+	* Records a research tool event in the buffer.
+	*/
+	add(entry) {
+		this.stmtInsert.run(this.projectHash, entry.sessionId, entry.toolName, entry.target);
+		debug("research-buffer", "Buffered research event", {
+			tool: entry.toolName,
+			target: entry.target
+		});
+	}
+	/**
+	* Returns recent buffer entries for a session within a time window.
+	*/
+	getRecent(sessionId, windowMinutes = 5) {
+		return this.stmtGetRecent.all(sessionId, this.projectHash, windowMinutes).map((r) => ({
+			toolName: r.tool_name,
+			target: r.target,
+			createdAt: r.created_at
+		}));
+	}
+	/**
+	* Deletes buffer entries older than the specified number of minutes.
+	*/
+	flush(olderThanMinutes = 30) {
+		const result = this.stmtFlush.run(olderThanMinutes);
+		if (result.changes > 0) debug("research-buffer", "Flushed old entries", { deleted: result.changes });
+		return result.changes;
+	}
+};
+
+//#endregion
+//#region src/storage/notifications.ts
+var NotificationStore = class {
+	stmtInsert;
+	stmtConsume;
+	stmtSelect;
+	constructor(db) {
+		db.exec(`
+      CREATE TABLE IF NOT EXISTS pending_notifications (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+		this.stmtInsert = db.prepare("INSERT INTO pending_notifications (id, project_id, message) VALUES (?, ?, ?)");
+		this.stmtSelect = db.prepare("SELECT * FROM pending_notifications WHERE project_id = ? ORDER BY created_at ASC LIMIT 10");
+		this.stmtConsume = db.prepare("DELETE FROM pending_notifications WHERE project_id = ?");
+		debug("db", "NotificationStore initialized");
+	}
+	add(projectId, message) {
+		const id = randomBytes(16).toString("hex");
+		this.stmtInsert.run(id, projectId, message);
+		debug("db", "Notification added", { projectId });
+	}
+	/** Fetch and delete all pending notifications for a project (consume pattern). */
+	consumePending(projectId) {
+		const rows = this.stmtSelect.all(projectId);
+		if (rows.length > 0) this.stmtConsume.run(projectId);
+		return rows.map((r) => ({
+			id: r.id,
+			projectId: r.project_id,
+			message: r.message,
+			createdAt: r.created_at
+		}));
+	}
+};
+
+//#endregion
+//#region src/storage/tool-registry.ts
+/**
+* Repository for tool registry CRUD operations.
+*
+* Unlike ObservationRepository, this is NOT scoped to a single project --
+* the tool registry spans all scopes (global, project, plugin) and is
+* queried cross-project for tool discovery and routing.
+*
+* All SQL statements are prepared once in the constructor and reused for
+* every call (better-sqlite3 performance best practice).
+*/
+var ToolRegistryRepository = class {
+	db;
+	stmtUpsert;
+	stmtRecordUsage;
+	stmtGetByScope;
+	stmtGetByName;
+	stmtGetAll;
+	stmtCount;
+	stmtGetAvailableForSession;
+	stmtInsertEvent;
+	stmtGetUsageForTool;
+	stmtGetUsageForSession;
+	stmtGetUsageSince;
+	stmtGetRecentUsage;
+	stmtMarkStale;
+	stmtMarkDemoted;
+	stmtMarkActive;
+	stmtGetConfigSourced;
+	stmtGetRecentEventsForTool;
+	constructor(db) {
+		this.db = db;
+		try {
+			this.stmtUpsert = db.prepare(`
+        INSERT INTO tool_registry (name, tool_type, scope, source, project_hash, description, server_name, discovered_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT (name, COALESCE(project_hash, ''))
+        DO UPDATE SET
+          description = COALESCE(excluded.description, tool_registry.description),
+          source = excluded.source,
+          status = 'active',
+          updated_at = datetime('now')
+      `);
+			this.stmtRecordUsage = db.prepare(`
+        UPDATE tool_registry
+        SET usage_count = usage_count + 1,
+            last_used_at = datetime('now'),
+            updated_at = datetime('now')
+        WHERE name = ? AND COALESCE(project_hash, '') = COALESCE(?, '')
+      `);
+			this.stmtGetByScope = db.prepare(`
+        SELECT * FROM tool_registry
+        WHERE scope = 'global' OR project_hash = ?
+        ORDER BY usage_count DESC, discovered_at DESC
+      `);
+			this.stmtGetByName = db.prepare(`
+        SELECT * FROM tool_registry
+        WHERE name = ?
+        ORDER BY usage_count DESC
+        LIMIT 1
+      `);
+			this.stmtGetAll = db.prepare(`
+        SELECT * FROM tool_registry
+        ORDER BY usage_count DESC, discovered_at DESC
+      `);
+			this.stmtCount = db.prepare(`
+        SELECT COUNT(*) AS count FROM tool_registry
+      `);
+			this.stmtGetAvailableForSession = db.prepare(`
+        SELECT * FROM tool_registry
+        WHERE
+          scope = 'global'
+          OR (scope = 'project' AND project_hash = ?)
+          OR (scope = 'plugin' AND (project_hash IS NULL OR project_hash = ?))
+        ORDER BY
+          CASE status
+            WHEN 'active' THEN 0
+            WHEN 'stale' THEN 1
+            WHEN 'demoted' THEN 2
+            ELSE 3
+          END,
+          CASE tool_type
+            WHEN 'mcp_server' THEN 0
+            WHEN 'slash_command' THEN 1
+            WHEN 'skill' THEN 2
+            WHEN 'plugin' THEN 3
+            ELSE 4
+          END,
+          usage_count DESC,
+          discovered_at DESC
+      `);
+			this.stmtInsertEvent = db.prepare(`
+        INSERT INTO tool_usage_events (tool_name, session_id, project_hash, success)
+        VALUES (?, ?, ?, ?)
+      `);
+			this.stmtGetUsageForTool = db.prepare(`
+        SELECT tool_name, COUNT(*) as usage_count, MAX(created_at) as last_used
+        FROM tool_usage_events
+        WHERE tool_name = ? AND project_hash = ?
+          AND created_at >= datetime('now', ?)
+        GROUP BY tool_name
+      `);
+			this.stmtGetUsageForSession = db.prepare(`
+        SELECT tool_name, COUNT(*) as usage_count, MAX(created_at) as last_used
+        FROM tool_usage_events
+        WHERE session_id = ?
+        GROUP BY tool_name
+        ORDER BY usage_count DESC
+      `);
+			this.stmtGetUsageSince = db.prepare(`
+        SELECT tool_name, COUNT(*) as usage_count, MAX(created_at) as last_used
+        FROM tool_usage_events
+        WHERE project_hash = ?
+          AND created_at >= datetime('now', ?)
+        GROUP BY tool_name
+        ORDER BY usage_count DESC
+      `);
+			this.stmtGetRecentUsage = db.prepare(`
+        SELECT tool_name, COUNT(*) as usage_count, MAX(created_at) as last_used
+        FROM (
+          SELECT tool_name, created_at
+          FROM tool_usage_events
+          WHERE project_hash = ?
+          ORDER BY created_at DESC
+          LIMIT ?
+        )
+        GROUP BY tool_name
+        ORDER BY usage_count DESC
+      `);
+			this.stmtMarkStale = db.prepare(`
+        UPDATE tool_registry
+        SET status = 'stale', updated_at = datetime('now')
+        WHERE name = ? AND COALESCE(project_hash, '') = COALESCE(?, '')
+          AND status != 'stale'
+      `);
+			this.stmtMarkDemoted = db.prepare(`
+        UPDATE tool_registry
+        SET status = 'demoted', updated_at = datetime('now')
+        WHERE name = ? AND COALESCE(project_hash, '') = COALESCE(?, '')
+      `);
+			this.stmtMarkActive = db.prepare(`
+        UPDATE tool_registry
+        SET status = 'active', updated_at = datetime('now')
+        WHERE name = ? AND COALESCE(project_hash, '') = COALESCE(?, '')
+          AND status != 'active'
+      `);
+			this.stmtGetConfigSourced = db.prepare(`
+        SELECT * FROM tool_registry
+        WHERE source LIKE 'config:%'
+          AND status = 'active'
+          AND (project_hash = ? OR project_hash IS NULL)
+      `);
+			this.stmtGetRecentEventsForTool = db.prepare(`
+        SELECT success FROM tool_usage_events
+        WHERE tool_name = ? AND project_hash = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+      `);
+			debug("tool-registry", "ToolRegistryRepository initialized");
+		} catch (err) {
+			throw err;
+		}
+	}
+	/**
+	* Inserts or updates a discovered tool in the registry.
+	* On conflict (same name + project_hash), updates description and source.
+	*/
+	upsert(tool) {
+		try {
+			this.stmtUpsert.run(tool.name, tool.toolType, tool.scope, tool.source, tool.projectHash, tool.description, tool.serverName);
+			debug("tool-registry", "Upserted tool", {
+				name: tool.name,
+				scope: tool.scope
+			});
+		} catch (err) {
+			debug("tool-registry", "Failed to upsert tool", {
+				name: tool.name,
+				error: String(err)
+			});
+		}
+	}
+	/**
+	* Increments usage_count and updates last_used_at for a tool.
+	* Called from organic PostToolUse discovery to track usage.
+	*/
+	recordUsage(name, projectHash) {
+		try {
+			this.stmtRecordUsage.run(name, projectHash);
+			debug("tool-registry", "Recorded usage", { name });
+		} catch (err) {
+			debug("tool-registry", "Failed to record usage", {
+				name,
+				error: String(err)
+			});
+		}
+	}
+	/**
+	* Records usage for an existing tool, or creates it if not yet in the registry.
+	* This is the entry point for organic discovery -- an upsert-and-increment-if-exists pattern.
+	*
+	* First tries recordUsage. If the tool is not in the registry (changes === 0),
+	* calls upsert with the full tool info, which initializes it with usage_count = 0.
+	*/
+	recordOrCreate(name, defaults, sessionId, success) {
+		try {
+			const result = this.stmtRecordUsage.run(name, defaults.projectHash);
+			if (result.changes === 0) this.upsert({
+				name,
+				...defaults
+			});
+			if (sessionId !== void 0) this.stmtInsertEvent.run(name, sessionId, defaults.projectHash, success === false ? 0 : 1);
+			debug("tool-registry", "recordOrCreate completed", {
+				name,
+				created: result.changes === 0
+			});
+		} catch (err) {
+			debug("tool-registry", "Failed recordOrCreate", {
+				name,
+				error: String(err)
+			});
+		}
+	}
+	/**
+	* Returns global tools plus project-specific tools for the given project.
+	*/
+	getForProject(projectHash) {
+		return this.stmtGetByScope.all(projectHash);
+	}
+	/**
+	* Returns tools available in the resolved scope for a given project.
+	* Implements SCOP-01/SCOP-02/SCOP-03 scope resolution rules.
+	*/
+	getAvailableForSession(projectHash) {
+		return this.stmtGetAvailableForSession.all(projectHash, projectHash);
+	}
+	/**
+	* Returns the top-usage entry for a given tool name.
+	*/
+	getByName(name) {
+		return this.stmtGetByName.get(name) ?? null;
+	}
+	/**
+	* Returns all tools in the registry (for debugging/admin).
+	*/
+	getAll() {
+		return this.stmtGetAll.all();
+	}
+	/**
+	* Returns total number of tools in the registry.
+	*/
+	count() {
+		return this.stmtCount.get().count;
+	}
+	/**
+	* Returns usage stats for a specific tool within a time window.
+	* @param timeModifier - SQLite datetime modifier, e.g., '-7 days', '-30 days'
+	*/
+	getUsageForTool(toolName, projectHash, timeModifier = "-7 days") {
+		return this.stmtGetUsageForTool.get(toolName, projectHash, timeModifier) ?? null;
+	}
+	/**
+	* Returns per-tool usage stats for a specific session.
+	*/
+	getUsageForSession(sessionId) {
+		return this.stmtGetUsageForSession.all(sessionId);
+	}
+	/**
+	* Returns per-tool usage stats since a time offset for a project.
+	* @param timeModifier - SQLite datetime modifier, e.g., '-7 days', '-30 days'
+	*/
+	getUsageSince(projectHash, timeModifier = "-7 days") {
+		return this.stmtGetUsageSince.all(projectHash, timeModifier);
+	}
+	/**
+	* Returns per-tool usage stats from the last N events for a project.
+	* Event-count-based window instead of time-based — immune to usage gaps.
+	* @param limit - Number of recent events to consider (default 200)
+	*/
+	getRecentUsage(projectHash, limit = 200) {
+		return this.stmtGetRecentUsage.all(projectHash, limit);
+	}
+	/**
+	* Marks a tool as stale (no longer in config but still in registry).
+	* Idempotent -- no-op if already stale.
+	*/
+	markStale(name, projectHash) {
+		try {
+			this.stmtMarkStale.run(name, projectHash);
+			debug("tool-registry", "Marked tool stale", { name });
+		} catch (err) {
+			debug("tool-registry", "Failed to mark tool stale", {
+				name,
+				error: String(err)
+			});
+		}
+	}
+	/**
+	* Marks a tool as demoted (high failure rate detected).
+	*/
+	markDemoted(name, projectHash) {
+		try {
+			this.stmtMarkDemoted.run(name, projectHash);
+			debug("tool-registry", "Marked tool demoted", { name });
+		} catch (err) {
+			debug("tool-registry", "Failed to mark tool demoted", {
+				name,
+				error: String(err)
+			});
+		}
+	}
+	/**
+	* Marks a tool as active (restored from stale/demoted).
+	* Idempotent -- no-op if already active.
+	*/
+	markActive(name, projectHash) {
+		try {
+			this.stmtMarkActive.run(name, projectHash);
+			debug("tool-registry", "Marked tool active", { name });
+		} catch (err) {
+			debug("tool-registry", "Failed to mark tool active", {
+				name,
+				error: String(err)
+			});
+		}
+	}
+	/**
+	* Returns all config-sourced active tools for a given project (or global).
+	* Used by staleness detection to compare against current config state.
+	*/
+	getConfigSourcedTools(projectHash) {
+		try {
+			return this.stmtGetConfigSourced.all(projectHash);
+		} catch (err) {
+			debug("tool-registry", "Failed to get config-sourced tools", { error: String(err) });
+			return [];
+		}
+	}
+	/**
+	* Returns recent success/failure events for a specific tool.
+	* Used by failure-driven demotion to check failure rate.
+	* @param limit - Number of recent events to check (default 5)
+	*/
+	getRecentEventsForTool(toolName, projectHash, limit = 5) {
+		try {
+			return this.stmtGetRecentEventsForTool.all(toolName, projectHash, limit);
+		} catch (err) {
+			debug("tool-registry", "Failed to get recent events for tool", {
+				toolName,
+				error: String(err)
+			});
+			return [];
+		}
+	}
+	/**
+	* Sanitizes a user query for safe FTS5 MATCH usage.
+	* Removes FTS5 operators and special characters to prevent syntax errors.
+	* Returns null if the query is empty after sanitization.
+	*/
+	sanitizeQuery(query) {
+		const words = query.trim().split(/\s+/).filter(Boolean);
+		if (words.length === 0) return null;
+		const sanitized = words.map((w) => {
+			let cleaned = w.replace(/["*()^{}[\]]/g, "");
+			if (/^(NEAR|OR|AND|NOT)$/i.test(cleaned)) return "";
+			cleaned = cleaned.replace(/[^\w\-]/g, "");
+			return cleaned;
+		}).filter(Boolean);
+		if (sanitized.length === 0) return null;
+		return sanitized.join(" ");
+	}
+	/**
+	* FTS5 keyword search on tool_registry_fts (name + description).
+	* Returns ranked results using BM25 with name weighted 2x over description.
+	*/
+	searchByKeyword(query, options) {
+		const sanitized = this.sanitizeQuery(query);
+		if (!sanitized) return [];
+		const limit = options?.limit ?? 20;
+		let sql = `
+      SELECT tr.*, bm25(tool_registry_fts, 2.0, 1.0) AS rank
+      FROM tool_registry_fts
+      JOIN tool_registry tr ON tr.id = tool_registry_fts.rowid
+      WHERE tool_registry_fts MATCH ?
+    `;
+		const params = [sanitized];
+		if (options?.scope) {
+			sql += " AND tr.scope = ?";
+			params.push(options.scope);
+		}
+		sql += " ORDER BY rank LIMIT ?";
+		params.push(limit);
+		try {
+			return this.db.prepare(sql).all(...params).map(({ rank, ...toolFields }) => ({
+				tool: toolFields,
+				score: Math.abs(rank),
+				matchType: "fts"
+			}));
+		} catch (err) {
+			debug("tool-registry", "FTS5 search failed", { error: String(err) });
+			return [];
+		}
+	}
+	/**
+	* Vector similarity search on tool_registry_embeddings using vec0 KNN.
+	* Returns tool IDs and distances sorted by cosine similarity.
+	*/
+	searchByVector(queryEmbedding, options) {
+		const limit = options?.limit ?? 40;
+		try {
+			let sql;
+			const params = [queryEmbedding];
+			if (options?.scope) {
+				sql = `
+          SELECT tre.tool_id, tre.distance
+          FROM tool_registry_embeddings tre
+          JOIN tool_registry tr ON tr.id = tre.tool_id
+          WHERE tre.embedding MATCH ? AND tr.scope = ?
+          ORDER BY tre.distance LIMIT ?
+        `;
+				params.push(options.scope);
+			} else sql = `
+          SELECT tre.tool_id, tre.distance
+          FROM tool_registry_embeddings tre
+          WHERE tre.embedding MATCH ?
+          ORDER BY tre.distance LIMIT ?
+        `;
+			params.push(limit);
+			return this.db.prepare(sql).all(...params);
+		} catch (err) {
+			debug("tool-registry", "Vector search failed", { error: String(err) });
+			return [];
+		}
+	}
+	/**
+	* Hybrid search combining FTS5 keyword and vec0 vector results via
+	* reciprocal rank fusion (RRF). Falls back to FTS5-only when vector
+	* search is unavailable (no worker, no sqlite-vec, no embeddings).
+	*/
+	async searchTools(query, options) {
+		const limit = options?.limit ?? 20;
+		const ftsResults = this.searchByKeyword(query, {
+			scope: options?.scope,
+			limit
+		});
+		let vectorResults = [];
+		if (options?.worker?.isReady() && options?.hasVectorSupport) {
+			const queryEmbedding = await options.worker.embed(query);
+			if (queryEmbedding) vectorResults = this.searchByVector(queryEmbedding, {
+				scope: options?.scope,
+				limit: limit * 2
+			});
+		}
+		if (vectorResults.length === 0) return ftsResults.slice(0, limit);
+		const fused = reciprocalRankFusion([ftsResults.map((r) => ({ id: String(r.tool.id) })), vectorResults.map((r) => ({ id: String(r.tool_id) }))]);
+		const ftsMap = /* @__PURE__ */ new Map();
+		for (const r of ftsResults) ftsMap.set(String(r.tool.id), r);
+		const vecIds = new Set(vectorResults.map((r) => String(r.tool_id)));
+		const results = [];
+		for (const item of fused) {
+			if (results.length >= limit) break;
+			const fromFts = ftsMap.get(item.id);
+			const fromVec = vecIds.has(item.id);
+			if (fromFts) results.push({
+				tool: fromFts.tool,
+				score: item.fusedScore,
+				matchType: fromFts && fromVec ? "hybrid" : "fts"
+			});
+			else if (fromVec) {
+				const toolRow = this.db.prepare("SELECT * FROM tool_registry WHERE id = ?").get(Number(item.id));
+				if (toolRow) results.push({
+					tool: toolRow,
+					score: item.fusedScore,
+					matchType: "vector"
+				});
+			}
+		}
+		return results;
+	}
+	/**
+	* Stores an embedding vector for a tool in tool_registry_embeddings.
+	* Used by the background embedding loop to index tool descriptions.
+	*/
+	storeEmbedding(toolId, embedding) {
+		try {
+			this.db.prepare("INSERT OR REPLACE INTO tool_registry_embeddings(tool_id, embedding) VALUES (?, ?)").run(toolId, embedding);
+		} catch (err) {
+			debug("tool-registry", "Failed to store tool embedding", {
+				toolId,
+				error: String(err)
+			});
+		}
+	}
+	/**
+	* Returns tools that have descriptions but no embedding yet.
+	* Used by the background embedding loop to find work.
+	*/
+	findUnembeddedTools(limit = 5) {
+		try {
+			return this.db.prepare(`
+        SELECT id, name, description FROM tool_registry
+        WHERE description IS NOT NULL
+          AND id NOT IN (SELECT tool_id FROM tool_registry_embeddings)
+        LIMIT ?
+      `).all(limit);
+		} catch (err) {
+			debug("tool-registry", "Failed to find unembedded tools", { error: String(err) });
+			return [];
+		}
+	}
+};
+
+//#endregion
+export { jaccardSimilarity as a, ObservationRepository as c, MIGRATIONS as d, runMigrations as f, SaveGuard as i, rowToObservation as l, debugTimed as m, NotificationStore as n, hybridSearch as o, debug as p, ResearchBufferRepository as r, SessionRepository as s, ToolRegistryRepository as t, openDatabase as u };
+//# sourceMappingURL=tool-registry-Dk6m-4H_.mjs.map

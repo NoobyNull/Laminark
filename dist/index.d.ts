@@ -1,4 +1,4 @@
-import { a as SearchResult, i as ObservationInsert, n as DatabaseConfig, o as Session, r as Observation, t as ObservationRepository } from "./observations-B62-p18e.mjs";
+import { a as SearchResult, i as ObservationInsert, n as DatabaseConfig, o as Session, r as Observation, t as ObservationRepository } from "./observations-Ch0nc47i.mjs";
 import Database from "better-sqlite3";
 
 //#region src/storage/database.d.ts
@@ -53,6 +53,13 @@ interface Migration {
  * Migration 010: Project metadata table for project selector UI.
  * Migration 011: Add project_hash to graph tables and backfill from observations.
  * Migration 012: Add classification and classified_at columns for LLM-based observation classification.
+ * Migration 013: Research buffer table for exploration tool event buffering.
+ * Migration 014: Add kind column to observations with backfill from source field.
+ * Migration 015: Update graph taxonomy -- remove Tool/Person nodes, tighten CHECK constraints.
+ * Migration 016: Tool registry table for discovered tools with scope-aware uniqueness.
+ * Migration 017: Tool usage events table for per-event temporal tracking.
+ * Migration 018: Tool registry FTS5 + vec0 tables for hybrid search on tool descriptions.
+ * Migration 019: Add status column (active/stale/demoted) to tool_registry for staleness management.
  */
 declare const MIGRATIONS: Migration[];
 /**
