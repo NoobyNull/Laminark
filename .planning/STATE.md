@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-10)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
-**Current focus:** Milestone v2.0 — Phase 15 complete (Tool Search), Phase 16 next
+**Current focus:** Milestone v2.0 — Phase 16 in progress (Staleness Management), Plan 01 complete
 
 ## Current Position
 
-Phase: 15 of 16 (Tool Search) -- COMPLETE
-Plan: 2 of 2 complete
-Status: Phase 15 complete, ready for phase 16
-Last activity: 2026-02-11 — 15-02 complete (discover_tools MCP tool, background tool embedding)
+Phase: 16 of 16 (Staleness Management) -- IN PROGRESS
+Plan: 1 of 2 complete
+Status: Plan 16-01 complete (staleness data model + storage methods), Plan 16-02 next
+Last activity: 2026-02-11 — 16-01 complete (migration 19, staleness methods on ToolRegistryRepository)
 
-Progress (v2.0): [█████████░] 90% (Phase 15 complete, Phase 16 remaining)
+Progress (v2.0): [█████████▒] 95% (Phase 16 plan 1/2 complete)
 
 ## Performance Metrics
 
@@ -47,6 +47,7 @@ Progress (v2.0): [█████████░] 90% (Phase 15 complete, Phase 
 | 13-context-enhancement | 1/1 | 3min | 3min |
 | 14-conversation-routing | 2/2 | 5min | 2.5min |
 | 15-tool-search | 2/2 | 4min | 2min |
+| 16-staleness-management | 1/2 | 2min | 2min |
 
 ## Accumulated Context
 
@@ -97,6 +98,10 @@ Recent decisions affecting current work:
 - [15-02]: Deduplication mirrors injection.ts formatToolSection -- server-level entries suppress individual mcp_tool entries
 - [15-02]: processUnembeddedTools piggybacks on existing 5-second setInterval -- no new timer
 - [15-02]: ToolRegistryRepository instance wrapped in try/catch at module level for pre-migration graceful degradation
+- [16-01]: Three-state tool status (active/stale/demoted) with idempotent markStale/markActive transitions
+- [16-01]: getConfigSourcedTools returns project-level AND global tools for complete staleness comparison
+- [16-01]: Status ordering prepended before tool_type ordering in getAvailableForSession
+- [16-01]: Upsert ON CONFLICT restores active status for re-discovered tools
 
 ### Pending Todos
 
@@ -118,5 +123,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 15-02-PLAN.md -- discover_tools MCP tool with hybrid search, background tool embedding. Phase 15 complete (2/2).
+Stopped at: Completed 16-01-PLAN.md -- staleness data model with migration 19, 5 new methods on ToolRegistryRepository. Phase 16 plan 1/2 complete.
 Resume file: None
