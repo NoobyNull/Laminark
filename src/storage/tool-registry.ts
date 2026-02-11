@@ -25,6 +25,9 @@ export class ToolRegistryRepository {
   private readonly stmtCount: BetterSqlite3.Statement;
   private readonly stmtGetAvailableForSession: BetterSqlite3.Statement;
   private readonly stmtInsertEvent: BetterSqlite3.Statement;
+  private readonly stmtGetUsageForTool: BetterSqlite3.Statement;
+  private readonly stmtGetUsageForSession: BetterSqlite3.Statement;
+  private readonly stmtGetUsageSince: BetterSqlite3.Statement;
 
   constructor(db: BetterSqlite3.Database) {
     this.db = db;
@@ -91,6 +94,31 @@ export class ToolRegistryRepository {
       this.stmtInsertEvent = db.prepare(`
         INSERT INTO tool_usage_events (tool_name, session_id, project_hash, success)
         VALUES (?, ?, ?, ?)
+      `);
+
+      this.stmtGetUsageForTool = db.prepare(`
+        SELECT tool_name, COUNT(*) as usage_count, MAX(created_at) as last_used
+        FROM tool_usage_events
+        WHERE tool_name = ? AND project_hash = ?
+          AND created_at >= datetime('now', ?)
+        GROUP BY tool_name
+      `);
+
+      this.stmtGetUsageForSession = db.prepare(`
+        SELECT tool_name, COUNT(*) as usage_count, MAX(created_at) as last_used
+        FROM tool_usage_events
+        WHERE session_id = ?
+        GROUP BY tool_name
+        ORDER BY usage_count DESC
+      `);
+
+      this.stmtGetUsageSince = db.prepare(`
+        SELECT tool_name, COUNT(*) as usage_count, MAX(created_at) as last_used
+        FROM tool_usage_events
+        WHERE project_hash = ?
+          AND created_at >= datetime('now', ?)
+        GROUP BY tool_name
+        ORDER BY usage_count DESC
       `);
 
       debug('tool-registry', 'ToolRegistryRepository initialized');
@@ -200,5 +228,29 @@ export class ToolRegistryRepository {
   count(): number {
     const row = this.stmtCount.get() as { count: number };
     return row.count;
+  }
+
+  /**
+   * Returns usage stats for a specific tool within a time window.
+   * @param timeModifier - SQLite datetime modifier, e.g., '-7 days', '-30 days'
+   */
+  getUsageForTool(toolName: string, projectHash: string, timeModifier: string = '-7 days'): ToolUsageStats | null {
+    const row = this.stmtGetUsageForTool.get(toolName, projectHash, timeModifier) as ToolUsageStats | undefined;
+    return row ?? null;
+  }
+
+  /**
+   * Returns per-tool usage stats for a specific session.
+   */
+  getUsageForSession(sessionId: string): ToolUsageStats[] {
+    return this.stmtGetUsageForSession.all(sessionId) as ToolUsageStats[];
+  }
+
+  /**
+   * Returns per-tool usage stats since a time offset for a project.
+   * @param timeModifier - SQLite datetime modifier, e.g., '-7 days', '-30 days'
+   */
+  getUsageSince(projectHash: string, timeModifier: string = '-7 days'): ToolUsageStats[] {
+    return this.stmtGetUsageSince.all(projectHash, timeModifier) as ToolUsageStats[];
   }
 }
