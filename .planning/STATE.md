@@ -14,7 +14,7 @@ Plan: 2 of 2 complete
 Status: Phase 10 complete
 Last activity: 2026-02-11 — 10-02 complete (config scanning + organic PostToolUse discovery wired into hook pipeline)
 
-Progress (v2.0): [███░░░░░░░] 25% (Phase 10 complete, 3/8 v2 phases done)
+Progress (v2.0): [███░░░░░░░] 25% (Phase 10 complete, 2/8 v2 phases done)
 
 ## Performance Metrics
 
