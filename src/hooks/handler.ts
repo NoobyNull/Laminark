@@ -76,6 +76,8 @@ export function processPostToolUseFiltered(
   // This runs BEFORE the self-referential filter so Laminark's own tools are registered
   if (toolRegistry) {
     try {
+      const sessionId = input.session_id as string | undefined;
+      const isFailure = hookEventName === 'PostToolUseFailure';
       toolRegistry.recordOrCreate(toolName, {
         toolType: inferToolType(toolName),
         scope: inferScope(toolName),
@@ -83,7 +85,7 @@ export function processPostToolUseFiltered(
         projectHash: projectHash ?? null,
         description: null,
         serverName: extractServerName(toolName),
-      });
+      }, sessionId ?? null, !isFailure);
     } catch {
       // Non-fatal: registry is supplementary to core memory function
     }
