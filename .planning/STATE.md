@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-10)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
-**Current focus:** Milestone v2.0 — Phase 10: Tool Discovery and Registry
+**Current focus:** Milestone v2.0 — Phase 10 complete, ready for Phase 11
 
 ## Current Position
 
-Phase: 10 of 16 (Tool Discovery and Registry)
-Plan: 1 of 2 complete
-Status: Executing Phase 10
-Last activity: 2026-02-11 — 10-01 complete (tool registry storage foundation: types, migration 16, ToolRegistryRepository)
+Phase: 10 of 16 (Tool Discovery and Registry) -- COMPLETE
+Plan: 2 of 2 complete
+Status: Phase 10 complete
+Last activity: 2026-02-11 — 10-02 complete (config scanning + organic PostToolUse discovery wired into hook pipeline)
 
-Progress (v2.0): [██░░░░░░░░] 19% (Phase 10 plan 1/2, 2/8 v2 phases in progress)
+Progress (v2.0): [███░░░░░░░] 25% (Phase 10 complete, 3/8 v2 phases done)
 
 ## Performance Metrics
 
@@ -41,7 +41,7 @@ Progress (v2.0): [██░░░░░░░░] 19% (Phase 10 plan 1/2, 2/8 v2
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 09-global-installation | 2/2 | 6min | 3min |
-| 10-tool-discovery-registry | 1/2 | 2min | 2min |
+| 10-tool-discovery-registry | 2/2 | 4min | 2min |
 
 ## Accumulated Context
 
@@ -62,23 +62,27 @@ Recent decisions affecting current work:
 - [10-01]: COALESCE(project_hash, '') for NULL-safe unique index -- global tools deduplicated in separate namespace
 - [10-01]: ToolRegistryRepository is NOT project-scoped -- queries span all scopes for cross-project discovery
 - [10-01]: recordOrCreate uses upsert-then-increment pattern for organic tool discovery
+- [10-02]: Organic discovery runs BEFORE self-referential filter -- Laminark's own tools are registered
+- [10-02]: Config scanning uses only synchronous fs operations (SessionStart is synchronous)
+- [10-02]: All discovery writes wrapped in try/catch -- registry failures never block core pipeline
+- [10-02]: projectHash threaded from main() to avoid redundant realpathSync in organic discovery
 
 ### Pending Todos
 
 - ~~[v2] Global installation mechanism for Laminark~~ COMPLETE (Phase 09)
 - ~~[v2] Scope-aware tool registry~~ COMPLETE (Phase 10-01: storage layer)
-- [v2] Tool discovery across config scopes (Phase 10-02: scanning + organic)
+- ~~[v2] Tool discovery across config scopes~~ COMPLETE (Phase 10-02: config scanning + organic PostToolUse)
 - [v2] Conversation-driven routing
 
 ### Blockers/Concerns
 
 - ~~Global installation changes MCP prefix from `mcp__laminark__` to `mcp__plugin_laminark_laminark__` — dual-prefix support needed during migration~~ RESOLVED by 09-01
-- Tool discovery must handle missing/malformed config files gracefully
+- ~~Tool discovery must handle missing/malformed config files gracefully~~ RESOLVED by 10-02 (all scanners wrapped in try/catch)
 - Routing cold start — heuristic fallback needed before learned patterns accumulate
 - MCP Tool Search feature (`ENABLE_TOOL_SEARCH`) interaction with registry completeness is not fully understood
 
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 10-01-PLAN.md -- tool registry storage foundation. Ready for 10-02.
+Stopped at: Completed 10-02-PLAN.md -- Phase 10 complete. Tool discovery pipeline wired: config scanning at SessionStart, organic discovery at PostToolUse.
 Resume file: None
