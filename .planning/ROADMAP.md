@@ -254,7 +254,10 @@ Plans:
   1. Session start injection includes an "Available Tools" section listing the most relevant tools for the current project scope
   2. The tool suggestions section fits within a 500-character sub-budget and does not cause the overall context injection to exceed 6000 characters
   3. Tools are ranked by a relevance score combining usage frequency and recency, so the most-used recent tools appear first
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 13-01-PLAN.md -- Relevance-ranked tool suggestions with 500-char sub-budget in session context (CTXT-01, CTXT-02, CTXT-03)
 
 ### Phase 14: Conversation Routing
 **Goal**: Laminark detects when the conversation is heading toward a task that a specific tool can handle and proactively suggests it, with graceful behavior when it lacks data
