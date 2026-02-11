@@ -1,198 +1,433 @@
-# Stack Research
+# Technology Stack: Global Tool Discovery & Routing
 
-**Domain:** Claude Code plugin with persistent memory, vector search, adaptive semantic analysis, and web-based visualization
-**Researched:** 2026-02-08
-**Confidence:** HIGH (core stack) / MEDIUM (visualization, embedding strategy)
+**Project:** Laminark -- Global Installation, Tool Discovery, Scope-Aware Registry, Conversation-Driven Routing
+**Researched:** 2026-02-10
+**Scope:** NEW capabilities only. Existing validated stack (SQLite/WAL, MCP SDK, Hono, Cytoscape, tsdown, etc.) is NOT re-researched.
 
-## Recommended Stack
+## Executive Summary
 
-### Runtime & Language
+This milestone requires **zero new npm dependencies**. Every capability needed for global installation, tool discovery, scope-aware registry, and conversation-driven routing can be built with Node.js standard library (`fs`, `path`, `os`, `crypto`) and the existing Laminark stack. The work is primarily:
 
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| Node.js | 22.x LTS ("Jod") | Runtime | Active LTS until April 2027. Claude Code plugins run on Node.js. Built-in WebSocket client (no ws dependency needed). 30% faster startup than Node 20. Native `node:sqlite` available but better-sqlite3 remains faster. **Confidence: HIGH** |
-| TypeScript | ~5.8 | Language | Required by MCP SDK ecosystem. Erasable syntax support lets Node.js run TS directly via `--erasableSyntaxOnly`. MCP SDK is TypeScript-first. **Confidence: HIGH** |
-| Zod | ^4.3 | Schema validation | Peer dependency of MCP SDK (SDK imports from `zod/v4`). Also used for tool input schemas. 57% smaller core than v3. 2kb gzipped. **Confidence: HIGH** |
+1. Parsing JSON config files at known filesystem paths (Node.js `fs.readFileSync`)
+2. Adding new SQLite tables/queries to the existing database
+3. Modifying the hook handler to extract tool provenance from `tool_name` prefixes
+4. Adjusting the plugin manifest and build for global installation
 
-### MCP SDK & Plugin Infrastructure
+**Key insight from research:** Claude Code's config system is fully file-based (JSON files at deterministic paths). No API calls, no service discovery, no dynamic protocol needed. The "discovery" is just reading files.
 
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| @modelcontextprotocol/sdk | ^1.26 (v1.x line) | MCP server | The official SDK. Use v1.x for production stability -- v2 split packages (`@modelcontextprotocol/server`) expected stable Q1 2026 but not yet released. When v2 ships, migrate to `@modelcontextprotocol/server` for smaller install. Stdio transport for Claude Code integration. **Confidence: HIGH** |
+## Recommended Stack Additions
 
-**Migration note:** The v2 SDK splits into `@modelcontextprotocol/server`, `@modelcontextprotocol/client`, and `@modelcontextprotocol/core`. v1.x gets bug fixes for 6+ months after v2 ships. Start on v1.x, plan migration path.
+### NO new npm packages needed
 
-### Database & Search
+| Capability | Implementation | Why No New Package |
+|------------|---------------|-------------------|
+| Parse Claude Code config JSON files | `fs.readFileSync` + `JSON.parse` | Config files are plain JSON at known paths. Zod (already installed) handles validation. |
+| Determine config file paths | `os.homedir()` + `path.join()` | All paths are deterministic: `~/.claude/settings.json`, `.claude/settings.json`, `.mcp.json`, etc. |
+| Tool name parsing (scope detection) | String matching / regex | Tool names follow known patterns: `Read`, `mcp__server__tool`, `mcp__plugin_market_name__tool` |
+| Tool registry storage | New SQLite table in existing database | Already using better-sqlite3 with WAL. Just add a migration. |
+| Conversation routing | Extend existing hook handler + context injection | SessionStart hook and PostToolUse hook already capture all needed data. |
+| Global installation | Modify `.claude-plugin/plugin.json` + marketplace config | File-based configuration, no runtime dependency. |
 
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| better-sqlite3 | ^12.6 | SQLite driver | Synchronous API is 100x faster than async alternatives for local queries. Proven in Engram. Supports loadExtension() for sqlite-vec. Prebuilt binaries for all LTS Node versions. The fastest SQLite library for Node.js, period. **Confidence: HIGH** |
-| SQLite FTS5 | (built into SQLite) | Full-text search | Compiled into better-sqlite3's bundled SQLite. Inverted index with BM25 ranking. Use external-content FTS5 tables backed by canonical data tables. No additional dependency. **Confidence: HIGH** |
-| sqlite-vec | ^0.1.7-alpha | Vector similarity search | Pure C, zero dependencies, runs anywhere SQLite runs. Loads as a SQLite extension via `db.loadExtension()`. Successor to sqlite-vss (Faiss-based, heavier). Supports L2, cosine, and inner product distance. The only lightweight option that stays in-process with SQLite. **Confidence: MEDIUM** -- still in alpha, but the project is actively developed and the API is stable enough for production use. No realistic alternative that keeps everything in-process with SQLite. |
+## Detailed Technology Decisions
 
-**FTS5 + sqlite-vec hybrid search pattern:** Use FTS5 for keyword search with BM25 scoring, sqlite-vec for semantic vector search, then combine scores with weighted reciprocal rank fusion. This is the same hybrid pattern Engram used and it works well.
+### 1. Claude Code Config File Parsing
 
-### Embedding Strategy (Pluggable)
+**Decision:** Use Node.js `fs.readFileSync` + `JSON.parse` with Zod schema validation.
 
-| Strategy | Technology | Version | When to Use |
-|----------|------------|---------|-------------|
-| **Local ONNX (default)** | @huggingface/transformers | ^3.8 | Default strategy. Runs BGE Small EN v1.5 or all-MiniLM-L6-v2 (384-dim) locally via ONNX Runtime. ~23MB model download on first use. Sub-100ms inference on CPU for short texts. No API key needed. **Confidence: HIGH** |
-| **Claude piggyback** | Custom extraction | N/A | Extract semantic signals from Claude's own responses during generation. Zero additional compute -- free ride on work Claude is already doing. Requires prompt engineering to extract topic vectors/keywords. **Confidence: MEDIUM** -- novel approach, needs validation |
-| **Hybrid** | Both above | N/A | Use Claude piggyback during active sessions, fall back to local ONNX for offline/batch operations. Best of both worlds. **Confidence: MEDIUM** |
+**Config file locations discovered from official docs (HIGH confidence):**
 
-**Why @huggingface/transformers over fastembed:** fastembed-js (Anush008/fastembed-js) was **archived January 15, 2026** and is no longer maintained. @huggingface/transformers v3 is the actively maintained successor ecosystem -- it uses ONNX Runtime under the hood, supports the same BGE and MiniLM models, has 1200+ pre-converted models on HuggingFace Hub, and works in Node.js with ESM+CJS. The @mastra/fastembed wrapper still exists but depends on the archived upstream.
+| File | Path | Scope | Contains |
+|------|------|-------|----------|
+| Global user settings | `~/.claude/settings.json` | User-wide | `hooks`, `statusLine`, `enabledPlugins`, `env` |
+| Global personal settings | `~/.claude/settings.local.json` | User-wide, private | `permissions`, `enableAllProjectMcpServers` |
+| Project team settings | `{cwd}/.claude/settings.json` | Per-project, committed | `permissions`, `enabledPlugins` |
+| Project local settings | `{cwd}/.claude/settings.local.json` | Per-project, private | `permissions` |
+| Project MCP servers | `{cwd}/.mcp.json` | Per-project, committed | `mcpServers` config |
+| User/local MCP servers | `~/.claude.json` | User-wide | `mcpServers` in `projects[path]` entries |
+| Plugin registry | `~/.claude/plugins/installed_plugins.json` | User-wide | Plugin install records with scopes/paths |
+| Known marketplaces | `~/.claude/plugins/known_marketplaces.json` | User-wide | Marketplace source+install paths |
 
-### Web Server (Visualization UI)
+**Implementation pattern:**
 
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| hono | ^4.11 | HTTP server for web UI | 14KB total, zero dependencies, built on Web Standards (Fetch API). 3.5x faster than Express. First-class TypeScript. Perfect for a localhost-only visualization server that must add zero perceptible overhead. Ships with built-in middleware for static files, CORS, etc. **Confidence: HIGH** |
-| @hono/node-server | ^1.x | Node.js adapter | Thin adapter to run Hono on Node.js. Uses Web Standard APIs from Node 18+. **Confidence: HIGH** |
+```typescript
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { z } from 'zod';
 
-### Visualization (Web UI)
+// Zod schemas for each config format
+const SettingsSchema = z.object({
+  hooks: z.record(z.array(z.unknown())).optional(),
+  enabledPlugins: z.record(z.boolean()).optional(),
+  statusLine: z.unknown().optional(),
+}).passthrough();
 
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| cytoscape | ^3.33 | Knowledge graph visualization | Best balance of ease-of-use and analytical power. Built-in graph algorithms (PageRank, betweenness centrality) useful for finding important memory nodes. Force-directed layouts. Rich extension ecosystem. Canvas-based rendering handles hundreds of nodes smoothly. Can also run headlessly on Node.js for graph analysis. **Confidence: HIGH** |
-| Vanilla JS + HTML | N/A | Timeline view | Build timeline with plain DOM/CSS. No framework needed for a single-page visualization. Keeps bundle tiny. Use CSS Grid + custom elements for the timeline layout. **Confidence: HIGH** |
-
-**Why not a frontend framework (React/Vue/Svelte)?** This is a localhost developer tool, not a web app. The UI is a knowledge graph and a timeline -- two visualizations, not a complex interactive application. A framework adds build complexity, bundle size, and startup time for zero benefit. Ship HTML + JS + CSS. If complexity grows later, Preact (3KB) is the escape hatch.
-
-### Build & Development Tools
-
-| Tool | Version | Purpose | Notes |
-|------|---------|-------|-------|
-| tsdown | ^0.20 | TypeScript bundler | Successor to tsup (which is no longer maintained). Built on Rolldown (Rust). ESM-first. Zero config. Outputs ESM + CJS with type declarations. Handles the plugin's TypeScript compilation. **Confidence: MEDIUM** -- tsdown is new (0.x) but actively developed. tsup 8.5 still works if tsdown proves unstable. |
-| vitest | ^4.0 | Testing | Next-gen testing powered by Vite. Out-of-box ESM + TypeScript. No config needed. Requires Node >=20. Fast parallel execution. **Confidence: HIGH** |
-| TypeScript | ~5.8 | Type checking | Use `tsc --noEmit` for type checking only. Let tsdown handle compilation. **Confidence: HIGH** |
-
-## Alternatives Considered
-
-| Recommended | Alternative | Why Not |
-|-------------|-------------|---------|
-| better-sqlite3 ^12.6 | node:sqlite (built-in) | node:sqlite requires Node 23.5.0+ (not LTS). API is less mature. Cannot load extensions yet (needed for sqlite-vec). Stick with better-sqlite3 until node:sqlite reaches parity in a future LTS. |
-| better-sqlite3 ^12.6 | @libsql/client | Async API adds overhead for local operations (better-sqlite3 is ~100x faster for countPostsByUser-type queries in benchmarks). libSQL's value is remote/edge sync which we don't need (local-first tool). |
-| better-sqlite3 ^12.6 | sql.js | WASM-based, 50-60% native performance. Only useful for browser/non-native environments. We're in Node.js -- use native. |
-| sqlite-vec ^0.1.7 | pgvector / Pinecone / Qdrant | External database servers. Violates "SQLite single-file" constraint. Massive overhead for a personal dev tool. |
-| sqlite-vec ^0.1.7 | sqlite-vss | Predecessor to sqlite-vec, based on Faiss. Heavier dependency. No longer in active development -- all effort goes to sqlite-vec. |
-| @huggingface/transformers ^3.8 | fastembed ^2.1 | fastembed-js was archived January 2026. Dead project. |
-| @huggingface/transformers ^3.8 | onnxruntime-node direct | Lower-level, requires manual tokenization and model loading. @huggingface/transformers wraps onnxruntime-node with proper tokenizers and model pipeline management. |
-| hono ^4.11 | express ^4.x / ^5.x | Express is 5x slower, larger footprint, callback-oriented API feels dated. Express 5 exists but Hono is better in every dimension for a minimal API server. |
-| hono ^4.11 | fastify ^5.x | Fastify is great for large APIs but heavier than Hono. Plugin architecture is overkill for a localhost visualization server with 5 routes. |
-| cytoscape ^3.33 | sigma.js | WebGL-based, faster for 10K+ nodes. But documentation is poor and our graphs are hundreds of nodes, not thousands. Cytoscape's built-in graph algorithms (PageRank, centrality) provide actual analytical value for finding important memories. |
-| cytoscape ^3.33 | vis.js | Beginner-friendly but order-of-magnitude slower than cytoscape in benchmarks. |
-| cytoscape ^3.33 | d3.js | Maximum flexibility but maximum effort. D3 is a visualization toolkit, not a graph library. Cytoscape gives you graph-specific features out of the box. |
-| tsdown ^0.20 | tsup ^8.5 | tsup is no longer actively maintained. Recommends tsdown as successor. |
-| tsdown ^0.20 | esbuild direct | Lower-level, no TypeScript declaration generation, no zero-config experience. tsdown wraps Rolldown (which is faster than esbuild) with sensible defaults. |
-| Vanilla JS | React / Vue / Svelte | Framework overhead for a 2-view visualization tool is unjustifiable. Adds build pipeline complexity. HTML + Cytoscape + vanilla JS is sufficient. |
-| vitest ^4.0 | jest | Vitest is faster, native ESM/TypeScript, no config. Jest requires transforms for ESM/TS. No reason to use Jest in a new 2026 project. |
-
-## What NOT to Use
-
-| Avoid | Why | Use Instead |
-|-------|-----|-------------|
-| fastembed / fastembed-js | Archived January 2026. No longer maintained. Depends on dead upstream. | @huggingface/transformers ^3.8 |
-| sqlite-vss | Deprecated in favor of sqlite-vec. Based on Faiss (heavy C++ dependency). | sqlite-vec ^0.1.7 |
-| Python anything | Constraint: "No Python." fastembed Python, sentence-transformers, etc. are out. | Node.js-native alternatives |
-| Bun | Constraint: "No Bun." Also, Claude Code runs on Node.js. | Node.js 22 LTS |
-| Express | Slow, large, outdated API design. No reason to use it in 2026 for a new project. | hono ^4.11 |
-| Electron / Tauri | Out of scope per PROJECT.md. Browser-based web UI keeps it simple. | hono + browser |
-| Heavy ML frameworks (PyTorch, TensorFlow.js) | Violates lightweight constraint. GB-scale dependencies. This is what made Engram heavy. | @huggingface/transformers (ONNX) |
-| React / Vue / Angular | Overkill for 2 visualization views on localhost. Adds 50-200KB+ and build complexity. | Vanilla JS + Cytoscape |
-| node:sqlite | Requires Node 23.5+ (not LTS). Cannot load extensions. Immature API. | better-sqlite3 ^12.6 |
-| @libsql/client | Async overhead for local ops. Remote sync not needed. | better-sqlite3 ^12.6 |
-
-## Stack Patterns by Variant
-
-**If MCP SDK v2 ships stable during development:**
-- Migrate from `@modelcontextprotocol/sdk` to `@modelcontextprotocol/server`
-- Smaller install, cleaner imports, same API concepts
-- Because: v1 will get 6+ months of patches, but v2 is the future
-
-**If sqlite-vec alpha proves too unstable:**
-- Use raw SQLite BLOB columns with manual cosine similarity in SQL
-- Store float32 vectors as BLOBs, compute `vec_distance_cosine()` equivalent with a custom SQL function registered via better-sqlite3
-- Because: sqlite-vec's core value is the virtual table abstraction and SIMD acceleration. For small datasets (<100K vectors), brute-force cosine in SQL is acceptable
-
-**If @huggingface/transformers is too heavy at startup:**
-- Lazy-load the embedding pipeline only when first needed
-- Use Claude piggyback strategy as primary during active sessions
-- Fall back to batch ONNX inference during idle periods
-- Because: the ONNX runtime is ~50MB of native binaries. Lazy loading eliminates startup cost
-
-**If tsdown 0.x proves unstable:**
-- Fall back to tsup ^8.5 (still works, just not actively maintained)
-- Or use esbuild directly with a thin build script
-- Because: tsdown is 0.x software. Having a fallback is prudent
-
-## Version Compatibility
-
-| Package A | Compatible With | Notes |
-|-----------|-----------------|-------|
-| better-sqlite3 ^12.6 | Node.js 22 LTS | Prebuilt binaries available for LTS versions |
-| better-sqlite3 ^12.6 | sqlite-vec ^0.1.7 | Load via `db.loadExtension()`. sqlite-vec npm package provides the compiled extension. |
-| @modelcontextprotocol/sdk ^1.26 | zod ^4.3 (v4) | SDK imports from `zod/v4`. Backwards compatible with Zod v3.25+. |
-| @huggingface/transformers ^3.8 | onnxruntime-node ^1.24 | Transformers.js uses ONNX Runtime under the hood. onnxruntime-node is a transitive dependency. |
-| @huggingface/transformers ^3.8 | Node.js 22 LTS | ESM + CJS both supported |
-| hono ^4.11 | @hono/node-server ^1.x | Required adapter for Node.js. Uses Web Standard APIs from Node 18+. |
-| vitest ^4.0 | Node.js >=20 | Requires Vite >=6. Node 22 LTS satisfies this. |
-| tsdown ^0.20 | TypeScript ~5.8 | Built on Rolldown (Rust). Handles TS compilation and bundling. |
-| cytoscape ^3.33 | Any modern browser | Canvas-based rendering. No WebGL required (unlike sigma.js). |
-
-## Installation
-
-```bash
-# Core runtime + MCP
-npm install @modelcontextprotocol/sdk zod better-sqlite3 sqlite-vec
-
-# Web server
-npm install hono @hono/node-server
-
-# Embedding (lazy-loaded, but install upfront)
-npm install @huggingface/transformers
-
-# Visualization (served as static assets, not bundled server-side)
-# cytoscape loaded via <script> tag or bundled into web UI assets
-
-# Dev dependencies
-npm install -D typescript @types/better-sqlite3 tsdown vitest
+function readConfigSafe<T>(path: string, schema: z.ZodType<T>): T | null {
+  try {
+    const raw = readFileSync(path, 'utf-8');
+    return schema.parse(JSON.parse(raw));
+  } catch {
+    return null; // File missing or invalid -- graceful degradation
+  }
+}
 ```
 
-## Architecture Implications
+**Why NOT use chokidar/fs.watch for file watching:** Config files change rarely (user edits settings, installs a plugin). Laminark already reads config at startup via SessionStart hook. Re-reading on each SessionStart is sufficient. File watching adds complexity and resource overhead for zero benefit in a tool that restarts each session.
 
-1. **Single process, multiple concerns:** The plugin runs as one Node.js process serving both MCP (stdio) and web UI (HTTP on localhost). Hono's lightweight footprint makes this viable without bloat.
+**Confidence: HIGH** -- Verified against live system files at `/home/matthew/.claude/settings.json`, `/home/matthew/.claude.json`, `/home/matthew/.claude/plugins/installed_plugins.json`, and official Claude Code docs.
 
-2. **Synchronous database, async everything else:** better-sqlite3's sync API is intentional -- SQLite queries complete in microseconds on local disk. The async overhead of libSQL/node-sqlite3 adds latency for zero benefit in a local tool. Use sync for DB, async for HTTP and embedding inference.
+### 2. Tool Name Parsing & Scope Detection
 
-3. **Lazy embedding initialization:** @huggingface/transformers downloads and caches models on first use (~23MB for BGE Small). Initialize the pipeline lazily on first semantic operation, not at plugin startup. This keeps startup instant.
+**Decision:** Pattern-match tool_name strings using a deterministic prefix taxonomy. No external library needed.
 
-4. **Static web assets:** The visualization UI is plain HTML/JS/CSS served by Hono's static middleware. No build step needed for the frontend. Cytoscape loaded from a local copy or CDN fallback.
+**Tool naming taxonomy discovered from official docs + live observation (HIGH confidence):**
 
-5. **Plugin lifecycle:** Claude Code plugins use `.mcp.json` for MCP server config (stdio transport) and `hooks/hooks.json` for event hooks (PostToolUse, SessionStart, SessionEnd, etc.). The plugin structure is: `.claude-plugin/plugin.json` (manifest), `.mcp.json` (MCP config), `hooks/` (event handlers), `skills/` (slash commands), `commands/` (user commands).
+| Pattern | Scope | Example | Source |
+|---------|-------|---------|--------|
+| No prefix (bare name) | Built-in | `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `Task`, `WebFetch`, `WebSearch` | Claude Code core |
+| `mcp__{server}__{tool}` | Project MCP (.mcp.json) or User MCP (~/.claude.json) | `mcp__laminark__recall`, `mcp__github__search_repositories` | .mcp.json or ~/.claude.json mcpServers |
+| `mcp__plugin_{marketplace}_{plugin}__{tool}` | Plugin MCP | `mcp__plugin_laminark_laminark__status` | Plugin .mcp.json |
+
+**Critical finding:** The `tool_name` field in PostToolUse hook payloads uses these exact patterns. There is no `tool_scope` or `tool_source` field in the payload. Scope must be inferred from the tool_name prefix.
+
+**Implementation pattern:**
+
+```typescript
+interface ToolProvenance {
+  scope: 'builtin' | 'project-mcp' | 'user-mcp' | 'plugin-mcp';
+  serverName: string | null;     // e.g., 'laminark', 'github'
+  toolName: string;              // e.g., 'recall', 'search_repositories'
+  marketplace: string | null;    // e.g., 'laminark' (for plugin scope)
+  pluginName: string | null;     // e.g., 'laminark' (for plugin scope)
+}
+
+const BUILTIN_TOOLS = new Set([
+  'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep',
+  'Task', 'WebFetch', 'WebSearch', 'MCPSearch',
+]);
+
+function parseToolProvenance(toolName: string): ToolProvenance {
+  // Built-in tools: no prefix
+  if (BUILTIN_TOOLS.has(toolName)) {
+    return { scope: 'builtin', serverName: null, toolName, marketplace: null, pluginName: null };
+  }
+
+  // Plugin MCP: mcp__plugin_{marketplace}_{plugin}__{tool}
+  const pluginMatch = toolName.match(/^mcp__plugin_([^_]+)_([^_]+)__(.+)$/);
+  if (pluginMatch) {
+    return {
+      scope: 'plugin-mcp',
+      serverName: `${pluginMatch[1]}_${pluginMatch[2]}`,
+      toolName: pluginMatch[3],
+      marketplace: pluginMatch[1],
+      pluginName: pluginMatch[2],
+    };
+  }
+
+  // Regular MCP: mcp__{server}__{tool}
+  const mcpMatch = toolName.match(/^mcp__([^_]+)__(.+)$/);
+  if (mcpMatch) {
+    return {
+      scope: 'project-mcp', // Disambiguated later via config file lookup
+      serverName: mcpMatch[1],
+      toolName: mcpMatch[2],
+      marketplace: null,
+      pluginName: null,
+    };
+  }
+
+  // Unknown -- treat as external
+  return { scope: 'builtin', serverName: null, toolName, marketplace: null, pluginName: null };
+}
+```
+
+**Disambiguation note:** To distinguish `project-mcp` from `user-mcp` for regular MCP tools (`mcp__{server}__{tool}`), check whether the server name exists in the project's `.mcp.json` vs `~/.claude.json`. This is the only case requiring config file lookup at tool-capture time.
+
+**Confidence: HIGH** -- Verified tool naming from:
+- Live system SKILL.md referencing `mcp__plugin_laminark_laminark__status`
+- Official docs showing `mcp__memory__create_entities` pattern
+- Hook handler code that matches `mcp__laminark__` prefix
+- Official hook reference confirming `tool_name` field in PostToolUse payloads
+
+### 3. Tool Registry (New SQLite Table)
+
+**Decision:** Add a `tool_registry` table to the existing Laminark SQLite database via the migration system.
+
+**Schema:**
+
+```sql
+CREATE TABLE tool_registry (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tool_name TEXT NOT NULL,          -- Full tool_name as seen in hooks (e.g., 'mcp__github__search_repositories')
+  canonical_name TEXT NOT NULL,     -- Just the tool part (e.g., 'search_repositories')
+  scope TEXT NOT NULL,              -- 'builtin' | 'project-mcp' | 'user-mcp' | 'plugin-mcp'
+  server_name TEXT,                 -- MCP server name (null for builtins)
+  project_hash TEXT,                -- NULL for global tools, project_hash for project-scoped
+  first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+  use_count INTEGER NOT NULL DEFAULT 0,
+  metadata TEXT DEFAULT '{}'        -- JSON: description, marketplace, plugin name, etc.
+);
+
+CREATE UNIQUE INDEX idx_tool_registry_name_project
+  ON tool_registry(tool_name, project_hash);
+CREATE INDEX idx_tool_registry_scope
+  ON tool_registry(scope);
+CREATE INDEX idx_tool_registry_server
+  ON tool_registry(server_name);
+```
+
+**Why this belongs in the existing SQLite database:**
+- WAL mode already handles concurrent access from hook handler + MCP server
+- Migration system already exists (`src/storage/migrations.ts`)
+- Same `project_hash` scoping pattern used by observations, sessions, graph tables
+- No new connection management needed
+
+**Integration with existing code:** New migration (version 16) in `MIGRATIONS` array. New `ToolRegistryRepository` class following the same pattern as `ObservationRepository`.
+
+**Confidence: HIGH** -- This is a straightforward extension of the existing storage pattern.
+
+### 4. Global Installation Configuration
+
+**Decision:** Laminark transitions from project-scoped (.mcp.json) to user-scoped plugin installation. The plugin system handles this.
+
+**Current state (project-scoped):**
+- `.mcp.json` in project root defines the MCP server
+- Hook handler runs from project-relative path
+- Tool names appear as `mcp__laminark__*`
+
+**Target state (global plugin):**
+- Plugin installed via marketplace to `~/.claude/plugins/cache/laminark/`
+- Enabled in `~/.claude/settings.json` -> `enabledPlugins`
+- MCP server defined in `.claude-plugin/plugin.json` or plugin `.mcp.json`
+- Hooks defined in plugin `hooks/hooks.json`
+- Tool names appear as `mcp__plugin_laminark_laminark__*`
+
+**Changes required to existing files:**
+
+| File | Change | Rationale |
+|------|--------|-----------|
+| `.claude-plugin/plugin.json` | Add `mcpServers` or reference `.mcp.json` | Plugin system auto-starts MCP servers when plugin is enabled |
+| `.claude-plugin/plugin.json` | Add `hooks` field referencing hooks config | Plugin hooks merge with user/project hooks automatically |
+| `hooks/hooks.json` (new) | Move hook config from project `.claude/settings.json` to plugin | Hooks travel with the plugin, not with each project |
+| `src/hooks/handler.ts` | Update self-referential filter prefix | Change from `mcp__laminark__` to `mcp__plugin_laminark_laminark__` |
+| `src/shared/config.ts` | Use `${CLAUDE_PLUGIN_ROOT}` for paths | Plugin runs from cache dir, not project root |
+| `skills/status/SKILL.md` | Already references `mcp__plugin_laminark_laminark__status` | Already correct for plugin scope |
+
+**Plugin `.mcp.json` format for global installation:**
+
+```json
+{
+  "mcpServers": {
+    "laminark": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"],
+      "env": {}
+    }
+  }
+}
+```
+
+**Hook migration for global scope:**
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Critical constraint discovered:** Plugin MCP servers start automatically when the plugin is enabled, but "you must restart Claude Code to apply MCP server changes (enabling or disabling)." This means installing/enabling the plugin requires a Claude Code restart -- acceptable for a one-time setup.
+
+**Confidence: HIGH** -- Verified from official plugin docs, live `installed_plugins.json`, `known_marketplaces.json`, and the working `frontend-design` plugin structure.
+
+### 5. Conversation-Driven Routing
+
+**Decision:** Extend the SessionStart context injection (`src/context/injection.ts`) to include tool-awareness context. Extend PostToolUse hook to update tool registry.
+
+**What "routing" means in this context:**
+1. At SessionStart, inject context about what tools are available and recently used
+2. During conversation, the hook handler tags each observation with tool provenance
+3. When recalling memories, weight results by tool relevance to current conversation
+4. The MCP `recall` tool gets an optional `scope` filter parameter
+
+**No new technology needed.** This is:
+- Extending the existing `assembleSessionContext()` function to query the tool registry
+- Adding a `scope` parameter to the existing `recall` MCP tool's Zod input schema
+- Modifying `processPostToolUseFiltered()` to upsert tool registry entries
+
+**Implementation touches:**
+
+| Existing File | Change |
+|---------------|--------|
+| `src/context/injection.ts` | Add "Available tools" section to context output |
+| `src/hooks/handler.ts` | Call `toolRegistry.upsert()` on each PostToolUse event |
+| `src/mcp/tools/recall.ts` | Add optional `scope` filter to search |
+| `src/storage/observations.ts` | Add `tool_scope` column or tag in metadata |
+
+**Confidence: HIGH** -- This builds directly on existing patterns.
+
+### 6. Config File Scope Resolution
+
+**Decision:** Implement a `ConfigResolver` class that reads all Claude Code config files and merges them according to the documented precedence hierarchy.
+
+**Precedence (highest to lowest, from official docs):**
+1. Managed settings (`/etc/claude-code/managed-settings.json` on Linux)
+2. Local settings (`.claude/settings.local.json`)
+3. Project settings (`.claude/settings.json`)
+4. User settings (`~/.claude/settings.json`)
+
+**MCP server scope resolution:**
+1. Local scope: `~/.claude.json` under project path key
+2. Project scope: `.mcp.json` in project root
+3. User scope: `~/.claude.json` top-level `mcpServers`
+4. Plugin scope: plugin `.mcp.json` files
+
+**What Laminark needs from config resolution:**
+- List of enabled plugins (to know what plugin MCP tools to expect)
+- List of MCP servers per scope (to disambiguate `mcp__{server}__` tool names)
+- Project path (from `cwd` in hook payload, already available)
+
+**Implementation:** Single `ConfigResolver` class in `src/config/` that:
+1. Reads files once per session (SessionStart hook)
+2. Caches results in memory
+3. Provides `getServerScope(serverName, projectPath): 'local' | 'project' | 'user' | 'plugin'`
+4. Provides `getEnabledPlugins(): string[]`
+5. Provides `getAllMcpServers(projectPath): Map<string, {scope, config}>`
+
+**Why a class, not individual functions:** The config files are read once and cached. A class encapsulates the cache lifetime with the session lifetime. When the hook handler creates a `ConfigResolver`, it reads all files once. The MCP server process can also create one at startup.
+
+**Confidence: HIGH** -- All file paths and formats verified from live system.
+
+## Integration Map: Existing Code -> New Code
+
+```
+EXISTING                              NEW
+-------                               ---
+src/hooks/handler.ts                  src/config/resolver.ts (ConfigResolver)
+  |-- processPostToolUseFiltered()      |-- reads all Claude Code config files
+  |     NOW: captures observations      |-- caches per session
+  |     ADD: upserts tool registry      |-- resolves server -> scope mapping
+  |                                     |
+  |-- handleSessionStart()            src/storage/tool-registry.ts (ToolRegistryRepository)
+        NOW: assembles context            |-- upsert(), getByProject(), getByScope()
+        ADD: queries tool registry        |-- migration 16 adds table
+        ADD: reads config resolver        |
+                                      src/hooks/tool-provenance.ts (parseToolProvenance)
+src/context/injection.ts                |-- parses tool_name into scope/server/tool
+  NOW: recent changes, decisions        |-- uses ConfigResolver for disambiguation
+  ADD: tool landscape section
+                                      .claude-plugin/plugin.json (updated)
+src/mcp/tools/recall.ts                 |-- mcpServers config for global install
+  NOW: search by text/vector            |-- hooks reference
+  ADD: optional scope filter
+                                      hooks/hooks.json (new)
+src/storage/migrations.ts                |-- hook config for plugin distribution
+  ADD: migration 16 (tool_registry)
+```
+
+## What NOT to Add
+
+| Temptation | Why Avoid | What to Do Instead |
+|------------|-----------|-------------------|
+| chokidar / fs.watch for config watching | Config changes are rare. Adds dependency + complexity. | Re-read configs at SessionStart (once per session) |
+| A separate config database | Over-engineering. Config is static within a session. | In-memory cache in ConfigResolver, populated from JSON files |
+| Tool description scraping via MCP | MCP list_tools is available only to the MCP client (Claude Code), not to MCP servers. Laminark is a server. | Extract descriptions from tool_response metadata if available, or from config files |
+| Dynamic plugin scanning | Claude Code already manages plugin lifecycle. Don't duplicate. | Read `installed_plugins.json` and `enabledPlugins` from settings |
+| WebSocket/IPC for tool change notifications | Adds complexity. Tool lists change only when user installs/uninstalls. | Refresh registry at SessionStart |
+| npm package for JSON schema validation of Claude Code configs | Zod (already installed) does this. Claude Code has no published JSON schemas for config files. | Define Zod schemas inline |
+| A process manager for the MCP server | Claude Code plugin system manages process lifecycle (start on enable, stop on disable) | Trust the plugin system |
+
+## Migration Path: Project -> Global
+
+The transition from project-scoped to global plugin must be backwards-compatible:
+
+**Phase 1 (this milestone):** Support both install modes
+- Plugin `.mcp.json` uses `${CLAUDE_PLUGIN_ROOT}` for paths (works in both contexts)
+- Hook handler detects both `mcp__laminark__` and `mcp__plugin_laminark_laminark__` prefixes for self-referential filtering
+- `getConfigDir()` already resolves to `~/.claude/plugins/cache/laminark/data/` (correct for global)
+- `getProjectHash(process.cwd())` already scopes data per project (correct for global)
+
+**Phase 2 (documentation):** Update marketplace and README
+- Remove `.mcp.json` from project root in favor of plugin installation
+- Publish to marketplace for `claude plugin install laminark@laminark`
+
+**Key insight:** The existing database path (`~/.claude/plugins/cache/laminark/data/data.db`) is already global-scoped. The `project_hash` column in every table already provides per-project isolation. The global database with project scoping is the correct architecture -- no database migration needed for the global/project transition.
+
+## Version Requirements
+
+| Component | Current Version | Required Changes | Version Change |
+|-----------|----------------|------------------|----------------|
+| Node.js | >=22.0.0 | None | Same |
+| @modelcontextprotocol/sdk | ^1.26.0 | None | Same |
+| better-sqlite3 | ^12.6.2 | None (new table only) | Same |
+| zod | ^4.3.6 | None (new schemas only) | Same |
+| typescript | ^5.9.3 | None | Same |
+| hono | ^4.11.9 | None | Same |
+
+**Zero dependency additions. Zero version bumps.**
 
 ## Sources
 
-- [Claude Code Plugin Docs](https://code.claude.com/docs/en/plugins) -- Plugin structure, hooks, MCP integration (HIGH confidence)
-- [Claude Code Hooks Reference](https://code.claude.com/docs/en/hooks) -- PostToolUse, SessionStart, notification hooks (HIGH confidence)
-- [MCP TypeScript SDK GitHub](https://github.com/modelcontextprotocol/typescript-sdk) -- v1.26.0, v2 roadmap, split packages (HIGH confidence)
-- [MCP SDK npm](https://www.npmjs.com/package/@modelcontextprotocol/sdk) -- v1.26.0 latest (HIGH confidence)
-- [better-sqlite3 npm](https://www.npmjs.com/package/better-sqlite3) -- v12.6.2 latest (HIGH confidence)
-- [sqlite-vec GitHub](https://github.com/asg017/sqlite-vec) -- v0.1.7-alpha.2, pure C, zero deps (MEDIUM confidence -- alpha)
-- [sqlite-vec Node.js docs](https://alexgarcia.xyz/sqlite-vec/js.html) -- Node.js integration, loadExtension() API (MEDIUM confidence)
-- [SQLite FTS5 docs](https://www.sqlite.org/fts5.html) -- BM25, external content tables (HIGH confidence)
-- [fastembed-js GitHub](https://github.com/Anush008/fastembed-js) -- Archived January 15, 2026 (HIGH confidence)
-- [@huggingface/transformers npm](https://www.npmjs.com/package/@huggingface/transformers) -- v3.8.1, ONNX Runtime, 1200+ models (HIGH confidence)
-- [SQLite Driver Benchmark](https://sqg.dev/blog/sqlite-driver-benchmark) -- better-sqlite3 vs libSQL vs node:sqlite performance (MEDIUM confidence)
-- [Hono.js](https://hono.dev/) -- v4.11.9, 14KB, Web Standards, 3.5x faster than Express (HIGH confidence)
-- [Cytoscape.js](https://js.cytoscape.org/) -- v3.33.1, graph theory library, built-in algorithms (HIGH confidence)
-- [Graph Library Comparison](https://memgraph.com/blog/you-want-a-fast-easy-to-use-and-popular-graph-visualization-tool) -- Cytoscape vs sigma vs vis.js benchmarks (MEDIUM confidence)
-- [Vitest](https://vitest.dev/) -- v4.0.18, Vite-powered, native ESM+TS (HIGH confidence)
-- [tsdown GitHub](https://github.com/rolldown/tsdown) -- v0.20.3, Rolldown-powered, tsup successor (MEDIUM confidence -- 0.x)
-- [tsup GitHub](https://github.com/egoist/tsup) -- v8.5.1, no longer actively maintained (HIGH confidence)
-- [Node.js 22 LTS](https://nodejs.org/en/about/previous-releases) -- Active LTS until April 2027 (HIGH confidence)
-- [TypeScript 5.8](https://devblogs.microsoft.com/typescript/announcing-typescript-5-8/) -- Erasable syntax, ESM require() support (HIGH confidence)
-- [Zod v4](https://zod.dev/v4) -- v4.3.6, 2kb core, 57% smaller than v3 (HIGH confidence)
+- [Claude Code MCP Documentation](https://code.claude.com/docs/en/mcp) -- MCP scopes, tool search, plugin MCP servers (HIGH confidence, fetched 2026-02-10)
+- [Claude Code Plugins Reference](https://code.claude.com/docs/en/plugins-reference) -- Plugin manifest schema, MCP server bundling, hooks config, skills (HIGH confidence, fetched 2026-02-10)
+- [Claude Code Hooks Reference](https://code.claude.com/docs/en/hooks) -- All hook events, payload schemas, tool_name patterns, MCP tool matching (HIGH confidence, fetched 2026-02-10)
+- [Claude Code Settings](https://code.claude.com/docs/en/settings) -- Settings file locations, precedence, MCP config, permissions (HIGH confidence, fetched 2026-02-10)
+- Live system files at `/home/matthew/.claude/settings.json`, `/home/matthew/.claude/settings.local.json`, `/home/matthew/.claude.json`, `/home/matthew/.claude/plugins/installed_plugins.json`, `/home/matthew/.claude/plugins/known_marketplaces.json` -- Actual Claude Code config structure (HIGH confidence, direct observation)
+- Live Laminark codebase at `/data/Laminark/` -- Existing architecture, hook handler, MCP server, database schema (HIGH confidence, direct observation)
+- Plugin structure comparison: `frontend-design@claude-code-plugins` and `clangd-lsp@claude-plugins-official` installed plugins (HIGH confidence, direct observation)
 
 ---
-*Stack research for: Laminark -- Claude Code persistent adaptive memory plugin*
-*Researched: 2026-02-08*
+*Stack research for: Laminark V2 -- Global Tool Discovery & Routing Milestone*
+*Researched: 2026-02-10*
+*Result: Zero new dependencies. Pure architectural changes to existing codebase.*

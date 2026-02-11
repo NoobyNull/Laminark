@@ -1,319 +1,519 @@
-# Pitfalls Research
+# Domain Pitfalls
 
-**Domain:** Claude Code persistent memory plugin with adaptive topic detection, knowledge graph, and web visualization
-**Researched:** 2026-02-08
-**Confidence:** HIGH (multiple verified sources, direct predecessor post-mortem data, SQLite official docs)
+**Domain:** Adding global tool discovery, scope-aware registry, and conversation-driven routing to an existing Claude Code MCP plugin (Laminark V2)
+**Researched:** 2026-02-10
+**Confidence:** HIGH (grounded in official Claude Code docs, Laminark source analysis, and documented ecosystem bugs)
+
+---
 
 ## Critical Pitfalls
 
-### Pitfall 1: Indiscriminate Memory Storage ("Remember Everything" Trap)
-
-**What goes wrong:**
-The system stores every observation, conversation fragment, and tool output without filtering for quality or relevance. The memory database bloats rapidly. Worse, storing low-value or erroneous observations degrades retrieval quality -- the agent starts pulling back noise instead of signal. Harvard D3 Institute research shows that "add-all" strategies perform worse than having no memory at all, because incorrect or irrelevant memories propagate errors in downstream reasoning.
-
-**Why it happens:**
-It feels safer to capture everything than risk losing something important. The "never lose context" mission gets misinterpreted as "store every byte." Early-stage testing uses small datasets where bloat is invisible. Engram's viral success came from the concept of total recall, creating pressure to save aggressively.
-
-**How to avoid:**
-Implement selective memory admission from day one. Every observation passes through a quality gate before storage:
-- Relevance score (does this relate to active work?)
-- Novelty check (is this genuinely new information, or a rephrasing?)
-- Utility-based retention (how likely is this to be useful in future retrieval?)
-Use retrieval-history-based deletion: memories that are never retrieved after N retrievals of their neighbors get pruned. Research shows this yields up to 10% performance gains over naive strategies.
-
-**Warning signs:**
-- Database size growing faster than linearly with session count
-- Search results returning obviously irrelevant observations
-- Retrieval latency increasing session-over-session
-- Memory search returning near-duplicate entries
-
-**Phase to address:**
-Phase 1 (Core Storage). The admission policy must be part of the storage layer from the start. Retrofitting filtering onto an already-bloated database requires a full reindex.
+Mistakes that cause rewrites, data corruption, or fundamentally broken user experiences.
 
 ---
 
-### Pitfall 2: Embedding Strategy Lock-in and Migration Hell
+### Pitfall 1: Ghost Tool Suggestions (Recommending Unavailable Tools)
 
-**What goes wrong:**
-You pick an embedding model, store thousands of vectors, then need to change models (better model released, licensing changes, performance issues). Every existing vector is now incompatible with the new model's embedding space. Switching models requires a full reindex of all stored memories -- which can be slow, expensive, and risks data loss if the original text was discarded or compressed.
+**What goes wrong:** The routing system suggests a tool that is not actually available in the current session's resolved scope. Claude attempts to call it and gets a "No such tool available" error, wasting a turn and confusing the user.
 
-Research on "query drift compensation" confirms this is a fundamental problem: embeddings from different model versions are mathematically incompatible, and failing to reindex produces silently incorrect search results.
+**Why it happens:** Tool availability is session-specific and depends on an intersection of scopes: built-in tools are always present, user-scope MCP servers from `~/.claude.json` apply across projects, project-scope servers from `.mcp.json` apply only in that project, and team settings from `.claude/settings.json` add more. If Laminark's registry caches a tool discovered in Project A and then suggests it in Project B where that tool's MCP server is not configured, it becomes a ghost tool.
 
-**Why it happens:**
-Embeddings feel like an implementation detail, so developers store only vectors without the metadata needed for migration. The pluggable embedding strategy (a stated Laminark requirement) makes this worse -- the system explicitly supports multiple models, increasing the likelihood of model switches.
+**Laminark-specific risk:** Laminark currently stores all data in a single SQLite database with `project_hash` scoping. The knowledge graph and observations are already scoped. But a tool registry that stores "tool X exists" without also storing "tool X is available in scope Y" will leak tools across projects. The current `getProjectHash(process.cwd())` pattern (line 43 of `src/index.ts`) correctly scopes observations, but tool availability is more nuanced -- a user-scope MCP server is available in ALL projects, while a project-scope one is not.
 
-**How to avoid:**
-- Always store the original text alongside vectors. Vectors are derived, text is primary.
-- Store embedding model identifier and version with every vector row.
-- Design the schema so reindexing is a background operation that does not block reads.
-- Build a reindex command from day one (not as an afterthought).
-- Consider storing multiple embedding representations per observation if cost permits.
+**Consequences:**
+- Claude wastes API turns on failed tool calls
+- User loses trust in Laminark's recommendations quickly (one ghost suggestion is enough)
+- The routing memory learns from failed calls, polluting its pattern data
 
-**Warning signs:**
-- Schema has vector columns but no model version column
-- No CLI/API command for reindexing
-- Original text has been lossy-compressed or discarded to save space
-- Tests pass with hardcoded embeddings rather than live model inference
+**Prevention:**
+- Tool registry must store scope metadata: `{ tool_name, server_name, scope: 'built_in' | 'user' | 'project' | 'local', project_hash?: string }`
+- At suggestion time, compute the available tool set: `built_in UNION user_scope UNION project_scope(current_hash) UNION local_scope(current_hash)`
+- NEVER suggest a tool unless it passes the availability check
+- Add a "staleness" flag: re-validate tool availability on SessionStart, mark stale tools as unavailable until re-confirmed
 
-**Phase to address:**
-Phase 1 (Core Storage) for schema design. Phase 2 (Embedding Strategy) for the reindex pipeline. The schema must accommodate migration before any vectors are written.
+**Detection (warning signs):**
+- Any tool suggestion that does not pass through an availability filter
+- Registry queries that do not include `project_hash` or scope filtering
+- Tests that verify tool suggestions without mocking a specific project context
 
----
-
-### Pitfall 3: Context Window Poisoning from Memory Injection
-
-**What goes wrong:**
-The MCP memory tools inject too many tokens into Claude's context window. A `read_graph()` or broad `search()` call dumps 10k-15k+ tokens of memory into context before the user's actual work begins. This burns through the 200k token window, reduces Claude's effective working memory for the current task, and can degrade response quality by flooding the model with tangentially relevant information.
-
-Claude Code's own team had to build Tool Search (January 2026) specifically because MCP tools were consuming 51k tokens before any conversation started. The claude-mem project addresses this with a 3-layer workflow (search index -> timeline -> full details) achieving 10x token efficiency.
-
-**Why it happens:**
-Developers build memory retrieval for completeness rather than precision. The natural instinct is "give Claude everything it might need." Graph-based retrieval is especially prone to this -- following edges pulls in increasingly distant nodes. Without token budgets, a single memory query can return an entire conversation history.
-
-**How to avoid:**
-- Implement the 3-layer progressive retrieval pattern: (1) lightweight index search returning IDs and titles (~50-100 tokens per result), (2) targeted timeline/context expansion, (3) full observation fetch only for confirmed-relevant items.
-- Set hard token budgets per memory injection (e.g., 500-2000 tokens max per retrieval).
-- Use `defer_loading: true` for memory tools so they do not inflate the initial context.
-- Return summaries by default, full content only on explicit drill-down.
-
-**Warning signs:**
-- Claude saying "I notice from my memory that..." about obviously irrelevant topics
-- Context window exhaustion after fewer than 30-40 tool uses
-- Users reporting Claude seems "distracted" or "unfocused" after memory loads
-- Memory search results consistently exceed 1000 tokens
-
-**Phase to address:**
-Phase 1 (MCP Tools) for the progressive retrieval API design. This is an architectural decision that cannot be bolted on later -- the tool signatures define the retrieval pattern.
+**Phase guidance:** Must be addressed in the registry design phase, before routing is built. Routing depends on a correct, scope-filtered tool set.
 
 ---
 
-### Pitfall 4: SQLite Corruption from Concurrent Session Access
+### Pitfall 2: Config File Format Confusion (MCP Servers vs Settings vs Hooks)
 
-**What goes wrong:**
-Multiple Claude Code sessions write to the same SQLite database simultaneously. Without proper WAL mode configuration and busy timeout handling, this produces "database is locked" errors, partial writes, or in worst cases, silent data corruption. The official SQLite documentation catalogs specific corruption vectors: file locking race conditions, WAL file separation from the database, and POSIX advisory lock cancellation when multiple file descriptors access the same file.
+**What goes wrong:** Laminark parses Claude Code config files assuming a single format, but Claude Code uses different formats and locations for different purposes. MCP servers, hooks, settings, and plugins each live in different files with different schemas.
 
-This is not hypothetical. The dev.to post-mortem on Claude Code concurrent sessions documents this exact failure mode: the official Memory MCP implementation lacked concurrent access support, causing data corruption during simultaneous writes.
+**Why it happens:** The Claude Code config landscape is genuinely confusing:
 
-**Why it happens:**
-Developers test with a single Claude Code session. Concurrent access only surfaces when users run multiple sessions (common workflow: one session for frontend, one for backend, one for tests). SQLite's WAL mode allows concurrent reads but still serializes writes. The subtlety is that WAL mode does not eliminate locking -- it makes it more granular and better-behaved, but `SQLITE_BUSY` still occurs.
+| File | Location | Contains | Format |
+|------|----------|----------|--------|
+| `~/.claude.json` | Home dir | User-scope MCP servers + local-scope MCP servers (per-project paths) | `{ "mcpServers": {...}, "projects": { "/path": { "mcpServers": {...} } } }` |
+| `~/.claude/settings.json` | Home .claude dir | Global hooks, preferences, enabledPlugins | `{ "hooks": {...}, "env": {...}, "enabledPlugins": [...] }` |
+| `~/.claude/settings.local.json` | Home .claude dir | Personal global overrides | Same as settings.json |
+| `.mcp.json` | Project root | Project-scope MCP servers | `{ "mcpServers": {...} }` |
+| `.claude/settings.json` | Project .claude dir | Team hooks, project preferences | `{ "hooks": {...} }` |
+| `.claude/settings.local.json` | Project .claude dir | Personal project overrides | Same as settings.json |
 
-**How to avoid:**
-- Enable WAL mode as the very first PRAGMA after opening the connection.
-- Set `busy_timeout` to at least 5000ms (prevents immediate failures under contention).
-- Use a single canonical file path for the database (no symlinks, no hardlinks -- different paths create separate WAL files and separate lock tracking, per SQLite docs).
-- Never access the database file directly while connections are open (no backup-by-copy, use the SQLite backup API or `VACUUM INTO`).
-- Run periodic WAL checkpoints to prevent unbounded WAL file growth.
-- Never fork a process with an open database connection.
-- Test with 3+ concurrent sessions from day one.
+The critical trap: `~/.claude.json` (MCP servers) vs `~/.claude/settings.json` (hooks/settings) look almost the same but serve completely different purposes. A documented bug (GitHub issue #4976) confirms even the official docs got this wrong.
 
-**Warning signs:**
-- `SQLITE_BUSY` errors in logs
-- WAL file growing beyond 10MB without checkpointing
-- `-shm` file lingering after all connections close
-- Different test runs producing different results (nondeterminism from race conditions)
+**Laminark-specific risk:** Laminark's current config reading is minimal -- `src/shared/config.ts` only reads `~/.laminark/config.json` for debug settings. Expanding to read Claude Code's config files means parsing 5-6 different files with 3 different schemas. If the parser treats `~/.claude.json` as having the same structure as `.mcp.json`, it will miss per-project server blocks inside the `"projects"` key.
 
-**Phase to address:**
-Phase 1 (Core Storage). The database initialization sequence must be correct from the first line of code. This is not fixable after deployment without risking existing user data.
+**Consequences:**
+- Missing tools (most config files parsed correctly, but one format misunderstood)
+- Runtime crashes from unexpected JSON structure
+- Silent data loss: tools exist in config but are not discovered
 
----
+**Prevention:**
+- Define explicit TypeScript interfaces for each config file format:
+  - `ClaudeJsonConfig` (for `~/.claude.json`): `{ mcpServers?: McpServers, projects?: Record<string, { mcpServers?: McpServers }> }`
+  - `SettingsConfig` (for `settings.json`): `{ hooks?: HooksConfig, enabledPlugins?: string[], env?: Record<string, string> }`
+  - `McpJsonConfig` (for `.mcp.json`): `{ mcpServers: McpServers }`
+- Validate with Zod schemas (already a dependency) -- fail loud on unexpected structure
+- Write a dedicated parser per file type, not a generic "read JSON and extract tools" function
+- Handle `${VAR}` and `${VAR:-default}` environment variable expansion in `.mcp.json` (Claude Code does this natively; Laminark must too)
 
-### Pitfall 5: Dependency Weight Creep (The Engram Lesson)
+**Detection (warning signs):**
+- A single `parseConfig()` function that handles all file types
+- No Zod/schema validation on parsed config objects
+- Tests that use a simplified config format instead of real-world examples
 
-**What goes wrong:**
-The plugin accumulates dependencies that make installation fragile, startup slow, and the package enormous. Engram's original stack included Bun + Python + ChromaDB before a rewrite. Native binary dependencies (like better-sqlite3, ONNX runtime, node-canvas) require compilation on install, which fails on machines without build toolchains. The plugin becomes the thing users spend more time debugging than using.
-
-Claude Code's own issue tracker documents multiple installation conflicts between npm-local and native binary installations (issue #10280), and MCP server failures on Windows from native dependency problems (issue #3369).
-
-**Why it happens:**
-Each dependency solves a real problem in isolation. better-sqlite3 is faster than node-sqlite3. ONNX gives local embeddings. A graph visualization library provides the UI. But each native dependency adds a compilation step, a platform matrix, and a failure mode. The decision is made feature-by-feature without tracking cumulative weight.
-
-**How to avoid:**
-- Maintain a strict dependency budget: count native dependencies (target: 0-1 for core, more acceptable for optional features).
-- Use Node.js built-in `node:sqlite` (available since Node 22) if it meets performance requirements, eliminating the better-sqlite3 native compilation requirement.
-- Make heavy dependencies optional: the embedding model should not block core save/search. If ONNX fails to install, fall back to keyword-only search.
-- Measure cold-start time in CI. Set a budget (e.g., <500ms to first tool availability). Fail the build if it regresses.
-- Separate the web UI into a lazy-loaded optional component -- users who only want MCP memory should not pay for visualization dependencies.
-
-**Warning signs:**
-- `npm install` takes longer than 30 seconds
-- Installation instructions include "if you get a build error, try..."
-- GitHub issues about installation failures on specific platforms
-- Package size exceeding 50MB
-- Startup time exceeding 1 second
-
-**Phase to address:**
-Phase 1 (Foundation). Dependency choices in Phase 1 compound through every subsequent phase. Switching from better-sqlite3 to node:sqlite in Phase 4 means revalidating all existing code.
+**Phase guidance:** Must be the first thing built in the discovery phase. Everything downstream depends on correct parsing.
 
 ---
 
-### Pitfall 6: Adaptive Threshold Over-Engineering
+### Pitfall 3: Silent Config Override (Last-Wins JSON Merging)
 
-**What goes wrong:**
-The adaptive topic detection system becomes a complex ML pipeline that is impossible to debug, tune, or explain. The "adaptive per-user, per-session thresholds" requirement sounds elegant but creates a system where the threshold behaves unpredictably -- sometimes stashing context too aggressively (user loses their train of thought), sometimes not stashing at all (memory fills with noise). Users cannot understand why the system made a particular decision, eroding trust.
+**What goes wrong:** When `~/.claude.json` contains multiple `mcpServers` sections (e.g., from merging JSON incorrectly), only the last section takes effect. This is a documented Claude Code bug (GitHub issue #4938). Laminark's parser must handle this the same way Claude Code does, or tool discovery will disagree with what Claude Code actually loads.
 
-Research on dynamic topic detection confirms: topics show "consistent instability with words moving from one topic to another depending on algorithm setup." Short-text topic modeling is especially brittle due to data sparsity, slang, and insufficient word co-occurrence.
+**Why it happens:** JSON does not support duplicate keys. When a JSON parser encounters duplicate keys at the same level, behavior is implementation-defined. Most JavaScript parsers (including `JSON.parse`) silently take the last value. If Laminark reads `~/.claude.json` and handles duplicate keys differently than Claude Code does, Laminark thinks tools exist that Claude Code has not loaded.
 
-**Why it happens:**
-"Adaptive" implies learning, which implies a model, which implies hyperparameters, which implies tuning. The developer builds an increasingly sophisticated system to handle edge cases, each addition making the overall behavior less predictable. The ADHD-pattern target user is especially sensitive to systems that behave inconsistently -- unpredictable tools get abandoned.
+**Laminark-specific risk:** Laminark uses `JSON.parse` (via Node.js built-in), which has last-wins behavior, matching Claude Code. However, if Laminark ever switches to a streaming JSON parser, Zod `.transform()`, or a JSONC parser, the behavior could diverge. Additionally, if Laminark tries to be "smarter" by merging duplicate sections, it would create ghost tools.
 
-**How to avoid:**
-- Start with a simple, deterministic threshold (e.g., cosine similarity drop > 0.3 between consecutive messages = topic shift). Ship this. Gather real usage data.
-- Add adaptivity incrementally: session-level moving average of similarity scores, then per-user baseline calibration. Each step must be explainable.
-- Always provide a manual override (slash command to force-stash or force-continue).
-- Log every threshold decision with the inputs that drove it, enabling post-hoc debugging.
-- Set bounds on adaptation: the threshold can adapt within [0.15, 0.6] but never outside that range, preventing runaway learning.
+**Consequences:**
+- Tool registry disagrees with Claude Code's actual loaded tools
+- Ghost tool suggestions (see Pitfall 1)
+- Extremely hard to debug -- the config file looks correct to humans
 
-**Warning signs:**
-- Cannot explain in one sentence why a particular stash decision was made
-- Topic detection accuracy varies wildly between test runs
-- The threshold tuning code is longer than the core memory storage code
-- Users reporting "it keeps interrupting me" or "it never catches topic changes"
+**Prevention:**
+- Use standard `JSON.parse` for all Claude Code config files (matches Claude Code's own behavior)
+- Never attempt to merge duplicate keys or "fix" malformed configs
+- Add a consistency check: after discovery, compare Laminark's tool list against what Claude Code reports via `list_changed` or `/mcp` output
+- Document that Laminark follows Claude Code's resolution semantics exactly, not its own interpretation
 
-**Phase to address:**
-Phase 2 (Topic Detection). But the architecture must support swappable detection strategies from Phase 1, so that the initial simple approach can be replaced without rewiring the storage layer.
+**Detection (warning signs):**
+- Custom JSON parsing logic beyond `JSON.parse`
+- Any code that "merges" or "deep-merges" config objects from the same file
+- Missing integration tests with real-world (potentially malformed) config files
 
----
-
-### Pitfall 7: Knowledge Graph Becoming an Unqueryable Hairball
-
-**What goes wrong:**
-The knowledge graph accumulates entities and relationships without structure or governance. Every noun becomes a node, every co-occurrence becomes an edge. Within weeks, the graph has thousands of nodes with dense, meaningless connections. Queries that traverse the graph pull back enormous subgraphs. The visualization becomes an unreadable mess of overlapping nodes. The graph provides no more insight than a flat search index but costs significantly more to maintain and query.
-
-**Why it happens:**
-Knowledge graph construction from unstructured text (conversation logs) is fundamentally harder than building graphs from structured data. Entity extraction from casual developer conversation is noisy -- "the thing," "that bug," "the PR" all refer to specific entities but require coreference resolution to link correctly. Without schema enforcement, the graph evolves organically into spaghetti.
-
-**How to avoid:**
-- Define a fixed entity type taxonomy from day one (e.g., Project, File, Decision, Problem, Solution, Tool, Person -- and nothing else).
-- Enforce relationship types (e.g., RELATES_TO, CAUSED_BY, SOLVED_BY, PART_OF). No free-form edges.
-- Implement entity merging: detect when "the API" and "our REST API" and "the backend endpoints" refer to the same entity.
-- Set a maximum node degree: if an entity has >50 edges, it is too generic and should be split or pruned.
-- Build graph maintenance (deduplication, pruning orphans, merging synonyms) as a background job, not a manual task.
-
-**Warning signs:**
-- Visualization requires zooming to see individual nodes
-- Most-connected nodes are generic terms ("code," "file," "bug," "error")
-- Graph queries return >100 nodes for simple lookups
-- Entity names are inconsistent (same concept with 5+ different node labels)
-
-**Phase to address:**
-Phase 3 (Knowledge Graph). But the entity extraction rules and type taxonomy must be designed before any graph construction begins. Migrating an untyped graph to a typed schema requires re-extracting every entity from source text.
+**Phase guidance:** Config parsing phase. Must match Claude Code's behavior exactly.
 
 ---
 
-## Technical Debt Patterns
+### Pitfall 4: Scope Precedence Inversion (Getting the Hierarchy Wrong)
 
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| Store vectors without model version metadata | Simpler schema, fewer columns | Full reindex required on any model change, with no way to do it incrementally | Never -- the version column costs nothing |
-| Skip WAL checkpointing | No maintenance code needed | WAL file grows unbounded, eventual disk exhaustion, degraded read performance | Never -- checkpoint on session close at minimum |
-| Hardcode embedding dimensions | Avoids dynamic tensor handling | Locked to one model family; changing to a model with different dimensions requires schema migration | Only if you commit to one model for the project lifetime |
-| Inline knowledge graph in the memory SQLite DB | Single file, simpler deployment | Graph queries fight with memory writes for locks; no graph-specific indexing | Acceptable for MVP if graph is read-heavy. Split to separate connection or DB if write contention appears |
-| Use synchronous embedding in the save path | Simpler code, guaranteed consistency | Blocks the MCP response until embedding completes, adding 50-200ms latency per save | Never for user-facing saves. Acceptable for background batch processing |
-| Ship web UI bundled with core plugin | Single install | Doubles package size, pulls in frontend dependencies (React, D3, etc.) for users who only want CLI memory | Only for initial release. Split into optional `@laminark/web` package by Phase 4 |
+**What goes wrong:** Laminark resolves tool scope priority differently than Claude Code does, causing tools to appear with wrong scope metadata or causing Laminark to think a tool is available when Claude Code has overridden it.
 
-## Integration Gotchas
+**Why it happens:** Claude Code's scope precedence for MCP servers is: **local > project > user**. When servers with the same name exist at multiple scopes, local wins completely (no merging). But this is counterintuitive -- most systems use "specific overrides general" where project would beat global. In Claude Code, "local" means "per-project in `~/.claude.json`" (NOT `.claude/settings.local.json`), while "user" means "global in `~/.claude.json`". Both live in the same file but at different JSON paths.
 
-| Integration | Common Mistake | Correct Approach |
-|-------------|----------------|------------------|
-| Claude Code SDK hooks (PostToolUse, etc.) | Doing heavy processing in the hook callback, blocking Claude's response pipeline | Hook should only enqueue work. All processing (embedding, graph updates, topic analysis) happens in a background worker or microtask queue |
-| MCP tool registration | Registering 15+ tools with verbose schemas, consuming 10k+ tokens of context on session start | Minimal tool count (target: 5-8). Use `defer_loading: true` for secondary tools. Keep descriptions under 100 tokens each |
-| SQLite from multiple threads/workers | Opening separate connections without coordinating WAL mode and busy timeouts | Single connection manager that enforces WAL + busy_timeout on every connection. Or: single writer process with message-passing from workers |
-| ONNX Runtime for local embeddings | Bundling ONNX as a hard dependency, failing install on machines without build tools | Make ONNX optional. Fall back to Claude-piggyback embeddings or keyword-only search. Never let embedding failure block core functionality |
-| Web UI WebSocket connection | Keeping WebSocket open permanently, sending every database change as a real-time event | Lazy connection (only when UI is open). Batch updates. Send diffs, not full state. Disconnect after idle timeout |
-| node:sqlite vs better-sqlite3 | Assuming node:sqlite has feature parity with better-sqlite3 | Verify: does node:sqlite support WAL mode PRAGMAs, user-defined functions (for FTS5 ranking), and the backup API? Test before committing |
+For hooks and settings, the precedence is different: managed policy > enterprise settings > user settings > project settings > local settings. The precedence is NOT the same as MCP server precedence.
 
-## Performance Traps
+**Laminark-specific risk:** Laminark needs to track scope for tools AND hooks. If it applies MCP server precedence rules to hooks (or vice versa), routing decisions will be wrong. The system currently has a single `projectHash` concept, but scope resolution requires understanding the difference between "this tool is user-scope (available everywhere)" and "this tool is local-scope (available only here, overrides user-scope)".
 
-| Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|----------------|
-| Synchronous embedding on every save | MCP tool response time >200ms, user notices "lag" after Claude messages | Queue embeddings for background processing. Return save confirmation immediately, embed asynchronously | Immediately -- even one 150ms embedding blocks the response pipeline |
-| Unbounded graph traversal in search | Search queries take >500ms, return massive JSON payloads | Set depth limits (max 2 hops), node count limits (max 50 per query), and token budget per response | At ~5000 nodes / ~20000 edges |
-| D3 force layout with all nodes rendered | Browser tab freezes, high CPU usage, unresponsive graph interaction | Viewport culling (render only visible nodes), level-of-detail (simplify distant nodes), WebGL rendering via PixiJS for >500 nodes, Web Workers for layout computation | At ~500 SVG nodes / ~1000 edges for SVG. WebGL extends to ~5000 nodes |
-| FTS5 + vector search without result merging strategy | Keyword search and semantic search return different result sets with no unified ranking | Implement reciprocal rank fusion (RRF) or weighted score combination. Decide the merge strategy before building hybrid search | Immediately -- users get confusing results if keyword and semantic results are interleaved without ranking |
-| WAL checkpoint starvation under concurrent reads | WAL file grows without bound, disk usage spikes, read performance degrades | Schedule checkpoints during low-activity periods (session close, idle timeout). Set `wal_autocheckpoint` to reasonable value (default 1000 pages is fine for most cases) | At ~100MB WAL file size, or after extended periods with persistent read connections |
-| Loading entire knowledge graph for visualization | Browser memory >1GB, initial page load >5 seconds | Paginate graph loading. Start with a focus node and expand on demand. Never send the full graph to the browser | At ~2000 nodes |
+**Consequences:**
+- Tools shown with wrong scope labels
+- Routing suggests a tool that has been overridden at a more-specific scope
+- Scope-aware filtering removes tools that should be present, or keeps tools that should be hidden
 
-## Security Mistakes
+**Prevention:**
+- Implement scope resolution as a dedicated module with explicit precedence rules
+- MCP server resolution: `local_scope(project) > project_scope(.mcp.json) > user_scope(~/.claude.json global)`
+- When same-name servers exist at multiple scopes, the higher-priority scope REPLACES (not merges) the lower one
+- Build a comprehensive test suite with multi-scope conflicts as the primary test scenario
+- Separate scope resolution for MCP servers from scope resolution for hooks/settings
 
-| Mistake | Risk | Prevention |
-|---------|------|------------|
-| Storing API keys or tokens captured from conversation | Memory search exposes secrets in plaintext to any MCP client or web UI viewer | Implement a secret detection filter in the admission pipeline. Regex patterns for common API key formats. Never store observations matching secret patterns |
-| Web UI server binding to 0.0.0.0 | Any device on the local network can access the memory database | Bind to 127.0.0.1 only. Require a session token for WebSocket connections. Add CORS restrictions |
-| No authentication on MCP tools | Any MCP client connected to the system can read/write/delete all memories | Implement per-session tokens. Scope tool access by session ID. Add a confirmation step for bulk delete operations |
-| Storing file contents verbatim in observations | Proprietary source code stored in memory database, persisting after the project is deleted | Store references (file path + hash) rather than full file contents. Respect .gitignore patterns for what to observe |
-| Memory database file permissions too open | Other users on shared machines can read the SQLite file | Set file permissions to 0600 (owner read/write only) on database creation. Store in user-specific directory (~/.laminark/) |
+**Detection (warning signs):**
+- A single "resolve scope" function that handles both MCP servers and hooks
+- Tests that only exercise single-scope scenarios
+- No test cases for same-name servers at different scopes
 
-## UX Pitfalls
+**Phase guidance:** Registry design phase. The scope model must be correct before tools are stored.
 
-| Pitfall | User Impact | Better Approach |
-|---------|-------------|-----------------|
-| Silent memory operations with no feedback | User has no idea if memory is working. Zero trust in the system. "Is it even doing anything?" | Subtle indicators: "[memory: 3 observations saved]" in session output. Not verbose, but present. Slash command `/memory status` for detailed stats |
-| Aggressive topic stashing that interrupts flow | ADHD users -- the core audience -- experience the stash notification as an interruption that breaks hyperfocus. The tool designed to help scattered work patterns becomes another source of distraction | Default to silent stashing. Only notify on explicit topic return ("Welcome back to X -- I saved your context from earlier"). Never interrupt mid-thought |
-| Knowledge graph visualization without search/filter | User opens graph, sees 500 nodes, cannot find anything useful. Closes the tab and never returns | Open graph focused on a search result or current topic. Provide search-within-graph. Highlight recent nodes. Filter by entity type, date range, project |
-| Requiring manual memory curation | "You need to tag and organize your memories for best results." ADHD users will not do this. The system must work without any user maintenance | Fully automatic curation with optional manual override. Auto-tagging, auto-linking, auto-pruning. Manual commands exist but are never required |
-| Stale memory injection (retrieving outdated context) | Claude references a decision that was reversed 3 weeks ago, or a bug that was already fixed. User loses trust in memory accuracy | Implement temporal decay in retrieval scoring. Recent memories rank higher. Mark memories as superseded when contradicting information is stored. Show timestamps in memory results |
+---
 
-## "Looks Done But Isn't" Checklist
+### Pitfall 5: Breaking the Hook Handler's Stdout Contract
 
-- [ ] **Memory search:** Often missing hybrid ranking -- FTS5 and vector results returned separately without merged scoring. Verify results are ranked by a single unified score
-- [ ] **Concurrent sessions:** Often missing cross-session observation isolation. Verify that Session A's tool outputs do not appear in Session B's context without explicit cross-session search
-- [ ] **WAL mode:** Often missing checkpoint scheduling. Verify WAL file size after 100+ write operations. Should be bounded, not growing indefinitely
-- [ ] **Embedding pipeline:** Often missing graceful degradation. Verify that if the embedding model fails/is unavailable, save still succeeds (text-only, no vector) and keyword search still works
-- [ ] **Knowledge graph:** Often missing entity deduplication. Verify that searching for a concept returns one canonical node, not 5 variants of the same entity
-- [ ] **Topic detection:** Often missing the "no shift" case. Verify that a focused 2-hour session on one topic does NOT produce spurious stash events
-- [ ] **Web UI:** Often missing empty state handling. Verify that a new user with zero memories sees a helpful onboarding state, not a blank canvas or error
-- [ ] **Backup/restore:** Often missing WAL-aware backup. Verify backup captures database + WAL + SHM atomically (or uses SQLite backup API), not just the .sqlite file
-- [ ] **Cleanup:** Often missing memory deletion cascading to graph nodes. Verify that deleting a memory also removes its graph entities and relationships
-- [ ] **Plugin lifecycle:** Often missing graceful shutdown. Verify that killing Claude Code mid-session does not leave orphaned lock files, partial writes, or corrupted WAL
+**What goes wrong:** After adding global tool discovery and routing logic to the hook handler (`src/hooks/handler.ts`), debug output or error messages accidentally leak to stdout, which Claude Code interprets as context injection content and injects into Claude's conversation.
 
-## Recovery Strategies
+**Why it happens:** Laminark's hook handler has a critical constraint documented at line 21-25 of `handler.ts`: "Only SessionStart writes to stdout (synchronous hook -- stdout is injected into Claude's context window). All other hooks NEVER write to stdout." When adding new discovery logic (reading config files during SessionStart, computing available tools, etc.), any `console.log`, uncaught exception message, or library warning that writes to stdout becomes injected context.
 
-| Pitfall | Recovery Cost | Recovery Steps |
-|---------|---------------|----------------|
-| Database corruption from concurrent access | MEDIUM | Restore from automatic backup (if backup system exists). Rebuild WAL with `PRAGMA wal_checkpoint(TRUNCATE)`. If unrecoverable, rebuild from exported JSON. This is why automated backups before every session start are critical |
-| Embedding model lock-in (need to switch models) | MEDIUM | If original text is stored: batch reindex all observations with new model (hours for large DBs). If text was discarded: unrecoverable. Must re-extract from conversation logs if available |
-| Knowledge graph spaghetti | HIGH | Cannot be incrementally fixed. Requires defining the entity taxonomy, then re-extracting all entities from source observations with new extraction rules. Effectively rebuilding the graph from scratch |
-| Context window bloat from memory tools | LOW | Update tool descriptions to be shorter. Implement `defer_loading`. Restructure retrieval to progressive pattern. No data migration needed, only code changes |
-| Memory bloat from indiscriminate storage | MEDIUM | Run a one-time pruning job: delete observations below a utility threshold, merge duplicates, remove orphaned graph nodes. Future-proof by adding admission filter. Cannot recover wasted disk space without VACUUM |
-| Dependency weight (too many native deps) | HIGH | Requires replacing dependencies one at a time while maintaining backward compatibility. Each replacement needs a full test pass. Cannot be done incrementally -- users on the old stack need migration support |
+**Laminark-specific risk:** This is Laminark's most fragile architectural constraint. The current handler is careful -- it uses `debug()` (which writes to a log file, not stdout) and only `process.stdout.write(context)` in SessionStart. But new tool discovery code might:
+- Use `console.log` for debugging during development and forget to remove it
+- Import a library that writes warnings to stdout
+- Have a Zod validation error that `.toString()` includes `console.log` from a `refine()` handler
+- Throw an uncaught error whose message includes the string "[object Object]" or similar noise
 
-## Pitfall-to-Phase Mapping
+**Consequences:**
+- Claude receives garbled context injection (config file paths, JSON fragments, error messages)
+- Confusing and unpredictable Claude behavior
+- Extremely hard to debug because the noise appears as if it is part of Laminark's context
 
-| Pitfall | Prevention Phase | Verification |
-|---------|------------------|--------------|
-| Indiscriminate memory storage | Phase 1 (Core Storage) | Memory count stays sublinear with session count. No exact duplicates in search results |
-| Embedding migration hell | Phase 1 (Schema Design) + Phase 2 (Embedding) | `model_version` column exists. Reindex command works. Switching models produces valid search results |
-| Context window poisoning | Phase 1 (MCP Tool Design) | Total memory injection per query <2000 tokens. Session remains functional after 50+ tool uses |
-| SQLite corruption | Phase 1 (Database Init) | 3 concurrent sessions writing simultaneously produce zero errors after 1000 operations each |
-| Dependency weight creep | Phase 1 (Foundation) | `npm install` < 30 seconds. Cold start < 500ms. Zero native compilation required for core functionality |
-| Adaptive threshold over-engineering | Phase 2 (Topic Detection) | Threshold decision explainable in one sentence for any given input. Manual override always works |
-| Knowledge graph hairball | Phase 3 (Knowledge Graph) | Max 8 entity types. No node with >50 edges. Graph query returns <50 nodes for single-entity lookup |
-| Web UI performance | Phase 4 (Visualization) | Graph renders <500ms for 500 nodes. No browser tab freeze. Viewport culling active |
-| Memory staleness | Phase 2 (Retrieval Ranking) | Temporal decay visible in search results. Superseded memories ranked below current ones |
-| Secret leakage | Phase 1 (Admission Pipeline) | Synthetic API keys in test observations are never stored. Regex filter catches common secret patterns |
+**Prevention:**
+- Enforce the contract with a test that captures stdout during non-SessionStart events and asserts it is empty
+- All new modules imported into `handler.ts` must go through a review for stdout writes
+- Wrap SessionStart discovery logic in a try-catch that only returns null (not error messages) on failure
+- Use the existing `debug()` function for ALL logging; never `console.log` or `console.warn` in hook handler code paths
+- Consider redirecting `process.stdout` to `/dev/null` for non-SessionStart events as a safety net
+
+**Detection (warning signs):**
+- Any `console.log` or `console.warn` call in files imported by `handler.ts`
+- Missing stdout-assertion tests for hook events
+- New dependencies added to the hook handler's import chain
+
+**Phase guidance:** Every phase that touches the hook handler. Should be a CI check.
+
+---
+
+### Pitfall 6: Database Schema Migration Conflicts Between V1 and V2
+
+**What goes wrong:** V2 adds new tables (tool_registry, routing_patterns, scope_metadata) to the same SQLite database that V1 uses. If users upgrade from V1 to V2, the migration must not break existing data. If it fails mid-migration, the database is left in an inconsistent state.
+
+**Why it happens:** Laminark uses a migration system (`src/storage/migrations.ts`) that runs on database open. V1 already has migrations 001-013+. V2 needs to add new tables without altering existing ones. SQLite does not support transactional DDL for all operations (ALTER TABLE has limitations). If a V2 migration adds a column to an existing table and fails, the table may be left with the column but without the data migration.
+
+**Laminark-specific risk:** The current database opens in `src/index.ts` line 41: `const db = openDatabase(getDatabaseConfig())`. Migrations run synchronously during `openDatabase`. The hook handler ALSO opens the database independently (line 199 of `handler.ts`). If the MCP server process and hook handler process both run migrations concurrently on first V2 startup, they could conflict despite WAL mode.
+
+**Consequences:**
+- Corrupted database on upgrade
+- V1 data lost
+- User must manually delete database and lose all memories
+
+**Prevention:**
+- V2 migrations should ONLY add new tables (CREATE TABLE IF NOT EXISTS), never alter existing V1 tables
+- Use a migration version guard: check current migration version before running, skip if already applied
+- Test the upgrade path explicitly: create a V1 database, run V2 migrations, verify all V1 data intact
+- The migration runner should use a SQLite transaction wrapping all DDL for each migration step
+- Consider a migration lock (exclusive SQLite lock during migration) to prevent concurrent migration from hook handler and MCP server
+
+**Detection (warning signs):**
+- Any migration that uses ALTER TABLE on existing V1 tables
+- Missing upgrade-path tests (V1 DB -> V2 migration -> verify data)
+- No concurrent migration protection
+
+**Phase guidance:** Must be addressed in the very first V2 implementation phase (registry tables). Test the upgrade path before any other work.
+
+---
+
+## Moderate Pitfalls
+
+Issues that cause degraded functionality but not data loss or rewrites.
+
+---
+
+### Pitfall 7: Config File Read Performance in Hook Handler
+
+**What goes wrong:** The SessionStart hook reads 5-6 config files from disk to discover tools, adding enough latency that it exceeds the 2-second hook timeout, causing Claude Code to skip the context injection entirely.
+
+**Why it happens:** The current `handleSessionStart` has a 500ms performance warning (line 43 of `session-lifecycle.ts`). Adding file reads for `~/.claude.json`, `~/.claude/settings.json`, `~/.claude/settings.local.json`, `.mcp.json`, `.claude/settings.json`, and `.claude/settings.local.json` means 6 synchronous `readFileSync` calls plus JSON parsing. On a cold filesystem (first access after boot, NFS mounts, encrypted home directories), each read could take 10-50ms. If any config file is large (a `~/.claude.json` with many projects could be several KB), parsing adds overhead.
+
+**Laminark-specific risk:** The hook handler opens a fresh database connection every invocation (line 199 of `handler.ts`), which already costs ~2ms. Adding 6 file reads pushes the total startup toward the danger zone. The hook handler imports NO heavy dependencies (explicitly documented in the handler: "Imports only storage modules -- NO @modelcontextprotocol/sdk (cold start overhead)"). Tool discovery code must follow this same constraint.
+
+**Prevention:**
+- Cache discovered tools in the SQLite database; do NOT re-parse config files on every SessionStart
+- Only re-scan config files when they have changed (check file mtime before reading)
+- Use `fs.statSync` (fast) before `fs.readFileSync` (slower) to detect changes
+- Keep tool discovery code import-light: no Zod validation in the hot path, validate offline
+- Set a performance budget: total SessionStart handler must complete in <200ms (current is ~100ms)
+
+**Detection (warning signs):**
+- `readFileSync` calls in the SessionStart code path without mtime caching
+- Importing Zod or other validation libraries in the hook handler's critical path
+- No performance benchmarks for the SessionStart handler
+
+**Phase guidance:** Discovery phase. Build caching from the start, not as an optimization later.
+
+---
+
+### Pitfall 8: Tool Name Collisions Across MCP Servers
+
+**What goes wrong:** Two different MCP servers register tools with the same name (e.g., both have a `search` tool). Laminark's registry stores them as separate entries but cannot distinguish which one to route to.
+
+**Why it happens:** Claude Code namespaces MCP tools as `mcp__<servername>__<toolname>`. But Laminark needs to understand tool capabilities to route effectively. If it strips the namespace for readability or matching ("the user needs search capabilities"), it loses the disambiguation. Conversely, if it keeps the full namespace, the routing model must understand that `mcp__github__search_repositories` and `mcp__jira__search_issues` are different tools for different purposes.
+
+**Laminark-specific risk:** The current self-referential filter uses `mcp__laminark__` prefix (line 70 of `handler.ts`). This shows the codebase already deals with MCP namespacing. But routing logic needs to go further: understand what each tool does, not just its name. Two tools named `search` from different servers are completely different capabilities.
+
+**Prevention:**
+- Always store and reference tools by their full Claude Code namespace: `mcp__<server>__<tool>`
+- Store tool descriptions from the MCP server's tool listing alongside the name
+- Route based on descriptions, not names -- use embedding similarity between user intent and tool descriptions
+- Index tool descriptions in FTS5 for keyword matching, just as observations are indexed
+
+**Detection (warning signs):**
+- Registry schema that stores `tool_name` without `server_name`
+- Routing logic that matches on short tool names rather than full namespaced names
+- No storage of tool descriptions
+
+**Phase guidance:** Registry design phase. The schema must include server name from the start.
+
+---
+
+### Pitfall 9: Cold Start -- Empty Routing Memory
+
+**What goes wrong:** When Laminark V2 first installs (or in a new project), the routing memory is empty. Without historical patterns, every routing decision is a guess. The system either suggests nothing (useless) or suggests everything (annoying).
+
+**Why it happens:** Conversation-driven routing learns from patterns: "when the user discusses X, they tend to use tool Y." On first run, there are zero patterns. The system must have a sensible default behavior that is useful from the very first session.
+
+**Laminark-specific risk:** Laminark V1 already solved this for topic detection -- `AdaptiveThresholdManager` has `seedFromHistory()` (line 92 of `index.ts`). The same architectural pattern should apply to routing, but the cold-start problem is harder: topic detection has a mathematical default (use the static threshold), but routing has no mathematical default for "which tool should I suggest."
+
+**Prevention:**
+- Define built-in routing heuristics that work without any learned data:
+  - "User mentions database" -> suggest database MCP tools if available
+  - "User mentions GitHub/PR/issue" -> suggest GitHub MCP tools if available
+  - "User mentions memory/context" -> suggest Laminark tools
+- Keyword-based routing first, pattern-learned routing second (progressive enhancement)
+- Set a minimum observation count before learned patterns override heuristics (e.g., need 10+ successful routing outcomes before the learned model takes over)
+- Display confidence levels with suggestions: "I think you might want [tool] (low confidence -- still learning your patterns)"
+
+**Detection (warning signs):**
+- Routing module that only uses learned patterns with no fallback
+- No heuristic/keyword-based routing as the default strategy
+- Missing "confidence" or "certainty" signal in routing output
+
+**Phase guidance:** Routing phase. Build the heuristic fallback FIRST, then add learning on top.
+
+---
+
+### Pitfall 10: Over-Suggestion Fatigue (The Clippy Problem)
+
+**What goes wrong:** Laminark suggests tools too frequently, for conversations that do not need routing assistance. Users become annoyed and disable the feature or ignore all suggestions.
+
+**Why it happens:** Routing systems face an asymmetric feedback problem. Missing a useful suggestion is invisible (the user never knows), but an unwanted suggestion is immediately annoying. If the system optimizes for "never miss a routing opportunity," it will over-suggest. This is the same failure mode as Clippy, browser notification prompts, and autocomplete that fires on every keystroke.
+
+**Laminark-specific risk:** Laminark's current SessionStart injection is already in Claude's context window. Adding tool suggestions to every SessionStart or every PostToolUse event compounds the context burden. Claude Code already has MCP Tool Search (announced January 2026) that handles tool discovery when tools would exceed 10% of context. If Laminark also suggests tools, the user gets double suggestions.
+
+**Prevention:**
+- Suggestion gating: only suggest when confidence exceeds a threshold (start high, tune down)
+- Rate limiting: maximum 1-2 tool suggestions per session, not per turn
+- Negative signal: if a user does not use a suggested tool within N turns, reduce confidence for that pattern
+- Opt-in escalation: start with zero active suggestions, only suggest when explicitly asked or when a high-confidence match occurs
+- Never duplicate what Claude Code's built-in Tool Search already does -- focus on cross-session intelligence (tools the user used yesterday in a similar context) rather than intra-session discovery
+
+**Detection (warning signs):**
+- Suggestions injected on every SessionStart
+- No rate limiting on suggestion frequency
+- No negative feedback mechanism (unused suggestions)
+- No comparison with Claude Code's native Tool Search feature
+
+**Phase guidance:** Routing phase. Define the suggestion policy (when to suggest, how often, how to back off) before implementing the suggestion mechanism.
+
+---
+
+### Pitfall 11: Plugin Installation Path Resolution
+
+**What goes wrong:** When Laminark moves from project-scoped `.mcp.json` to global installation as a Claude Code plugin, the `command` path in the MCP server config stops resolving correctly. The `ensure-deps.sh` script (which currently uses relative paths from project root) breaks when the plugin is installed in a different location.
+
+**Why it happens:** Currently `.mcp.json` uses `"command": "bash", "args": ["./scripts/ensure-deps.sh", "node", "./dist/index.js"]` with paths relative to the project root. When installed as a global plugin, the plugin files are copied to a cache directory (Claude Code's plugin caching system). The relative paths `./scripts/` and `./dist/` would need to resolve from the cache location, not the original source.
+
+**Laminark-specific risk:** The `ensure-deps.sh` script detects the plugin root with `PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"` which works from the project directory but may fail in the cached plugin directory if `node_modules` needs to be installed there. Additionally, native modules like `better-sqlite3` and `sqlite-vec` require platform-specific compilation -- if the plugin is installed via npm and cached, the native modules need to match the target platform.
+
+**Consequences:**
+- Laminark MCP server fails to start after global installation
+- Plugin appears enabled but all tools are unavailable
+- Error only visible with `claude --debug`, invisible to normal users
+
+**Prevention:**
+- Use `${CLAUDE_PLUGIN_ROOT}` in all plugin configuration paths (this is Claude Code's official variable for plugin-relative paths)
+- Ensure `ensure-deps.sh` uses `${CLAUDE_PLUGIN_ROOT}` instead of `dirname $0` relative paths
+- Test the full install-from-npm -> cache -> start lifecycle, not just local development
+- Consider whether `npx @laminark/memory` is simpler than `bash ./scripts/ensure-deps.sh node ./dist/index.js` for the global case
+- Handle the native module compilation concern: bundle prebuilt binaries or use `npm rebuild` in the ensure-deps script
+
+**Detection (warning signs):**
+- Hard-coded relative paths in `.mcp.json` or `plugin.json` MCP server configs
+- `ensure-deps.sh` not using `${CLAUDE_PLUGIN_ROOT}`
+- No integration test that installs the plugin from npm and starts it
+
+**Phase guidance:** Global installation phase (first V2 phase). Must work before anything else.
+
+---
+
+### Pitfall 12: Stale Registry After Config Changes
+
+**What goes wrong:** The user adds or removes an MCP server in their config while a Claude Code session is active. Laminark's tool registry does not update, so it suggests tools that no longer exist or misses new tools.
+
+**Why it happens:** Claude Code supports `list_changed` notifications for dynamic tool updates within a running session. But config file changes (adding a new server to `~/.claude.json`) require restarting Claude Code. Laminark's registry would be populated at SessionStart and not refreshed. If the user restarts Claude Code (getting new MCP servers) but Laminark's cached registry is from a previous discovery run, the registry is stale.
+
+**Prevention:**
+- Re-run discovery on every SessionStart (but use mtime caching, see Pitfall 7)
+- Mark all registry entries with a `discovered_at` timestamp
+- On SessionStart, if any config file has changed since `discovered_at`, invalidate and re-scan
+- Consider subscribing to MCP `list_changed` notifications to update the registry mid-session
+- Add a manual refresh mechanism: a Laminark MCP tool like `refresh_registry` that forces re-scan
+
+**Detection (warning signs):**
+- Registry populated once and never refreshed
+- No `discovered_at` or `last_seen_at` timestamp on registry entries
+- No mechanism to detect config file changes
+
+**Phase guidance:** Discovery phase. Build invalidation alongside initial population.
+
+---
+
+### Pitfall 13: Laminark Routing Conflicts with Claude Code's Native Tool Search
+
+**What goes wrong:** Claude Code (since January 2026) has its own MCP Tool Search feature that dynamically loads tools when they would exceed 10% of context window. Laminark's routing suggestions overlap or conflict with this built-in behavior, creating confusion -- the user gets tool recommendations from two different systems that may disagree.
+
+**Why it happens:** Tool Search is Anthropic's solution to the "too many tools" problem. It defers MCP tool loading and uses a search mechanism to find relevant tools on demand. If Laminark independently suggests tools that Tool Search has already surfaced (or worse, suggests tools that Tool Search has deliberately deferred), the two systems interfere.
+
+**Laminark-specific risk:** Laminark is itself an MCP server. Its tools (`recall`, `save_memory`, `query_graph`, etc.) are subject to Tool Search's deferral logic. If Laminark has >10 tools and Claude Code defers some of them, Laminark's routing cannot suggest its own deferred tools because they are not loaded in context.
+
+**Prevention:**
+- Focus Laminark routing on cross-session intelligence (tools used before in similar contexts) rather than intra-session discovery (what tools exist right now)
+- Do NOT duplicate Tool Search's job of listing available tools -- instead, provide memory-augmented context ("last time you worked on database migrations, you used mcp__postgres__query")
+- Keep Laminark's own tool count low (6-8 tools) to stay below Tool Search's deferral threshold
+- Test with `ENABLE_TOOL_SEARCH=true` to ensure Laminark works correctly when Tool Search is active
+
+**Detection (warning signs):**
+- Laminark routing that lists available tools (duplicates Tool Search)
+- More than 10 Laminark MCP tools registered
+- No testing with Tool Search enabled
+
+**Phase guidance:** Routing design phase. Must define how Laminark routing complements (not competes with) Tool Search.
+
+---
+
+## Minor Pitfalls
+
+Issues that are annoying but not blocking.
+
+---
+
+### Pitfall 14: Environment Variable Expansion in Config Parsing
+
+**What goes wrong:** `.mcp.json` files use `${VAR}` syntax for environment variable expansion. Laminark reads the file and stores the literal string `${API_KEY}` instead of the expanded value, making tool metadata contain unexpanded variables.
+
+**Prevention:**
+- Implement the same expansion rules as Claude Code: `${VAR}` expands to env value, `${VAR:-default}` uses default if unset
+- If a required variable is not set and has no default, log a warning and skip that server (do not crash)
+- Only expand variables that Laminark needs for identification (server command/url); do NOT expand secrets into the database
+
+**Phase guidance:** Config parsing phase.
+
+---
+
+### Pitfall 15: MCP Tool Description Token Budget
+
+**What goes wrong:** Laminark stores full tool descriptions for routing and they consume excessive space in the database or in context injection.
+
+**Prevention:**
+- Truncate tool descriptions to 200 characters in the registry (enough for routing, not a full manual)
+- When injecting tool suggestions into context, use one-line summaries, not full descriptions
+- Follow the existing `estimateTokens` / `TOKEN_BUDGET` pattern from `src/mcp/token-budget.ts`
+
+**Phase guidance:** Registry phase.
+
+---
+
+### Pitfall 16: Windows Path Handling in Config Discovery
+
+**What goes wrong:** Config file paths use Unix-style paths (`~/.claude/settings.json`). On Windows, the home directory is different and path separators are backslashes.
+
+**Prevention:**
+- Use `os.homedir()` (already done in `src/shared/config.ts`) instead of hardcoding `~`
+- Use `path.join()` for all config file paths
+- Note that Claude Code on Windows requires `cmd /c` wrappers for npx commands -- Laminark should not need to replicate this since it reads configs rather than executing them, but should be aware of it for documentation
+
+**Phase guidance:** Global installation phase.
+
+---
+
+### Pitfall 17: Managed MCP Configuration Override in Enterprise Environments
+
+**What goes wrong:** In enterprise environments, `managed-mcp.json` takes exclusive control of MCP servers. Laminark discovers tools from user config files but those tools are actually blocked by the managed configuration.
+
+**Prevention:**
+- Check for managed config at `/Library/Application Support/ClaudeCode/managed-mcp.json` (macOS) or `/etc/claude-code/managed-mcp.json` (Linux)
+- If managed config exists, ONLY discover tools from managed servers plus `allowedMcpServers` / `deniedMcpServers` in managed settings
+- Log a warning when enterprise management is detected: "Managed MCP configuration detected -- discovery limited to approved servers"
+- Also check `allowedMcpServers` and `deniedMcpServers` in managed settings for allowlist/denylist filtering
+
+**Phase guidance:** Discovery phase (handle as a variant, not an afterthought).
+
+---
+
+### Pitfall 18: Intent Classification Cascading Errors
+
+**What goes wrong:** A single misclassification in conversation intent analysis causes the router to send the user down the wrong tool path. The wrong tool's output then feeds back into the conversation, compounding the error -- the next routing decision is based on corrupted context.
+
+**Prevention:**
+- Never auto-invoke tools based on routing classification; only suggest (require user or Claude confirmation)
+- Include an "uncertain" / "no match" classification that results in no suggestion (safe default)
+- Limit routing influence to tool metadata / context enrichment, not tool invocation
+- Log all routing decisions for retrospective analysis
+
+**Phase guidance:** Routing implementation phase.
+
+---
+
+## Phase-Specific Warnings
+
+| Phase Topic | Likely Pitfall | Severity | Mitigation |
+|-------------|---------------|----------|------------|
+| Global installation | Path resolution (#11), ensure-deps script (#11), Windows paths (#16) | Critical | Use `${CLAUDE_PLUGIN_ROOT}`, test full install lifecycle |
+| Config parsing | Format confusion (#2), silent override (#3), env expansion (#14) | Critical | Per-file-type parsers with Zod schemas, match `JSON.parse` behavior |
+| Registry design | Ghost tools (#1), scope precedence (#4), name collisions (#8) | Critical | Scope-aware schema with full MCP namespaces, local>project>user precedence |
+| Discovery implementation | Hook performance (#7), stale registry (#12), managed config (#17) | Moderate | mtime caching, invalidation timestamps, enterprise detection |
+| Routing implementation | Cold start (#9), over-suggestion (#10), Tool Search conflict (#13), cascading errors (#18) | Moderate | Heuristic fallbacks, rate limiting, complement not compete with Tool Search |
+| Migration / upgrade | Schema conflicts (#6), stdout contract (#5) | Critical | CREATE TABLE IF NOT EXISTS only, upgrade-path tests, stdout assertion tests |
+
+---
+
+## Integration-Specific Pitfalls (Laminark V1 -> V2)
+
+These pitfalls are specific to adding V2 features to the existing Laminark architecture.
+
+### The Hook Handler Import Chain Must Stay Light
+
+The hook handler (`src/hooks/handler.ts`) is Laminark's performance-critical path. It currently imports ONLY storage modules. Any V2 module imported into this chain (config parsers, registry queries, routing logic) must:
+- Not import `@modelcontextprotocol/sdk` (adds ~50ms cold start)
+- Not import `zod` in the hot path (validate offline, query validated data)
+- Not use `console.log` anywhere in the import chain
+- Complete within the existing ~100ms performance budget
+
+### The Database Is Shared Between Two Processes
+
+The MCP server process and hook handler process both access the same SQLite database. V1 handles this with WAL mode and busy_timeout. V2 adds more writes (tool registry updates, routing pattern storage). The busy_timeout of 5000ms (`src/shared/config.ts` line 58) should remain sufficient, but V2 must not add long-running write transactions that block the hook handler.
+
+### The ProjectHash Is Not the Only Scope Identifier
+
+V1 uses `projectHash` as the sole scope key. V2 needs to distinguish between user-scope (no project hash -- available everywhere), project-scope (needs project hash), and local-scope (needs project hash + user identity). This does not mean changing V1's schema, but V2 tables need a richer scope model beyond just `project_hash`.
+
+### Session Context Injection Budget Is Already Tight
+
+The current context injection budget is 6000 characters / ~2000 tokens (`src/context/injection.ts` line 12). Tool suggestions must fit within this budget OR use a separate injection mechanism. Adding a "Available tools for this project" section to SessionStart context will compete with observation summaries, session context, and decision history for the same token budget. Prioritize memory context over tool suggestions -- the user came to this project to work, not to read a tool catalog.
+
+### Self-Referential Loop Risk with Routing
+
+If Laminark routes tool suggestions through its own MCP tools (e.g., a `suggest_tools` tool), the hook handler's self-referential filter (`mcp__laminark__` prefix on line 70) will correctly skip capturing observations about Laminark's own suggestions. But if routing logic triggers via hooks (e.g., PostToolUse of a non-Laminark tool triggers a routing evaluation), care must be taken to ensure the routing evaluation itself does not generate observations that trigger further routing evaluations. This is an infinite-loop risk.
+
+---
 
 ## Sources
 
-- [SQLite Official: How To Corrupt An SQLite Database File](https://www.sqlite.org/howtocorrupt.html) -- authoritative documentation on corruption vectors
-- [SQLite Official: Write-Ahead Logging](https://sqlite.org/wal.html) -- WAL mode behavior, checkpoint starvation, concurrent access limits
-- [Fixing Claude Code's Concurrent Session Problem (dev.to)](https://dev.to/daichikudo/fixing-claude-codes-concurrent-session-problem-implementing-memory-mcp-with-sqlite-wal-mode-o7k) -- real-world post-mortem on SQLite concurrent session failures
-- [Fixing Claude Code's Amnesia (blog.fsck.com)](https://blog.fsck.com/2025/10/23/episodic-memory/) -- episodic memory approach, journaling limitations, ambient capture insight
-- [Claude Code MCP Context Bloat 46.9% Reduction (Medium)](https://medium.com/@joe.njenga/claude-code-just-cut-mcp-context-bloat-by-46-9-51k-tokens-down-to-8-5k-with-new-tool-search-ddf9e905f734) -- Tool Search feature, token overhead measurements
-- [Claude Code Issue #13805: Lazy-load MCP servers](https://github.com/anthropics/claude-code/issues/13805) -- MCP eager loading consuming 11.5% of context window
-- [Claude Code Issue #3406: Built-in tools + MCP descriptions 10-20k token overhead](https://github.com/anthropics/claude-code/issues/3406) -- tool description bloat measurements
-- [Harvard D3 Institute: How Selective Recall Boosts LLM Performance](https://d3.harvard.edu/smarter-memories-stronger-agents-how-selective-recall-boosts-llm-performance/) -- indiscriminate storage degrades performance; utility-based deletion yields 10% gains
-- [How Memory Management Impacts LLM Agents (arxiv)](https://arxiv.org/html/2505.16067v1) -- add-all strategy performs worse than no memory; strict filtering boosts accuracy
-- [Embedding Drift and Model Compatibility (arxiv)](https://arxiv.org/abs/2506.00037) -- query drift compensation, reindex requirements on model change
-- [Drift-Adapter: Near Zero-Downtime Embedding Model Upgrades](https://www.arxiv.org/pdf/2509.23471) -- practical approach to model migration without full reindex
-- [D3 Force Layout Optimization (NebulaGraph)](https://www.nebula-graph.io/posts/d3-force-layout-optimization) -- viewport culling, level-of-detail, WebGL fallback for large graphs
-- [Scale Up D3 Graph Visualization (Neo4j)](https://medium.com/neo4j/scale-up-your-d3-graph-visualisation-webgl-canvas-with-pixi-js-63f119d96a28) -- PixiJS + WebGL for graph rendering beyond SVG limits
-- [ADHD Working Memory Research (ADD Resource Center)](https://www.addrc.org/the-memory-maze-understanding-working-short-term-and-long-term-memory-in-adhd/) -- memory mechanisms in ADHD, implications for tool design
-- [Neurodivergent-Aware Productivity Framework (arxiv)](https://arxiv.org/html/2507.06864) -- ADHD as systems-level attentional modulation challenge, not task deficit
-- [MCP "Too Many Tools" Problem](https://demiliani.com/2025/09/04/model-context-protocol-and-the-too-many-tools-problem/) -- tool count limits, context overhead from verbose schemas
-- [Optimising MCP Server Context Usage (Scott Spence)](https://scottspence.com/posts/optimising-mcp-server-context-usage-in-claude-code) -- practical MCP optimization techniques
-- [claude-mem GitHub Repository](https://github.com/thedotmack/claude-mem) -- 3-layer progressive retrieval pattern, Endless Mode compression
-- [EvolvingLMMs-Lab/engram GitHub Repository](https://github.com/EvolvingLMMs-Lab/engram) -- predecessor architecture reference, E2EE memory layer
+- [Claude Code MCP Documentation](https://code.claude.com/docs/en/mcp) -- Official scope hierarchy, config formats, precedence rules (HIGH confidence)
+- [Claude Code Hooks Guide](https://code.claude.com/docs/en/hooks-guide) -- Hook lifecycle, settings locations, matcher system (HIGH confidence)
+- [Claude Code Plugins Reference](https://code.claude.com/docs/en/plugins-reference) -- Plugin manifest, `CLAUDE_PLUGIN_ROOT`, caching behavior (HIGH confidence)
+- [GitHub Issue #4938: Multiple mcpServers sections silently override](https://github.com/anthropics/claude-code/issues/4938) -- Silent override bug with duplicate mcpServers sections (HIGH confidence)
+- [GitHub Issue #4976: Documentation incorrect about config location](https://github.com/anthropics/claude-code/issues/4976) -- Documentation error about config file locations (HIGH confidence)
+- [GitHub Issue #2731: npx MCP servers fail after update](https://github.com/anthropics/claude-code/issues/2731) -- Path resolution failures after Claude Code updates (HIGH confidence)
+- [MCP and Context Overload (EclipseSource)](https://eclipsesource.com/blogs/2026/01/22/mcp-context-overload/) -- Too many tools degrades performance (MEDIUM confidence)
+- [MCP Tool Overload Prevention (Lunar.dev)](https://www.lunar.dev/post/why-is-there-mcp-tool-overload-and-how-to-solve-it-for-your-ai-agents) -- Tool naming collisions, ghost tools (MEDIUM confidence)
+- [LLM Ignoring MCP Tools (Arsturn)](https://www.arsturn.com/blog/why-your-llm-is-ignoring-your-mcp-tools-and-how-to-fix-it) -- Tool hallucination, selection degradation after 40+ tools (MEDIUM confidence)
+- [Intent Classification in Agentic LLM Apps](https://medium.com/@mr.murga/enhancing-intent-classification-and-error-handling-in-agentic-llm-applications-df2917d0a3cc) -- Routing misclassification, cascading errors (MEDIUM confidence)
+- [AI Agent Routing Best Practices (Patronus)](https://www.patronus.ai/ai-agent-development/ai-agent-routing) -- Over-suggestion, hybrid routing patterns (MEDIUM confidence)
+- [MCP Tool Search announcement](https://www.atcyrus.com/stories/mcp-tool-search-claude-code-context-pollution-guide) -- Claude Code's native tool discovery (MEDIUM confidence)
+- [Too Many Tools Problem](https://demiliani.com/2025/09/04/model-context-protocol-and-the-too-many-tools-problem/) -- Tool count limits, 400-500 tokens per tool definition (MEDIUM confidence)
+- Laminark source code analysis: `src/index.ts`, `src/hooks/handler.ts`, `src/shared/config.ts`, `src/context/injection.ts`, `src/hooks/admission-filter.ts`, `src/hooks/session-lifecycle.ts`, `src/mcp/server.ts`, `scripts/ensure-deps.sh` (HIGH confidence -- direct code reading)
 
 ---
-*Pitfalls research for: Claude Code persistent memory plugin (Laminark)*
-*Researched: 2026-02-08*
+*Pitfalls research for Laminark V2: Global Tool Intelligence*
+*Researched: 2026-02-10*
