@@ -3,7 +3,7 @@
 ## Milestones
 
 - Done **v1.0 Persistent Adaptive Memory** - Phases 1-8 (shipped 2026-02-09)
-- In Progress **v2.0 Global Tool Intelligence** - Phases 9-16 (in progress)
+- Done **v2.0 Global Tool Intelligence** - Phases 9-16 (shipped 2026-02-10)
 
 ## Phases
 
@@ -296,11 +296,11 @@ Plans:
   1. On each session start, config rescan compares current config files against the registry and marks tools that no longer appear in any config as stale
   2. Tools not seen (neither discovered nor used) in 30+ days are automatically deprioritized in ranking and suggestions
   3. When a PostToolUseFailure event occurs, the failing tool is deprioritized in future suggestions until a successful use resets its standing
-**Plans**: 2 plans
+**Plans**: 2 plans (complete)
 
 Plans:
-- [ ] 16-01-PLAN.md -- Migration 19 (status column), ToolRegistryRow type update, and staleness storage methods on ToolRegistryRepository (STAL-01, STAL-02, STAL-03 foundation)
-- [ ] 16-02-PLAN.md -- Config rescan staleness detection, failure demotion in PostToolUse, ranking deprioritization, routing exclusion, and search status display (STAL-01, STAL-02, STAL-03 wiring)
+- [x] 16-01-PLAN.md -- Migration 19 (status column), ToolRegistryRow type update, and staleness storage methods on ToolRegistryRepository (STAL-01, STAL-02, STAL-03 foundation)
+- [x] 16-02-PLAN.md -- Config rescan staleness detection, failure demotion in PostToolUse, ranking deprioritization, routing exclusion, and search status display (STAL-01, STAL-02, STAL-03 wiring)
 
 ## Progress
 
@@ -326,4 +326,4 @@ Note: Phases 15 and 16 depend on Phases 10+12 (not on each other or on 13/14), s
 | 13. Context Enhancement | v2.0 | 1/1 | Complete | 2026-02-11 |
 | 14. Conversation Routing | v2.0 | 2/2 | Complete | 2026-02-10 |
 | 15. Tool Search | v2.0 | 2/2 | Complete | 2026-02-10 |
-| 16. Staleness Management | v2.0 | 0/2 | Not started | - |
+| 16. Staleness Management | v2.0 | 2/2 | Complete | 2026-02-10 |
