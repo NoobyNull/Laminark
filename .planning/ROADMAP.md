@@ -181,7 +181,7 @@ Plans:
 - [x] **Phase 9: Global Installation** - Plugin manifest, global deployment, and project-aware session bootstrapping
 - [x] **Phase 10: Tool Discovery and Registry** - Config parsing, tool enumeration, and scope-aware registry storage
 - [x] **Phase 11: Scope Resolution** - Prefix-based scope detection and per-session tool filtering
-- [ ] **Phase 12: Usage Tracking** - Organic tool usage recording from hook events with project and session context
+- [x] **Phase 12: Usage Tracking** - Organic tool usage recording from hook events with project and session context
 - [ ] **Phase 13: Context Enhancement** - Session start injection extended with ranked tool suggestions within budget
 - [ ] **Phase 14: Conversation Routing** - Intent-to-tool mapping with confidence thresholds and cold start heuristics
 - [ ] **Phase 15: Tool Search** - MCP tool for querying the registry by keyword, scope, and semantic meaning
@@ -241,10 +241,10 @@ Plans:
   1. Every PostToolUse hook event increments the tool's usage count and updates its last_used_at timestamp in the registry
   2. Each usage event is recorded with its session ID and project association, enabling per-project and per-session usage analysis
   3. Usage data accumulated across multiple sessions is queryable -- a tool used 50 times over the past week shows that history
-**Plans**: 1 plan
+**Plans**: 1 plan (complete)
 
 Plans:
-- [ ] 12-01-PLAN.md -- Event-level usage tracking with tool_usage_events table, handler session_id threading, and temporal query methods (UTRK-01, UTRK-02, UTRK-03)
+- [x] 12-01-PLAN.md -- Event-level usage tracking with tool_usage_events table, handler session_id threading, and temporal query methods (UTRK-01, UTRK-02, UTRK-03)
 
 ### Phase 13: Context Enhancement
 **Goal**: Claude starts every session knowing not just what happened last time, but what tools are available and most relevant to the current context
@@ -307,7 +307,7 @@ Note: Phases 15 and 16 depend on Phases 10+12 (not on each other or on 13/14), s
 | 9. Global Installation | v2.0 | 2/2 | Complete | 2026-02-10 |
 | 10. Tool Discovery and Registry | v2.0 | 2/2 | Complete | 2026-02-11 |
 | 11. Scope Resolution | v2.0 | 1/1 | Complete | 2026-02-11 |
-| 12. Usage Tracking | v2.0 | 0/TBD | Not started | - |
+| 12. Usage Tracking | v2.0 | 1/1 | Complete | 2026-02-11 |
 | 13. Context Enhancement | v2.0 | 0/TBD | Not started | - |
 | 14. Conversation Routing | v2.0 | 0/TBD | Not started | - |
 | 15. Tool Search | v2.0 | 0/TBD | Not started | - |
