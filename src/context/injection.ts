@@ -312,8 +312,25 @@ function rankToolsByRelevance(
       return { row, score: 0 };
     }
 
-    // Frequency share: what fraction of recent events belong to this tool
-    return { row, score: count / totalEvents };
+    let score = count / totalEvents;
+
+    // STAL-02/03: Deprioritize stale and demoted tools
+    if (row.status === 'stale' || row.status === 'demoted') {
+      score *= 0.25;  // Reduce to 25% of normal score
+    }
+
+    // STAL-02: Age-based deprioritization for tools not seen in 30+ days
+    const lastUsed = row.last_used_at || row.discovered_at;
+    const lastSeen = new Date(Math.max(
+      new Date(lastUsed).getTime(),
+      new Date(row.updated_at).getTime(),
+    ));
+    const daysSinceLastSeen = (Date.now() - lastSeen.getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSinceLastSeen > 30) {
+      score *= 0.5;  // Additional 50% penalty for age (stacks with status penalty)
+    }
+
+    return { row, score };
   });
 
   // Sort by score descending; ties broken by lifetime usage_count descending

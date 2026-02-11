@@ -112,9 +112,12 @@ export class ConversationRouter {
     // 6. Get available tools (scope-filtered)
     const availableTools = toolRegistry.getAvailableForSession(this.projectHash);
 
-    // 7. Filter to suggestable: exclude built-in and Laminark tools
+    // 7. Filter to suggestable: exclude built-in, Laminark, and stale/demoted tools
     const suggestableTools = availableTools.filter(
-      (t: ToolRegistryRow) => t.tool_type !== 'builtin' && !isLaminarksOwnTool(t.name),
+      (t: ToolRegistryRow) =>
+        t.tool_type !== 'builtin' &&
+        !isLaminarksOwnTool(t.name) &&
+        t.status === 'active',  // STAL: Only suggest tools in good standing
     );
 
     // 8. If no suggestable tools: return
