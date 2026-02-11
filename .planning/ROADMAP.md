@@ -241,7 +241,10 @@ Plans:
   1. Every PostToolUse hook event increments the tool's usage count and updates its last_used_at timestamp in the registry
   2. Each usage event is recorded with its session ID and project association, enabling per-project and per-session usage analysis
   3. Usage data accumulated across multiple sessions is queryable -- a tool used 50 times over the past week shows that history
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 12-01-PLAN.md -- Event-level usage tracking with tool_usage_events table, handler session_id threading, and temporal query methods (UTRK-01, UTRK-02, UTRK-03)
 
 ### Phase 13: Context Enhancement
 **Goal**: Claude starts every session knowing not just what happened last time, but what tools are available and most relevant to the current context
