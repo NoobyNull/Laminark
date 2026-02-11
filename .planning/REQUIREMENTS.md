@@ -1,10 +1,9 @@
 # Requirements
 
-**Project:** Laminark — Claude Code Persistent Adaptive Memory Plugin
-**Version:** v1
-**Core Value:** You never lose context. Every thread is recoverable, every thought is findable.
+**Project:** Laminark — Claude Code Persistent Adaptive Memory & Tool Intelligence Plugin
+**Core Value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
 
-## v1 Requirements
+## v1.0 Requirements (Complete)
 
 ### Memory Core
 
@@ -78,82 +77,162 @@
 - [x] **DQ-04**: Plugin startup adds zero perceptible latency — ONNX model loads lazily on first observation, not at process start
 - [x] **DQ-05**: All topic shift decisions are logged with inputs for debugging and threshold tuning
 
-## v2 Requirements (Deferred)
+## v2.0 Requirements
+
+Requirements for Global Tool Intelligence milestone. Each maps to roadmap phases starting at Phase 9.
+
+### Global Installation
+
+- [ ] **GLOB-01**: Laminark is available in every Claude Code session without per-project configuration
+- [ ] **GLOB-02**: Laminark detects and registers the current project automatically on session start
+- [ ] **GLOB-03**: Plugin manifest (plugin.json) with correct MCP server, hooks, and skills configuration
+- [ ] **GLOB-04**: Self-referential filter handles both project-scoped and plugin-scoped MCP prefixes
+- [ ] **GLOB-05**: Installation works via `claude plugin install` from npm package
+
+### Tool Discovery
+
+- [ ] **DISC-01**: Laminark discovers MCP servers from project `.mcp.json` and user `~/.claude.json` on session start
+- [ ] **DISC-02**: Laminark discovers slash commands from `.claude/commands/` and `~/.claude/commands/`
+- [ ] **DISC-03**: Laminark discovers skills from `.claude/skills/` and `~/.claude/skills/`
+- [ ] **DISC-04**: Laminark discovers installed plugins from `~/.claude/plugins/installed_plugins.json`
+- [ ] **DISC-05**: Laminark records tool usage organically from PostToolUse hook events
+- [ ] **DISC-06**: Discovery results are stored in a `tool_registry` table with scope metadata
+
+### Scope Resolution
+
+- [ ] **SCOP-01**: Tool registry distinguishes global, project, and plugin scopes
+- [ ] **SCOP-02**: Session start context only surfaces tools available in the current scope
+- [ ] **SCOP-03**: Project-scoped tools from project A are never suggested in project B
+- [ ] **SCOP-04**: Scope resolution uses tool_name prefix parsing (bare = built-in, `mcp__` = MCP, `mcp__plugin_` = plugin)
+
+### Usage Tracking
+
+- [ ] **UTRK-01**: PostToolUse handler increments usage count and last_used_at in tool registry
+- [ ] **UTRK-02**: Tool usage context is recorded with session and project association
+- [ ] **UTRK-03**: Usage data persists across sessions for routing intelligence
+
+### Context Enhancement
+
+- [ ] **CTXT-01**: Session start injection includes an "Available Tools" section with top relevant tools
+- [ ] **CTXT-02**: Tool suggestions fit within a 500-character sub-budget of the existing 6000-char context limit
+- [ ] **CTXT-03**: Tool suggestions are ranked by relevance (usage frequency + recency)
+
+### Conversation Routing
+
+- [ ] **ROUT-01**: Laminark detects conversation intent patterns that match historical tool usage contexts
+- [ ] **ROUT-02**: Tool suggestions are delivered via existing notification mechanism (not auto-invocation)
+- [ ] **ROUT-03**: Routing includes confidence threshold — no suggestion when uncertain
+- [ ] **ROUT-04**: Heuristic fallback routing works without accumulated usage data (cold start)
+
+### Tool Search
+
+- [ ] **SRCH-01**: New `discover_tools` MCP tool allows querying the registry by keyword and scope
+- [ ] **SRCH-02**: Tool descriptions are indexed for semantic search using existing hybrid search infrastructure
+- [ ] **SRCH-03**: Search results include scope, usage count, and last used timestamp
+
+### Staleness Management
+
+- [ ] **STAL-01**: Config rescan on session start detects removed tools and marks them stale
+- [ ] **STAL-02**: Tools not seen in 30+ days are deprioritized in suggestions
+- [ ] **STAL-03**: PostToolUseFailure events deprioritize failing tools
+
+## Future Requirements (v3.0+)
+
+Deferred. Tracked but not in current roadmap.
+
+### Cross-Project Intelligence
+
+- **XPRJ-01**: Surface tool usage patterns from similar projects to new projects
+- **XPRJ-02**: Recommend tools for new projects based on project similarity (dependencies, language)
+- **XPRJ-03**: Cross-project intelligence surfaces tool names and patterns only — never observation content
+
+### Tool Workflow Chains
+
+- **WKFL-01**: Observe and store tool invocation sequences within sessions
+- **WKFL-02**: Identify common tool sequences (plan -> implement -> test) via pattern mining
+- **WKFL-03**: Suggest next step in a workflow after completing a step
+
+### v1.0 Deferred (Still Deferred)
 
 - Proactive context re-surfacing — notify user when current discussion is semantically similar to a stashed topic
-- Conflict detection and flagging — surface contradictions between observations (e.g., "uses React 17" vs "upgraded to React 19")
+- Conflict detection and flagging — surface contradictions between observations
 - Export/import for migration — allow moving memory database between machines
-- Advanced graph maintenance — automated deduplication, synonym merging ("the API" = "our REST API"), background pruning
+- Advanced graph maintenance — automated deduplication, synonym merging, background pruning
 - Multi-strategy curation — use Claude API for high-quality summarization when configured
 
 ## Out of Scope
 
-- **Cloud sync / multi-device** — local-first, single machine. Users can sync SQLite file with Syncthing if needed.
-- **Multi-user / team memory** — this is a personal developer tool. Team context is a different product.
-- **Mobile app** — web UI on localhost is sufficient for developer workflows.
-- **Electron/Tauri desktop wrapper** — browser-based web UI keeps it simple and universal.
-- **Integration with non-Claude AI tools** — optimized for Claude Code plugin lifecycle. MCP compliance allows passive connections.
-- **Aggressive auto-curation (LLM rewriting memories)** — hallucination risk corrupts ground truth. Store originals immutably, summaries are a separate layer.
-- **Heavy ML models (>500MB)** — kills startup time and memory footprint. Small ONNX models are good enough for personal memory search.
-- **Real-time WebSocket live updates** — SSE polling is sufficient for a tool you glance at, not stare at.
-- **Granular permission system / RBAC** — single-user local tool has no threat model justifying access controls.
+Explicitly excluded. Documented to prevent scope creep.
+
+| Feature | Reason |
+|---------|--------|
+| Automatic tool installation | Security risk — user must explicitly approve MCP server additions |
+| Tool execution proxy | Laminark is intelligence layer, not execution engine — MCP tools have own execution paths |
+| Real-time MCP server health monitoring | MCP servers can't communicate with each other — track failures reactively |
+| Natural language tool creation | Code generation is Claude's job — Laminark detects gaps and suggests creation |
+| Multi-user tool sharing | Claude Code already handles team sharing via project-scoped .mcp.json in git |
+| Universal tool abstraction layer | Different tool types have fundamentally different invocation patterns |
+| Enterprise managed-MCP handling | Complex enterprise config deferred — focus on developer workflow first |
+| Cloud sync / multi-device | Local-first, single machine |
+| Mobile app | Web UI on localhost is sufficient |
+| Integration with non-Claude AI tools | Optimized for Claude Code plugin lifecycle |
 
 ## Traceability
 
+### v1.0 (Complete)
+
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| MEM-01 | Phase 1: Storage Engine | Done |
-| MEM-02 | Phase 3: Hook Integration and Capture | Done |
-| MEM-03 | Phase 3: Hook Integration and Capture | Done |
-| MEM-04 | Phase 2: MCP Interface and Search | Done |
-| MEM-05 | Phase 2: MCP Interface and Search | Done |
-| MEM-06 | Phase 1: Storage Engine | Done |
-| MEM-07 | Phase 1: Storage Engine | Done |
-| MEM-08 | Phase 1: Storage Engine | Done |
-| MEM-09 | Phase 1: Storage Engine | Done |
-| MEM-10 | Phase 3: Hook Integration and Capture | Done |
-| SRC-01 | Phase 2: MCP Interface and Search | Done |
-| SRC-02 | Phase 4: Embedding Engine and Semantic Search | Done |
-| SRC-03 | Phase 4: Embedding Engine and Semantic Search | Done |
-| SRC-04 | Phase 2: MCP Interface and Search | Done |
-| SRC-05 | Phase 1: Storage Engine | Done |
-| SRC-06 | Phase 2: MCP Interface and Search | Done |
-| CTX-01 | Phase 5: Session Context and Summaries | Done |
-| CTX-02 | Phase 5: Session Context and Summaries | Done |
-| CTX-03 | Phase 6: Topic Detection and Context Stashing | Done |
-| CTX-04 | Phase 6: Topic Detection and Context Stashing | Done |
-| CTX-05 | Phase 6: Topic Detection and Context Stashing | Done |
-| CTX-06 | Phase 6: Topic Detection and Context Stashing | Done |
-| INT-01 | Phase 4: Embedding Engine and Semantic Search | Done |
-| INT-02 | Phase 7: Knowledge Graph and Advanced Intelligence | Done |
-| INT-03 | Phase 7: Knowledge Graph and Advanced Intelligence | Done |
-| INT-04 | Phase 4: Embedding Engine and Semantic Search | Done |
-| INT-05 | Phase 6: Topic Detection and Context Stashing | Done |
-| INT-06 | Phase 6: Topic Detection and Context Stashing | Done |
-| INT-07 | Phase 6: Topic Detection and Context Stashing | Done |
-| INT-08 | Phase 6: Topic Detection and Context Stashing | Done |
-| INT-09 | Phase 7: Knowledge Graph and Advanced Intelligence | Done |
-| INT-10 | Phase 7: Knowledge Graph and Advanced Intelligence | Done |
-| INT-11 | Phase 7: Knowledge Graph and Advanced Intelligence | Done |
-| INT-12 | Phase 7: Knowledge Graph and Advanced Intelligence | Done |
-| INT-13 | Phase 7: Knowledge Graph and Advanced Intelligence | Done |
-| VIS-01 | Phase 8: Web Visualization | Done |
-| VIS-02 | Phase 8: Web Visualization | Done |
-| VIS-03 | Phase 8: Web Visualization | Done |
-| VIS-04 | Phase 8: Web Visualization | Done |
-| VIS-05 | Phase 8: Web Visualization | Done |
-| VIS-06 | Phase 8: Web Visualization | Done |
-| UI-01 | Phase 2: MCP Interface and Search | Done (2 unified tools per design decision) |
-| UI-02 | Phase 5: Session Context and Summaries | Done |
-| UI-03 | Phase 5: Session Context and Summaries | Done |
-| UI-04 | Phase 6: Topic Detection and Context Stashing | Done |
-| UI-05 | Phase 6: Topic Detection and Context Stashing | Done |
-| DQ-01 | Phase 7: Knowledge Graph and Advanced Intelligence | Done |
-| DQ-02 | Phase 3: Hook Integration and Capture | Done |
-| DQ-03 | Phase 4: Embedding Engine and Semantic Search | Done |
-| DQ-04 | Phase 4: Embedding Engine and Semantic Search | Done |
-| DQ-05 | Phase 6: Topic Detection and Context Stashing | Done |
+| MEM-01 through MEM-10 | Phases 1-3 | Done |
+| SRC-01 through SRC-06 | Phases 2, 4 | Done |
+| CTX-01 through CTX-06 | Phases 5-6 | Done |
+| INT-01 through INT-13 | Phases 4, 6-7 | Done |
+| VIS-01 through VIS-06 | Phase 8 | Done |
+| UI-01 through UI-05 | Phases 2, 5-6 | Done |
+| DQ-01 through DQ-05 | Phases 3-4, 6-7 | Done |
+
+### v2.0 (Pending Roadmap)
+
+| REQ-ID | Phase | Status |
+|--------|-------|--------|
+| GLOB-01 | — | Pending |
+| GLOB-02 | — | Pending |
+| GLOB-03 | — | Pending |
+| GLOB-04 | — | Pending |
+| GLOB-05 | — | Pending |
+| DISC-01 | — | Pending |
+| DISC-02 | — | Pending |
+| DISC-03 | — | Pending |
+| DISC-04 | — | Pending |
+| DISC-05 | — | Pending |
+| DISC-06 | — | Pending |
+| SCOP-01 | — | Pending |
+| SCOP-02 | — | Pending |
+| SCOP-03 | — | Pending |
+| SCOP-04 | — | Pending |
+| UTRK-01 | — | Pending |
+| UTRK-02 | — | Pending |
+| UTRK-03 | — | Pending |
+| CTXT-01 | — | Pending |
+| CTXT-02 | — | Pending |
+| CTXT-03 | — | Pending |
+| ROUT-01 | — | Pending |
+| ROUT-02 | — | Pending |
+| ROUT-03 | — | Pending |
+| ROUT-04 | — | Pending |
+| SRCH-01 | — | Pending |
+| SRCH-02 | — | Pending |
+| SRCH-03 | — | Pending |
+| STAL-01 | — | Pending |
+| STAL-02 | — | Pending |
+| STAL-03 | — | Pending |
+
+**Coverage:**
+- v1.0 requirements: 49 total — all Done
+- v2.0 requirements: 31 total
+- Mapped to phases: 0 (pending roadmap creation)
+- Unmapped: 31
 
 ---
-*Generated: 2026-02-08 from research + user selections*
-*Traceability updated: 2026-02-09 — all requirements marked Done after v1.0 milestone audit*
+*Requirements defined: 2026-02-08 (v1.0), 2026-02-10 (v2.0)*
+*Last updated: 2026-02-10 after v2.0 milestone requirements definition*
