@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-10)
 
 ## Current Position
 
-Phase: 9 of 16 (Global Installation)
-Plan: 2 of 2 complete
-Status: Phase 09 complete
-Last activity: 2026-02-11 — 09-02 complete (plugin configuration with CLAUDE_PLUGIN_ROOT paths, verified via claude --plugin-dir)
+Phase: 10 of 16 (Tool Discovery and Registry)
+Plan: 1 of 2 complete
+Status: Executing Phase 10
+Last activity: 2026-02-11 — 10-01 complete (tool registry storage foundation: types, migration 16, ToolRegistryRepository)
 
-Progress (v2.0): [█░░░░░░░░░] 12% (Phase 09 complete, 1/8 v2 phases)
+Progress (v2.0): [██░░░░░░░░] 19% (Phase 10 plan 1/2, 2/8 v2 phases in progress)
 
 ## Performance Metrics
 
@@ -41,6 +41,7 @@ Progress (v2.0): [█░░░░░░░░░] 12% (Phase 09 complete, 1/8 v2
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 09-global-installation | 2/2 | 6min | 3min |
+| 10-tool-discovery-registry | 1/2 | 2min | 2min |
 
 ## Accumulated Context
 
@@ -58,12 +59,15 @@ Recent decisions affecting current work:
 - [09-02]: Plugin manifest uses semver 1.0.0 (not internal version "7") for plugin system compatibility
 - [09-02]: All config paths use ${CLAUDE_PLUGIN_ROOT} for portability -- no relative ./ paths in hooks.json or .mcp.json
 - [09-02]: SessionStart hook is synchronous with statusMessage; all other hooks are async: true
+- [10-01]: COALESCE(project_hash, '') for NULL-safe unique index -- global tools deduplicated in separate namespace
+- [10-01]: ToolRegistryRepository is NOT project-scoped -- queries span all scopes for cross-project discovery
+- [10-01]: recordOrCreate uses upsert-then-increment pattern for organic tool discovery
 
 ### Pending Todos
 
 - ~~[v2] Global installation mechanism for Laminark~~ COMPLETE (Phase 09)
-- [v2] Tool discovery across config scopes
-- [v2] Scope-aware tool registry
+- ~~[v2] Scope-aware tool registry~~ COMPLETE (Phase 10-01: storage layer)
+- [v2] Tool discovery across config scopes (Phase 10-02: scanning + organic)
 - [v2] Conversation-driven routing
 
 ### Blockers/Concerns
@@ -75,6 +79,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-10
-Stopped at: Phase 09 complete — verified, roadmap updated. Ready to plan Phase 10.
+Last session: 2026-02-11
+Stopped at: Completed 10-01-PLAN.md -- tool registry storage foundation. Ready for 10-02.
 Resume file: None
