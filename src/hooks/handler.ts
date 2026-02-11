@@ -88,6 +88,22 @@ export function processPostToolUseFiltered(
         description: null,
         serverName: extractServerName(toolName),
       }, sessionId ?? null, !isFailure);
+
+      // STAL-03: Failure-driven demotion / success restoration
+      if (isFailure) {
+        // Check sliding window: 3+ failures in last 5 events triggers demotion
+        const recentEvents = toolRegistry.getRecentEventsForTool(
+          toolName, projectHash ?? '', 5,
+        );
+        const failures = recentEvents.filter(e => e.success === 0).length;
+        if (failures >= 3) {
+          toolRegistry.markDemoted(toolName, projectHash ?? null);
+          debug('hook', 'Tool demoted due to failures', { tool: toolName, failures });
+        }
+      } else {
+        // Successful use restores demoted tools immediately
+        toolRegistry.markActive(toolName, projectHash ?? null);
+      }
     } catch {
       // Non-fatal: registry is supplementary to core memory function
     }
