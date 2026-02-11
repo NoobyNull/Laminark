@@ -47,9 +47,10 @@ function prependNotifications(
 function formatToolResult(result: ToolSearchResult, index: number): string {
   const { tool, score } = result;
   const description = tool.description ? ` -- ${tool.description}` : '';
+  const statusTag = tool.status !== 'active' ? ` [${tool.status}]` : '';
   const usageStr = tool.usage_count > 0 ? `${tool.usage_count} uses` : 'never used';
   const lastUsedStr = tool.last_used_at ? `last: ${tool.last_used_at.slice(0, 10)}` : 'never';
-  return `${index}. ${tool.name}${description}\n   [${tool.scope}] | ${usageStr} | ${lastUsedStr} | score: ${score.toFixed(2)}`;
+  return `${index}. ${tool.name}${statusTag}${description}\n   [${tool.scope}] | ${usageStr} | ${lastUsedStr} | score: ${score.toFixed(2)}`;
 }
 
 // ---------------------------------------------------------------------------
