@@ -1,4 +1,5 @@
 import type { ObservationRepository } from '../storage/observations.js';
+import { isLaminarksOwnTool } from './self-referential.js';
 import { debug } from '../shared/debug.js';
 
 /**
@@ -50,13 +51,24 @@ export function extractObservation(payload: PostToolUsePayload): string | null {
     }
 
     case 'Read':
-      // Low signal: file reads are usually noise. Admission filter will often reject.
-      return `[Read] ${tool_input.file_path}`;
-
     case 'Glob':
     case 'Grep':
-      // Low signal: search operations.
-      return `[${tool_name}] pattern=${tool_input.pattern ?? ''} in ${tool_input.path ?? 'cwd'}`;
+      // Routed to research buffer by handler.ts -- should not reach here.
+      // Return null to skip if reached via legacy code path.
+      return null;
+
+    case 'WebFetch': {
+      const url = String(tool_input.url ?? '');
+      const prompt = truncate(String(tool_input.prompt ?? ''), 100);
+      const response = truncate(JSON.stringify(tool_response ?? ''), 300);
+      return `[WebFetch] ${url}\nPrompt: ${prompt}\n${response}`;
+    }
+
+    case 'WebSearch': {
+      const query = String(tool_input.query ?? '');
+      const response = truncate(JSON.stringify(tool_response ?? ''), 300);
+      return `[WebSearch] "${query}"\n${response}`;
+    }
 
     default:
       // MCP tools and others -- capture tool name + input summary.
@@ -67,7 +79,7 @@ export function extractObservation(payload: PostToolUsePayload): string | null {
 /**
  * Processes a PostToolUse or PostToolUseFailure event.
  *
- * Validates the input, skips self-referential mcp__laminark__ tools,
+ * Validates the input, skips self-referential Laminark tools (both prefix variants),
  * extracts a semantic observation summary, and persists it to the database.
  */
 export function processPostToolUse(
@@ -82,7 +94,7 @@ export function processPostToolUse(
   }
 
   // Skip self-referential capture (Laminark observing its own operations)
-  if (toolName.startsWith('mcp__laminark__')) {
+  if (isLaminarksOwnTool(toolName)) {
     debug('hook', 'Skipping self-referential tool', { tool: toolName });
     return;
   }

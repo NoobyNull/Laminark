@@ -1,12 +1,14 @@
 import { openDatabase } from '../storage/database.js';
 import { getDatabaseConfig, getProjectHash } from '../shared/config.js';
 import { ObservationRepository } from '../storage/observations.js';
+import { ResearchBufferRepository } from '../storage/research-buffer.js';
 import { SessionRepository } from '../storage/sessions.js';
 import { extractObservation } from './capture.js';
 import { handleSessionStart, handleSessionEnd, handleStop } from './session-lifecycle.js';
 import { redactSensitiveContent, isExcludedFile } from './privacy-filter.js';
-import { shouldAdmit } from './admission-filter.js';
+import { shouldAdmit, isMeaningfulBashCommand } from './admission-filter.js';
 import { SaveGuard } from './save-guard.js';
+import { isLaminarksOwnTool } from './self-referential.js';
 import { debug } from '../shared/debug.js';
 
 /**
@@ -24,7 +26,7 @@ import { debug } from '../shared/debug.js';
  * - Imports only storage modules -- NO @modelcontextprotocol/sdk (cold start overhead)
  *
  * Filter pipeline (PostToolUse/PostToolUseFailure):
- *   1. Self-referential filter (mcp__laminark__ prefix)
+ *   1. Self-referential filter (dual-prefix: mcp__laminark__ and mcp__plugin_laminark_laminark__)
  *   2. Extract observation text from payload
  *   3. Privacy filter: exclude sensitive files, redact secrets
  *   4. Admission filter: reject noise content
@@ -40,16 +42,25 @@ async function readStdin(): Promise<string> {
 }
 
 /**
+ * Tools that are routed to the research buffer instead of creating observations.
+ * These are high-volume exploration tools whose individual calls are noise,
+ * but whose targets provide useful provenance context for subsequent changes.
+ */
+const RESEARCH_TOOLS = new Set(['Read', 'Glob', 'Grep']);
+
+/**
  * Processes a PostToolUse or PostToolUseFailure event through the full
- * filter pipeline: extract -> privacy -> admission -> store.
+ * filter pipeline: route research tools -> extract -> privacy -> admission -> store.
  *
  * Exported for unit testing of the pipeline logic.
  */
 export function processPostToolUseFiltered(
   input: Record<string, unknown>,
   obsRepo: ObservationRepository,
+  researchBuffer?: ResearchBufferRepository,
 ): void {
   const toolName = input.tool_name as string | undefined;
+  const hookEventName = input.hook_event_name as string | undefined;
 
   if (!toolName) {
     debug('hook', 'PostToolUse missing tool_name, skipping');
@@ -57,7 +68,7 @@ export function processPostToolUseFiltered(
   }
 
   // 1. Skip self-referential capture (Laminark observing its own operations)
-  if (toolName.startsWith('mcp__laminark__')) {
+  if (isLaminarksOwnTool(toolName)) {
     debug('hook', 'Skipping self-referential tool', { tool: toolName });
     return;
   }
@@ -70,6 +81,26 @@ export function processPostToolUseFiltered(
   if (filePath && isExcludedFile(filePath)) {
     debug('hook', 'Observation excluded (sensitive file)', { tool: toolName, filePath });
     return;
+  }
+
+  // 3.5. Route exploration tools to research buffer (not full observations)
+  if (RESEARCH_TOOLS.has(toolName) && researchBuffer) {
+    const target = String(toolInput.file_path ?? toolInput.pattern ?? '');
+    researchBuffer.add({
+      sessionId: (input.session_id as string) ?? null,
+      toolName,
+      target,
+    });
+    return;
+  }
+
+  // 3.6. Filter navigation Bash commands (only for success events)
+  if (toolName === 'Bash' && hookEventName !== 'PostToolUseFailure') {
+    const command = String(toolInput.command ?? '');
+    if (!isMeaningfulBashCommand(command)) {
+      debug('hook', 'Bash command filtered as navigation', { command: command.slice(0, 60) });
+      return;
+    }
   }
 
   // 4. Extract observation text from payload
@@ -91,11 +122,20 @@ export function processPostToolUseFiltered(
   }
 
   // 5. Privacy filter: redact sensitive content
-  const redacted = redactSensitiveContent(summary, filePath);
+  let redacted = redactSensitiveContent(summary, filePath);
 
   if (redacted === null) {
     debug('hook', 'Observation excluded by privacy filter', { tool: toolName });
     return;
+  }
+
+  // 5.5. Attach research context to Write/Edit observations
+  if ((toolName === 'Write' || toolName === 'Edit') && researchBuffer && payload.session_id) {
+    const research = researchBuffer.getRecent(payload.session_id, 5);
+    if (research.length > 0) {
+      const lines = research.map(r => `  - [${r.toolName}] ${r.target}`).join('\n');
+      redacted += `\nResearch context:\n${lines}`;
+    }
   }
 
   // 6. Admission filter: reject noise
@@ -114,14 +154,30 @@ export function processPostToolUseFiltered(
     return;
   }
 
-  // 7. Store the filtered, redacted observation
+  // 7. Determine observation kind from tool type
+  let kind = 'finding';
+  if (toolName === 'Write' || toolName === 'Edit') {
+    kind = 'change';
+  } else if (toolName === 'WebFetch' || toolName === 'WebSearch') {
+    kind = 'reference';
+  } else if (toolName === 'Bash') {
+    const command = String(toolInput.command ?? '');
+    if (/^git\s+(commit|push|merge|rebase|cherry-pick)\b/.test(command.trim())) {
+      kind = 'change';
+    } else {
+      kind = 'verification';
+    }
+  }
+
+  // 8. Store the filtered, redacted observation
   obsRepo.create({
     content: redacted,
     source: 'hook:' + toolName,
+    kind,
     sessionId: payload.session_id ?? null,
   });
 
-  debug('hook', 'Captured observation', { tool: toolName, length: redacted.length });
+  debug('hook', 'Captured observation', { tool: toolName, kind, length: redacted.length });
 }
 
 async function main(): Promise<void> {
@@ -146,11 +202,17 @@ async function main(): Promise<void> {
   try {
     const obsRepo = new ObservationRepository(laminarkDb.db, projectHash);
     const sessionRepo = new SessionRepository(laminarkDb.db, projectHash);
+    let researchBuffer: ResearchBufferRepository | undefined;
+    try {
+      researchBuffer = new ResearchBufferRepository(laminarkDb.db, projectHash);
+    } catch {
+      // research_buffer table may not exist yet before migration 13
+    }
 
     switch (eventName) {
       case 'PostToolUse':
       case 'PostToolUseFailure':
-        processPostToolUseFiltered(input, obsRepo);
+        processPostToolUseFiltered(input, obsRepo, researchBuffer);
         break;
       case 'SessionStart': {
         const context = handleSessionStart(input, sessionRepo, laminarkDb.db, projectHash);
