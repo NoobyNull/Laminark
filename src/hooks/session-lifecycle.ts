@@ -2,8 +2,10 @@ import type BetterSqlite3 from 'better-sqlite3';
 
 import type { ObservationRepository } from '../storage/observations.js';
 import type { SessionRepository } from '../storage/sessions.js';
+import type { ToolRegistryRepository } from '../storage/tool-registry.js';
 import { generateSessionSummary } from '../curation/summarizer.js';
 import { assembleSessionContext } from '../context/injection.js';
+import { scanConfigForTools } from './config-scanner.js';
 import { debug } from '../shared/debug.js';
 
 /**
@@ -24,6 +26,7 @@ export function handleSessionStart(
   sessionRepo: SessionRepository,
   db: BetterSqlite3.Database,
   projectHash: string,
+  toolRegistry?: ToolRegistryRepository,
 ): string | null {
   const sessionId = input.session_id as string | undefined;
 
@@ -34,6 +37,26 @@ export function handleSessionStart(
 
   sessionRepo.create(sessionId);
   debug('session', 'Session started', { sessionId });
+
+  // DISC-01 through DISC-04: Scan config files for available tools
+  if (toolRegistry) {
+    const cwd = input.cwd as string;
+    try {
+      const scanStart = Date.now();
+      const tools = scanConfigForTools(cwd, projectHash);
+      for (const tool of tools) {
+        toolRegistry.upsert(tool);
+      }
+      const scanElapsed = Date.now() - scanStart;
+      debug('session', 'Config scan completed', { toolsFound: tools.length, elapsed: scanElapsed });
+      if (scanElapsed > 200) {
+        debug('session', 'Config scan slow (>200ms budget)', { elapsed: scanElapsed });
+      }
+    } catch {
+      // Tool registry is supplementary -- never block session start
+      debug('session', 'Config scan failed (non-fatal)');
+    }
+  }
 
   // Assemble context from prior sessions and observations
   const startTime = Date.now();
