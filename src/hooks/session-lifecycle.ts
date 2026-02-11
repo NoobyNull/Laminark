@@ -6,6 +6,7 @@ import type { ToolRegistryRepository } from '../storage/tool-registry.js';
 import { generateSessionSummary } from '../curation/summarizer.js';
 import { assembleSessionContext } from '../context/injection.js';
 import { scanConfigForTools } from './config-scanner.js';
+import { extractPatterns, storePrecomputedPatterns } from '../routing/intent-patterns.js';
 import { debug } from '../shared/debug.js';
 
 /**
@@ -55,6 +56,23 @@ export function handleSessionStart(
     } catch {
       // Tool registry is supplementary -- never block session start
       debug('session', 'Config scan failed (non-fatal)');
+    }
+  }
+
+  // ROUT-01: Pre-compute routing patterns for this session
+  if (toolRegistry) {
+    try {
+      const precomputeStart = Date.now();
+      const patterns = extractPatterns(db, projectHash, 5);
+      storePrecomputedPatterns(db, projectHash, patterns);
+      const precomputeElapsed = Date.now() - precomputeStart;
+      debug('session', 'Routing patterns pre-computed', { patternCount: patterns.length, elapsed: precomputeElapsed });
+      if (precomputeElapsed > 50) {
+        debug('session', 'Pattern pre-computation slow (>50ms)', { elapsed: precomputeElapsed });
+      }
+    } catch {
+      // Routing is supplementary -- never block session start
+      debug('session', 'Pattern pre-computation failed (non-fatal)');
     }
   }
 

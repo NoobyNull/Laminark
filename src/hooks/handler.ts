@@ -10,6 +10,7 @@ import { shouldAdmit, isMeaningfulBashCommand } from './admission-filter.js';
 import { SaveGuard } from './save-guard.js';
 import { isLaminarksOwnTool } from './self-referential.js';
 import { ToolRegistryRepository } from '../storage/tool-registry.js';
+import { ConversationRouter } from '../routing/conversation-router.js';
 import { inferToolType, inferScope, extractServerName } from './tool-name-parser.js';
 import { debug } from '../shared/debug.js';
 
@@ -63,6 +64,7 @@ export function processPostToolUseFiltered(
   researchBuffer?: ResearchBufferRepository,
   toolRegistry?: ToolRegistryRepository,
   projectHash?: string,
+  db?: import('better-sqlite3').Database,
 ): void {
   const toolName = input.tool_name as string | undefined;
   const hookEventName = input.hook_event_name as string | undefined;
@@ -202,6 +204,20 @@ export function processPostToolUseFiltered(
   });
 
   debug('hook', 'Captured observation', { tool: toolName, kind, length: redacted.length });
+
+  // 9. ROUT-01/02/03/04: Routing evaluation (suggest tools based on conversation context)
+  // Runs AFTER observation storage and self-referential filter
+  if (db && toolRegistry && projectHash) {
+    try {
+      const sessionId = input.session_id as string | undefined;
+      if (sessionId) {
+        const router = new ConversationRouter(db, projectHash);
+        router.evaluate(sessionId, toolName, toolRegistry);
+      }
+    } catch {
+      // Routing is supplementary -- never block core pipeline
+    }
+  }
 }
 
 async function main(): Promise<void> {
@@ -242,7 +258,7 @@ async function main(): Promise<void> {
     switch (eventName) {
       case 'PostToolUse':
       case 'PostToolUseFailure':
-        processPostToolUseFiltered(input, obsRepo, researchBuffer, toolRegistry, projectHash);
+        processPostToolUseFiltered(input, obsRepo, researchBuffer, toolRegistry, projectHash, laminarkDb.db);
         break;
       case 'SessionStart': {
         const context = handleSessionStart(input, sessionRepo, laminarkDb.db, projectHash, toolRegistry);
