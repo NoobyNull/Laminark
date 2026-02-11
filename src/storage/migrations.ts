@@ -34,6 +34,7 @@ export interface Migration {
  * Migration 016: Tool registry table for discovered tools with scope-aware uniqueness.
  * Migration 017: Tool usage events table for per-event temporal tracking.
  * Migration 018: Tool registry FTS5 + vec0 tables for hybrid search on tool descriptions.
+ * Migration 019: Add status column (active/stale/demoted) to tool_registry for staleness management.
  */
 export const MIGRATIONS: Migration[] = [
   {
@@ -528,6 +529,14 @@ export const MIGRATIONS: Migration[] = [
         // sqlite-vec not available -- skip silently, vector search will degrade gracefully
       }
     },
+  },
+  {
+    version: 19,
+    name: 'add_tool_registry_status',
+    up: `
+      ALTER TABLE tool_registry ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
+      CREATE INDEX idx_tool_registry_status ON tool_registry(status);
+    `,
   },
 ];
 
