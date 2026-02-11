@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-10)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
-**Current focus:** Milestone v2.0 — Phase 13 complete, ready for Phase 14
+**Current focus:** Milestone v2.0 — Phase 14 complete, ready for Phase 15
 
 ## Current Position
 
-Phase: 14 of 16 (Conversation Routing)
-Plan: 1 of 2 complete
-Status: Executing phase 14
-Last activity: 2026-02-11 — 14-01 complete (routing types and heuristic fallback for cold-start tool suggestions)
+Phase: 14 of 16 (Conversation Routing) COMPLETE
+Plan: 2 of 2 complete
+Status: Phase 14 complete
+Last activity: 2026-02-11 — 14-02 complete (learned patterns, ConversationRouter, handler/session lifecycle wiring)
 
-Progress (v2.0): [██████░░░░] 68% (Phase 14 in progress, 14-01 done)
+Progress (v2.0): [███████░░░] 74% (Phase 14 complete)
 
 ## Performance Metrics
 
@@ -45,7 +45,7 @@ Progress (v2.0): [██████░░░░] 68% (Phase 14 in progress, 14-
 | 11-scope-resolution | 1/1 | 3min | 3min |
 | 12-usage-tracking | 1/1 | 2min | 2min |
 | 13-context-enhancement | 1/1 | 3min | 3min |
-| 14-conversation-routing | 1/2 | 2min | 2min |
+| 14-conversation-routing | 2/2 | 5min | 2.5min |
 
 ## Accumulated Context
 
@@ -84,6 +84,10 @@ Recent decisions affecting current work:
 - [14-01]: Heuristic functions are pure (no DB dependency) -- accept pre-fetched data for testability
 - [14-01]: Confidence scored as matchCount/toolKeywords.length (tool-side Jaccard overlap)
 - [14-01]: Stop word set covers 50 common English function words for keyword extraction
+- [14-02]: ConversationRouter instantiated per-evaluation (no long-lived state) -- matches short-lived CLI handler model
+- [14-02]: routing_state/routing_patterns tables created inline (no migration) -- transient data refreshed each session
+- [14-02]: db parameter added explicitly to processPostToolUseFiltered (clean separation, Option A)
+- [14-02]: Learned tier first, heuristic fallback -- progressive takeover as usage data accumulates
 
 ### Pending Todos
 
@@ -92,7 +96,7 @@ Recent decisions affecting current work:
 - ~~[v2] Tool discovery across config scopes~~ COMPLETE (Phase 10-02: config scanning + organic PostToolUse)
 - ~~[v2] Scope-filtered tool resolution~~ COMPLETE (Phase 11-01: getAvailableForSession + session context)
 - ~~[v2] Usage event tracking~~ COMPLETE (Phase 12-01: tool_usage_events + temporal queries)
-- [v2] Conversation-driven routing
+- ~~[v2] Conversation-driven routing~~ COMPLETE (Phase 14: types, heuristic, learned patterns, router, handler + session integration)
 
 ### Blockers/Concerns
 
@@ -104,5 +108,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 14-01-PLAN.md -- Routing types and heuristic fallback for cold-start tool suggestions. Phase 14 in progress (1/2 plans done).
+Stopped at: Completed 14-02-PLAN.md -- Learned patterns, ConversationRouter, handler/session lifecycle wiring. Phase 14 complete (2/2 plans done).
 Resume file: None
