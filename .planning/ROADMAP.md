@@ -178,7 +178,7 @@ Plans:
 
 **Milestone Goal:** Transform Laminark from a project-scoped memory plugin into a globally-installed tool intelligence layer that discovers, maps, and routes to available tools based on conversation context and scope awareness.
 
-- [ ] **Phase 9: Global Installation** - Plugin manifest, global deployment, and project-aware session bootstrapping
+- [x] **Phase 9: Global Installation** - Plugin manifest, global deployment, and project-aware session bootstrapping
 - [ ] **Phase 10: Tool Discovery and Registry** - Config parsing, tool enumeration, and scope-aware registry storage
 - [ ] **Phase 11: Scope Resolution** - Prefix-based scope detection and per-session tool filtering
 - [ ] **Phase 12: Usage Tracking** - Organic tool usage recording from hook events with project and session context
@@ -201,8 +201,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 09-01-PLAN.md -- Dual-prefix self-referential filter with TDD (GLOB-04)
-- [ ] 09-02-PLAN.md -- Plugin manifest, hooks.json, and .mcp.json configuration for global install (GLOB-01, GLOB-02, GLOB-03, GLOB-05)
+- [x] 09-01-PLAN.md -- Dual-prefix self-referential filter with TDD (GLOB-04)
+- [x] 09-02-PLAN.md -- Plugin manifest, hooks.json, and .mcp.json configuration for global install (GLOB-01, GLOB-02, GLOB-03, GLOB-05)
 
 ### Phase 10: Tool Discovery and Registry
 **Goal**: Laminark knows what tools exist across all configuration scopes and stores them in a queryable registry with provenance metadata
@@ -294,7 +294,7 @@ Note: Phases 15 and 16 depend on Phases 10+12 (not on each other or on 13/14), s
 | 6. Topic Detection and Context Stashing | v1.0 | 7/7 | Complete | 2026-02-08 |
 | 7. Knowledge Graph and Advanced Intelligence | v1.0 | 8/8 | Complete | 2026-02-08 |
 | 8. Web Visualization | v1.0 | 5/5 | Complete | 2026-02-08 |
-| 9. Global Installation | v2.0 | 0/2 | Planning | - |
+| 9. Global Installation | v2.0 | 2/2 | Complete | 2026-02-10 |
 | 10. Tool Discovery and Registry | v2.0 | 0/TBD | Not started | - |
 | 11. Scope Resolution | v2.0 | 0/TBD | Not started | - |
 | 12. Usage Tracking | v2.0 | 0/TBD | Not started | - |
