@@ -191,48 +191,48 @@ Explicitly excluded. Documented to prevent scope creep.
 | UI-01 through UI-05 | Phases 2, 5-6 | Done |
 | DQ-01 through DQ-05 | Phases 3-4, 6-7 | Done |
 
-### v2.0 (Pending Roadmap)
+### v2.0
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| GLOB-01 | — | Pending |
-| GLOB-02 | — | Pending |
-| GLOB-03 | — | Pending |
-| GLOB-04 | — | Pending |
-| GLOB-05 | — | Pending |
-| DISC-01 | — | Pending |
-| DISC-02 | — | Pending |
-| DISC-03 | — | Pending |
-| DISC-04 | — | Pending |
-| DISC-05 | — | Pending |
-| DISC-06 | — | Pending |
-| SCOP-01 | — | Pending |
-| SCOP-02 | — | Pending |
-| SCOP-03 | — | Pending |
-| SCOP-04 | — | Pending |
-| UTRK-01 | — | Pending |
-| UTRK-02 | — | Pending |
-| UTRK-03 | — | Pending |
-| CTXT-01 | — | Pending |
-| CTXT-02 | — | Pending |
-| CTXT-03 | — | Pending |
-| ROUT-01 | — | Pending |
-| ROUT-02 | — | Pending |
-| ROUT-03 | — | Pending |
-| ROUT-04 | — | Pending |
-| SRCH-01 | — | Pending |
-| SRCH-02 | — | Pending |
-| SRCH-03 | — | Pending |
-| STAL-01 | — | Pending |
-| STAL-02 | — | Pending |
-| STAL-03 | — | Pending |
+| GLOB-01 | Phase 9 | Pending |
+| GLOB-02 | Phase 9 | Pending |
+| GLOB-03 | Phase 9 | Pending |
+| GLOB-04 | Phase 9 | Pending |
+| GLOB-05 | Phase 9 | Pending |
+| DISC-01 | Phase 10 | Pending |
+| DISC-02 | Phase 10 | Pending |
+| DISC-03 | Phase 10 | Pending |
+| DISC-04 | Phase 10 | Pending |
+| DISC-05 | Phase 10 | Pending |
+| DISC-06 | Phase 10 | Pending |
+| SCOP-01 | Phase 11 | Pending |
+| SCOP-02 | Phase 11 | Pending |
+| SCOP-03 | Phase 11 | Pending |
+| SCOP-04 | Phase 11 | Pending |
+| UTRK-01 | Phase 12 | Pending |
+| UTRK-02 | Phase 12 | Pending |
+| UTRK-03 | Phase 12 | Pending |
+| CTXT-01 | Phase 13 | Pending |
+| CTXT-02 | Phase 13 | Pending |
+| CTXT-03 | Phase 13 | Pending |
+| ROUT-01 | Phase 14 | Pending |
+| ROUT-02 | Phase 14 | Pending |
+| ROUT-03 | Phase 14 | Pending |
+| ROUT-04 | Phase 14 | Pending |
+| SRCH-01 | Phase 15 | Pending |
+| SRCH-02 | Phase 15 | Pending |
+| SRCH-03 | Phase 15 | Pending |
+| STAL-01 | Phase 16 | Pending |
+| STAL-02 | Phase 16 | Pending |
+| STAL-03 | Phase 16 | Pending |
 
 **Coverage:**
-- v1.0 requirements: 49 total — all Done
+- v1.0 requirements: 49 total -- all Done
 - v2.0 requirements: 31 total
-- Mapped to phases: 0 (pending roadmap creation)
-- Unmapped: 31
+- Mapped to phases: 31/31
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-08 (v1.0), 2026-02-10 (v2.0)*
-*Last updated: 2026-02-10 after v2.0 milestone requirements definition*
+*Last updated: 2026-02-10 after v2.0 roadmap creation*

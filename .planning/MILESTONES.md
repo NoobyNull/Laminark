@@ -24,4 +24,15 @@
 
 **Started:** 2026-02-10
 **Starting phase number:** 9
-**Status:** Defining requirements
+**Ending phase number:** 16
+**Status:** Roadmap created, ready to plan Phase 9
+
+**Phases:**
+- Phase 9: Global Installation (GLOB-01 through GLOB-05)
+- Phase 10: Tool Discovery and Registry (DISC-01 through DISC-06)
+- Phase 11: Scope Resolution (SCOP-01 through SCOP-04)
+- Phase 12: Usage Tracking (UTRK-01 through UTRK-03)
+- Phase 13: Context Enhancement (CTXT-01 through CTXT-03)
+- Phase 14: Conversation Routing (ROUT-01 through ROUT-04)
+- Phase 15: Tool Search (SRCH-01 through SRCH-03)
+- Phase 16: Staleness Management (STAL-01 through STAL-03)
