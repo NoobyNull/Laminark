@@ -228,7 +228,10 @@ Plans:
   2. Session start context only surfaces tools that are available in the current project's resolved scope (built-in + global + current project + team)
   3. A tool registered from project A's `.mcp.json` is never suggested or surfaced when working in project B
   4. Scope detection correctly parses tool_name prefixes: bare names are built-in, `mcp__` prefix is MCP server, `mcp__plugin_` prefix is plugin-provided
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 11-01-PLAN.md -- Scope-filtered query (getAvailableForSession), tool section formatting, and session context wiring
 
 ### Phase 12: Usage Tracking
 **Goal**: Laminark builds a usage profile of which tools are used, how often, and in what context, providing the data foundation for intelligent routing
