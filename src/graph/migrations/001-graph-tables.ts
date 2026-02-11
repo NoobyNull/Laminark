@@ -2,12 +2,12 @@
  * Migration 001: Create graph_nodes and graph_edges tables.
  *
  * Graph tables are managed separately from the main observation/session tables
- * because the knowledge graph is a distinct subsystem (Phase 7) that operates
+ * because the knowledge graph is a distinct subsystem that operates
  * on extracted entities rather than raw observations.
  *
  * Tables:
- *   - graph_nodes: entities with type-checked taxonomy (7 types)
- *   - graph_edges: directed relationships with type-checked taxonomy (7 types),
+ *   - graph_nodes: entities with type-checked taxonomy (6 types)
+ *   - graph_edges: directed relationships with type-checked taxonomy (8 types),
  *     weight confidence, and unique constraint on (source_id, target_id, type)
  *
  * Indexes:
@@ -18,7 +18,7 @@
 export const up = `
   CREATE TABLE IF NOT EXISTS graph_nodes (
     id TEXT PRIMARY KEY,
-    type TEXT NOT NULL CHECK(type IN ('Project','File','Decision','Problem','Solution','Tool','Person')),
+    type TEXT NOT NULL CHECK(type IN ('Project','File','Decision','Problem','Solution','Reference')),
     name TEXT NOT NULL,
     metadata TEXT DEFAULT '{}',
     observation_ids TEXT DEFAULT '[]',
@@ -31,7 +31,7 @@ export const up = `
     id TEXT PRIMARY KEY,
     source_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
     target_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
-    type TEXT NOT NULL CHECK(type IN ('uses','depends_on','decided_by','related_to','part_of','caused_by','solved_by')),
+    type TEXT NOT NULL CHECK(type IN ('related_to','solved_by','caused_by','modifies','informed_by','references','verified_by','preceded_by')),
     weight REAL NOT NULL DEFAULT 1.0 CHECK(weight >= 0.0 AND weight <= 1.0),
     metadata TEXT DEFAULT '{}',
     project_hash TEXT,

@@ -20,6 +20,7 @@ export const ObservationRowSchema = z.object({
   embedding: z.instanceof(Buffer).nullable(),
   embedding_model: z.string().nullable(),
   embedding_version: z.string().nullable(),
+  kind: z.string().default('finding'),
   classification: z.string().nullable(),
   classified_at: z.string().nullable(),
   created_at: z.string(),
@@ -40,6 +41,8 @@ export type ObservationRow = z.infer<typeof ObservationRowSchema>;
  */
 export type ObservationClassification = 'discovery' | 'problem' | 'solution' | 'noise';
 
+export type ObservationKind = 'change' | 'reference' | 'finding' | 'decision' | 'verification';
+
 export interface Observation {
   rowid: number;
   id: string;
@@ -48,6 +51,7 @@ export interface Observation {
   title: string | null;
   source: string;
   sessionId: string | null;
+  kind: ObservationKind;
   embedding: Float32Array | null;
   embeddingModel: string | null;
   embeddingVersion: string | null;
@@ -70,6 +74,7 @@ export const ObservationInsertSchema = z.object({
   content: z.string().min(1).max(100_000),
   title: z.string().max(200).nullable().default(null),
   source: z.string().default('unknown'),
+  kind: z.string().default('finding'),
   sessionId: z.string().nullable().default(null),
   embedding: z.instanceof(Float32Array).nullable().default(null),
   embeddingModel: z.string().nullable().default(null),
@@ -127,6 +132,7 @@ export function rowToObservation(row: ObservationRow): Observation {
     title: row.title,
     source: row.source,
     sessionId: row.session_id,
+    kind: (row.kind ?? 'finding') as ObservationKind,
     embedding: row.embedding
       ? new Float32Array(
           row.embedding.buffer,

@@ -136,143 +136,33 @@ export const decisionRule: ExtractionRule = (text: string): ExtractionMatch[] =>
 };
 
 // =============================================================================
-// Tool Rule
+// Reference Rule
 // =============================================================================
 
 /**
- * Known tool/technology names -- curated list for conservative matching.
- * Case-insensitive, word-boundary aware.
+ * Matches URLs as Reference entities.
+ * Captures http/https URLs from observation text.
  * Confidence: 0.9
  */
-const KNOWN_TOOLS = [
-  // Linters & Formatters
-  'eslint', 'prettier', 'biome', 'stylelint', 'oxlint',
-  // Languages & Runtimes
-  'typescript', 'javascript', 'python', 'rust', 'golang',
-  'node', 'deno', 'bun',
-  // Package Managers
-  'npm', 'pnpm', 'yarn', 'cargo', 'pip',
-  // Bundlers & Build Tools
-  'webpack', 'vite', 'rollup', 'esbuild', 'tsup', 'tsdown', 'turbopack', 'parcel', 'swc',
-  // Test Frameworks
-  'jest', 'vitest', 'mocha', 'cypress', 'playwright', 'pytest',
-  // Frontend Frameworks
-  'react', 'vue', 'svelte', 'angular', 'solid', 'astro', 'next', 'nuxt', 'remix', 'gatsby',
-  // CSS Frameworks
-  'tailwind', 'tailwindcss', 'bootstrap', 'chakra',
-  // Databases
-  'sqlite', 'postgres', 'postgresql', 'mysql', 'mongodb', 'redis', 'supabase', 'dynamodb',
-  // ORMs & Query Builders
-  'prisma', 'drizzle', 'typeorm', 'sequelize', 'knex', 'kysely',
-  // Containers & Infrastructure
-  'docker', 'kubernetes', 'terraform', 'nginx', 'caddy',
-  // Version Control & CI
-  'git', 'github', 'gitlab', 'circleci', 'jenkins',
-  // Auth & Security
-  'jwt', 'oauth', 'bcrypt', 'argon2', 'jose',
-  // API & Communication
-  'graphql', 'grpc', 'trpc', 'express', 'fastify', 'hono', 'koa',
-  // AI/ML
-  'openai', 'anthropic', 'langchain', 'huggingface', 'onnx',
-  // Misc
-  'zod', 'ajv', 'winston', 'pino', 'socket.io', 'rxjs',
-  'storybook', 'chromatic', 'figma',
-] as const;
-
-// Build a regex that matches any tool name at word boundaries
-const toolPattern = new RegExp(
-  `\\b(${KNOWN_TOOLS.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`,
-  'gi',
-);
-
-export const toolRule: ExtractionRule = (text: string): ExtractionMatch[] => {
+export const referenceRule: ExtractionRule = (text: string): ExtractionMatch[] => {
   const matches: ExtractionMatch[] = [];
   const seen = new Set<string>();
 
+  const urlRegex = /https?:\/\/[^\s"'<>\])}]+/g;
   let match: RegExpExecArray | null;
-  // Reset regex state
-  toolPattern.lastIndex = 0;
-  while ((match = toolPattern.exec(text)) !== null) {
-    const name = match[1].toLowerCase();
-    if (seen.has(name)) continue;
-    seen.add(name);
+  while ((match = urlRegex.exec(text)) !== null) {
+    let url = match[0];
+    // Strip trailing punctuation that's likely not part of the URL
+    url = url.replace(/[.,;:!?)]+$/, '');
+
+    if (seen.has(url)) continue;
+    seen.add(url);
 
     matches.push({
-      name,
-      type: 'Tool',
+      name: url,
+      type: 'Reference',
       confidence: 0.9,
-      span: [match.index, match.index + match[0].length],
-    });
-  }
-
-  return matches;
-};
-
-// =============================================================================
-// Person Rule
-// =============================================================================
-
-/**
- * Matches @-mentions and "by/with [Capitalized Name]" patterns.
- * Confidence: 0.6 (names are tricky, keep conservative)
- */
-export const personRule: ExtractionRule = (text: string): ExtractionMatch[] => {
-  const matches: ExtractionMatch[] = [];
-  const seen = new Set<string>();
-
-  // @-mentions: @username (alphanumeric, hyphens, underscores)
-  const mentionRegex = /@([a-zA-Z][a-zA-Z0-9_-]{1,38})\b/g;
-  let match: RegExpExecArray | null;
-  while ((match = mentionRegex.exec(text)) !== null) {
-    const name = match[1];
-    const lower = name.toLowerCase();
-    if (seen.has(lower)) continue;
-    seen.add(lower);
-
-    matches.push({
-      name: `@${name}`,
-      type: 'Person',
-      confidence: 0.6,
-      span: [match.index, match.index + match[0].length],
-    });
-  }
-
-  // "by [Capitalized Name]" -- e.g., "reviewed by John Smith"
-  const byRegex = /\bby\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b/g;
-  while ((match = byRegex.exec(text)) !== null) {
-    const name = match[1];
-    const lower = name.toLowerCase();
-    if (seen.has(lower)) continue;
-    seen.add(lower);
-
-    matches.push({
-      name,
-      type: 'Person',
-      confidence: 0.6,
-      span: [match.index, match.index + match[0].length],
-    });
-  }
-
-  // "with [Capitalized Name]" when preceded by interaction verbs
-  // Two-stage match: first find the verb+with phrase, then extract capitalized name after it
-  const withVerbRegex = /\b(?:[Dd]ecided|[Ww]orked|[Pp]aired|[Cc]ollaborated|[Dd]iscussed|[Mm]et)\s+with\s+/g;
-  while ((match = withVerbRegex.exec(text)) !== null) {
-    // Extract capitalized name from text after the verb phrase
-    const afterVerb = text.slice(match.index + match[0].length);
-    const nameMatch = afterVerb.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b/);
-    if (!nameMatch) continue;
-
-    const name = nameMatch[1];
-    const lower = name.toLowerCase();
-    if (seen.has(lower)) continue;
-    seen.add(lower);
-
-    const fullEnd = match.index + match[0].length + nameMatch[0].length;
-    matches.push({
-      name,
-      type: 'Person',
-      confidence: 0.6,
-      span: [match.index, fullEnd],
+      span: [match.index, match.index + url.length],
     });
   }
 
@@ -453,10 +343,9 @@ export const projectRule: ExtractionRule = (text: string): ExtractionMatch[] => 
  */
 export const ALL_RULES: ExtractionRule[] = [
   filePathRule,
-  toolRule,
   projectRule,
+  referenceRule,
   decisionRule,
   problemRule,
   solutionRule,
-  personRule,
 ];

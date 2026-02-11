@@ -59,6 +59,10 @@ export function registerSaveMemory(
           .string()
           .default('manual')
           .describe("Source identifier (e.g., manual, hook:PostToolUse)"),
+        kind: z
+          .enum(['change', 'reference', 'finding', 'decision', 'verification'])
+          .default('finding')
+          .describe('Observation kind: change, reference, finding, decision, or verification'),
       },
     },
     async (args) => {
@@ -87,6 +91,7 @@ export function registerSaveMemory(
           content: args.text,
           title: resolvedTitle,
           source: args.source,
+          kind: args.kind,
         }, 'discovery');
 
         debug('mcp', 'save_memory: saved', {

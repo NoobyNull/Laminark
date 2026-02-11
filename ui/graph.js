@@ -24,13 +24,12 @@ function debounce(fn, ms) {
 // ---------------------------------------------------------------------------
 
 const ENTITY_STYLES = {
-  Project:  { color: '#58a6ff', shape: 'round-rectangle' },
-  File:     { color: '#7ee787', shape: 'rectangle' },
-  Decision: { color: '#d2a8ff', shape: 'diamond' },
-  Problem:  { color: '#f85149', shape: 'triangle' },
-  Solution: { color: '#3fb950', shape: 'star' },
-  Tool:     { color: '#f0883e', shape: 'hexagon' },
-  Person:   { color: '#79c0ff', shape: 'ellipse' },
+  Project:   { color: '#58a6ff', shape: 'round-rectangle' },
+  File:      { color: '#7ee787', shape: 'rectangle' },
+  Decision:  { color: '#d2a8ff', shape: 'diamond' },
+  Problem:   { color: '#f85149', shape: 'triangle' },
+  Solution:  { color: '#3fb950', shape: 'star' },
+  Reference: { color: '#f0883e', shape: 'hexagon' },
 };
 
 // ---------------------------------------------------------------------------
@@ -64,7 +63,7 @@ const LAYOUT_CONFIGS = {
     animationDuration: 500,
     nodeDimensionsIncludeLabels: true,
     concentric: function (node) {
-      var typeOrder = { Project: 5, Tool: 4, File: 3, Decision: 2, Person: 2, Problem: 1, Solution: 1 };
+      var typeOrder = { Project: 5, File: 4, Reference: 3, Decision: 2, Problem: 1, Solution: 1 };
       return typeOrder[node.data('type')] || 1;
     },
     levelWidth: function () { return 2; },
@@ -74,13 +73,14 @@ const LAYOUT_CONFIGS = {
 
 // Relationship type colors for focus mode edges
 var EDGE_TYPE_COLORS = {
-  uses: '#58a6ff',
-  depends_on: '#f0883e',
   related_to: '#8b949e',
-  part_of: '#d2a8ff',
-  caused_by: '#f85149',
   solved_by: '#3fb950',
-  decided_by: '#d29922',
+  caused_by: '#f85149',
+  modifies: '#58a6ff',
+  informed_by: '#d2a8ff',
+  references: '#f0883e',
+  verified_by: '#d29922',
+  preceded_by: '#79c0ff',
 };
 
 // ---------------------------------------------------------------------------
