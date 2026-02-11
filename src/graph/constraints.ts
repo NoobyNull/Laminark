@@ -218,27 +218,12 @@ export function mergeEntities(
  * Maps lowercase abbreviation -> lowercase full name.
  */
 const ABBREVIATION_MAP: Record<string, string> = {
+  // File extension abbreviations (for File entity dedup)
   ts: 'typescript',
   js: 'javascript',
   py: 'python',
   rb: 'ruby',
   rs: 'rust',
-  pg: 'postgresql',
-  postgres: 'postgresql',
-  mongo: 'mongodb',
-  k8s: 'kubernetes',
-  tf: 'terraform',
-  gh: 'github',
-  gl: 'gitlab',
-  ci: 'circleci',
-  gql: 'graphql',
-  tw: 'tailwind',
-  tailwindcss: 'tailwind',
-  sw: 'swc',
-  np: 'numpy',
-  pd: 'pandas',
-  wp: 'webpack',
-  nx: 'next',
 };
 
 /**

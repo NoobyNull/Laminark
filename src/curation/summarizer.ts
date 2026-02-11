@@ -1,4 +1,4 @@
-import type { Observation } from '../shared/types.js';
+import type { Observation, ObservationKind } from '../shared/types.js';
 import { ObservationRepository } from '../storage/observations.js';
 import { SessionRepository } from '../storage/sessions.js';
 import { debug } from '../shared/debug.js';
@@ -14,143 +14,40 @@ export interface SessionSummary {
 }
 
 // ---------------------------------------------------------------------------
-// Heuristic patterns for extracting structured information
-// ---------------------------------------------------------------------------
-
-/** Matches file paths like src/foo/bar.ts, ./config.json, /etc/hosts */
-const FILE_PATH_RE = /(?:^|[\s"'`(])([a-zA-Z0-9_./-]+\.[a-zA-Z]{1,10})(?=[\s"'`),;:]|$)/g;
-
-/** Keywords indicating a decision or choice was made */
-const DECISION_KEYWORDS = [
-  'decided',
-  'chose',
-  'will use',
-  'going with',
-  'selected',
-  'opted for',
-  'switching to',
-  'prefer',
-];
-
-/** Keywords indicating a problem was encountered */
-const PROBLEM_KEYWORDS = [
-  'error',
-  'failed',
-  'bug',
-  'issue',
-  'fix',
-  'broken',
-  'crash',
-  'wrong',
-  'missing',
-  'undefined',
-];
-
-/** Keywords indicating a solution was applied */
-const SOLUTION_KEYWORDS = [
-  'fixed',
-  'resolved',
-  'solved',
-  'working now',
-  'corrected',
-  'patched',
-  'addressed',
-];
-
-// ---------------------------------------------------------------------------
-// Extraction helpers
+// Kind-aware extraction helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Extracts unique file paths from observation content.
- * Filters out common false positives like version numbers (e.g., "v1.0").
+ * Groups observations by their kind field.
  */
-function extractFilePaths(observations: Observation[]): string[] {
-  const paths = new Set<string>();
-  const falsePositiveRe = /^[vV]?\d+\.\d/;
+function groupByKind(observations: Observation[]): Record<ObservationKind, Observation[]> {
+  const groups: Record<ObservationKind, Observation[]> = {
+    change: [],
+    reference: [],
+    finding: [],
+    decision: [],
+    verification: [],
+  };
 
   for (const obs of observations) {
-    const text = obs.content;
-    let match: RegExpExecArray | null;
-    FILE_PATH_RE.lastIndex = 0;
-    while ((match = FILE_PATH_RE.exec(text)) !== null) {
-      const path = match[1];
-      // Skip version-like patterns, single extensions, and very short matches
-      if (path.length > 3 && !falsePositiveRe.test(path)) {
-        paths.add(path);
-      }
-    }
-  }
-
-  return Array.from(paths).slice(0, 15);
-}
-
-/**
- * Extracts observations that contain decision-related keywords.
- * Returns the first sentence or first 120 characters of matching content.
- */
-function extractDecisions(observations: Observation[]): string[] {
-  const decisions: string[] = [];
-
-  for (const obs of observations) {
-    const lower = obs.content.toLowerCase();
-    const isDecision = DECISION_KEYWORDS.some((kw) => lower.includes(kw));
-    if (isDecision) {
-      // Take the first sentence or first 120 chars
-      const firstSentence = obs.content.split(/[.!?\n]/)[0].trim();
-      const snippet =
-        firstSentence.length > 120
-          ? firstSentence.slice(0, 117) + '...'
-          : firstSentence;
-      if (snippet.length > 5) {
-        decisions.push(snippet);
-      }
-    }
-  }
-
-  return decisions.slice(0, 8);
-}
-
-/**
- * Extracts key activities from observations by summarizing tool usage
- * and notable actions. Prioritizes: explicit saves > problems/solutions > tool actions.
- */
-function extractKeyActivities(observations: Observation[]): string[] {
-  const activities: string[] = [];
-  const seen = new Set<string>();
-
-  for (const obs of observations) {
-    const lower = obs.content.toLowerCase();
-
-    // Check for problem/solution pairs
-    const isProblem = PROBLEM_KEYWORDS.some((kw) => lower.includes(kw));
-    const isSolution = SOLUTION_KEYWORDS.some((kw) => lower.includes(kw));
-
-    let label: string | null = null;
-    if (isSolution) {
-      label = 'Resolved';
-    } else if (isProblem) {
-      label = 'Issue';
-    } else if (obs.source.startsWith('mcp:')) {
-      label = 'Saved';
+    const kind = obs.kind ?? 'finding';
+    if (groups[kind]) {
+      groups[kind].push(obs);
     } else {
-      label = 'Action';
-    }
-
-    // Take first meaningful line as the activity summary
-    const firstLine = obs.content.split('\n')[0].trim();
-    const snippet =
-      firstLine.length > 100
-        ? firstLine.slice(0, 97) + '...'
-        : firstLine;
-
-    if (snippet.length > 5 && !seen.has(snippet)) {
-      seen.add(snippet);
-      activities.push(`[${label}] ${snippet}`);
+      groups.finding.push(obs);
     }
   }
 
-  return activities.slice(0, 10);
+  return groups;
+}
+
+/**
+ * Extracts a snippet from observation content (first line, max 120 chars).
+ */
+function snippet(content: string, maxLen: number = 120): string {
+  const firstLine = content.split('\n')[0].trim();
+  if (firstLine.length <= maxLen) return firstLine;
+  return firstLine.slice(0, maxLen - 3) + '...';
 }
 
 // ---------------------------------------------------------------------------
@@ -160,23 +57,24 @@ function extractKeyActivities(observations: Observation[]): string[] {
 /**
  * Compresses an array of session observations into a structured text summary.
  *
- * This is a deterministic heuristic summarizer -- no LLM call. It extracts:
- * - Key activities (significant actions, max 10)
- * - Decisions and insights (keyword-matched, max 8)
- * - File paths mentioned (regex-extracted, max 15)
+ * Kind-aware: groups observations by their `kind` field instead of heuristic
+ * keyword matching. Produces structured sections:
+ * - Changes (kind='change'): file modifications
+ * - Decisions (kind='decision'): choices made
+ * - Verifications (kind='verification'): test/build results
+ * - References (kind='reference'): external resources consulted
+ * - Findings (kind='finding'): manual saves and insights
  *
  * Target output: under 500 tokens (~2000 characters).
- * If the raw extraction exceeds this budget, sections are truncated by priority:
- * decisions > activities > files.
+ * If the raw extraction exceeds this budget, sections are trimmed by priority:
+ * references first, then findings, then verifications, then changes.
  */
 export function compressObservations(observations: Observation[]): string {
   if (observations.length === 0) {
     return '';
   }
 
-  const activities = extractKeyActivities(observations);
-  const decisions = extractDecisions(observations);
-  const filePaths = extractFilePaths(observations);
+  const groups = groupByKind(observations);
 
   // Build the summary with section headers
   const sections: string[] = [];
@@ -193,27 +91,48 @@ export function compressObservations(observations: Observation[]): string {
   sections.push(`**Duration:** ${startedAt} to ${endedAt}`);
   sections.push(`**Observations:** ${observations.length}`);
 
-  if (activities.length > 0) {
+  // Changes section (most important)
+  if (groups.change.length > 0) {
     sections.push('');
-    sections.push('### Key Activities');
-    for (const activity of activities) {
-      sections.push(`- ${activity}`);
+    sections.push('### Changes');
+    for (const obs of groups.change.slice(0, 10)) {
+      sections.push(`- ${snippet(obs.content)}`);
     }
   }
 
-  if (decisions.length > 0) {
+  // Decisions section
+  if (groups.decision.length > 0) {
     sections.push('');
-    sections.push('### Decisions & Insights');
-    for (const decision of decisions) {
-      sections.push(`- ${decision}`);
+    sections.push('### Decisions');
+    for (const obs of groups.decision.slice(0, 5)) {
+      sections.push(`- ${snippet(obs.content)}`);
     }
   }
 
-  if (filePaths.length > 0) {
+  // Verifications section
+  if (groups.verification.length > 0) {
     sections.push('');
-    sections.push('### Files Touched');
-    for (const fp of filePaths) {
-      sections.push(`- ${fp}`);
+    sections.push('### Verifications');
+    for (const obs of groups.verification.slice(0, 5)) {
+      sections.push(`- ${snippet(obs.content)}`);
+    }
+  }
+
+  // References section
+  if (groups.reference.length > 0) {
+    sections.push('');
+    sections.push('### References');
+    for (const obs of groups.reference.slice(0, 3)) {
+      sections.push(`- ${snippet(obs.content)}`);
+    }
+  }
+
+  // Findings section
+  if (groups.finding.length > 0) {
+    sections.push('');
+    sections.push('### Findings');
+    for (const obs of groups.finding.slice(0, 5)) {
+      sections.push(`- ${snippet(obs.content)}`);
     }
   }
 
@@ -221,36 +140,33 @@ export function compressObservations(observations: Observation[]): string {
 
   // Enforce ~2000 char budget (approx 500 tokens at ~4 chars/token)
   if (result.length > 2000) {
-    // Progressively trim: files first, then activities
-    const trimmedFilePaths = filePaths.slice(0, 5);
-    const trimmedActivities = activities.slice(0, 5);
-
+    // Progressively trim: references first, then findings, then verifications
     const trimSections: string[] = [];
     trimSections.push('## Session Summary');
     trimSections.push(`**Duration:** ${startedAt} to ${endedAt}`);
     trimSections.push(`**Observations:** ${observations.length}`);
 
-    if (trimmedActivities.length > 0) {
+    if (groups.change.length > 0) {
       trimSections.push('');
-      trimSections.push('### Key Activities');
-      for (const activity of trimmedActivities) {
-        trimSections.push(`- ${activity}`);
+      trimSections.push('### Changes');
+      for (const obs of groups.change.slice(0, 5)) {
+        trimSections.push(`- ${snippet(obs.content)}`);
       }
     }
 
-    if (decisions.length > 0) {
+    if (groups.decision.length > 0) {
       trimSections.push('');
-      trimSections.push('### Decisions & Insights');
-      for (const decision of decisions.slice(0, 5)) {
-        trimSections.push(`- ${decision}`);
+      trimSections.push('### Decisions');
+      for (const obs of groups.decision.slice(0, 3)) {
+        trimSections.push(`- ${snippet(obs.content)}`);
       }
     }
 
-    if (trimmedFilePaths.length > 0) {
+    if (groups.verification.length > 0) {
       trimSections.push('');
-      trimSections.push('### Files Touched');
-      for (const fp of trimmedFilePaths) {
-        trimSections.push(`- ${fp}`);
+      trimSections.push('### Verifications');
+      for (const obs of groups.verification.slice(0, 3)) {
+        trimSections.push(`- ${snippet(obs.content)}`);
       }
     }
 

@@ -145,6 +145,12 @@ export function registerRecall(
           .describe(
             'View detail level: compact (index ~80 tokens/result), timeline (date-grouped), full (complete text)',
           ),
+        kind: z
+          .enum(['change', 'reference', 'finding', 'decision', 'verification'])
+          .optional()
+          .describe(
+            'Filter results by observation kind: change, reference, finding, decision, verification',
+          ),
         limit: z
           .number()
           .int()
@@ -247,7 +253,12 @@ export function registerRecall(
           // No query, id, title, or ids -- list recent
           observations = args.include_purged
             ? repo.listIncludingDeleted({ limit: args.limit })
-            : repo.list({ limit: args.limit });
+            : repo.list({ limit: args.limit, kind: args.kind });
+        }
+
+        // Apply kind filter to resolved observations (post-search filtering)
+        if (args.kind && observations.length > 0) {
+          observations = observations.filter((obs) => obs.kind === args.kind);
         }
 
         if (observations.length === 0) {

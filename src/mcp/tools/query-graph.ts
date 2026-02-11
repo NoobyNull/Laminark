@@ -210,7 +210,7 @@ export function registerQueryGraph(
     {
       title: 'Query Knowledge Graph',
       description:
-        "Query the knowledge graph to find entities and their relationships. Use to answer questions like 'what files does this decision affect?' or 'what tools does this project use?'",
+        "Query the knowledge graph to find entities and their relationships. Use to answer questions like 'what files does this decision affect?' or 'what references informed this change?'",
       inputSchema: {
         query: z
           .string()

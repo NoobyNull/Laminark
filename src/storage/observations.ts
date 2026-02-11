@@ -38,8 +38,8 @@ export class ObservationRepository {
     this.projectHash = projectHash;
 
     this.stmtInsert = db.prepare(`
-      INSERT INTO observations (id, project_hash, content, title, source, session_id, embedding, embedding_model, embedding_version)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO observations (id, project_hash, content, title, source, kind, session_id, embedding, embedding_model, embedding_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this.stmtGetById = db.prepare(`
@@ -96,6 +96,7 @@ export class ObservationRepository {
       validated.content,
       validated.title,
       validated.source,
+      validated.kind,
       validated.sessionId,
       embeddingBuffer,
       validated.embeddingModel,
@@ -136,6 +137,7 @@ export class ObservationRepository {
     offset?: number;
     sessionId?: string;
     since?: string;
+    kind?: string;
     includeUnclassified?: boolean;
   }): Observation[] {
     debug('obs', 'Listing observations', { ...options });
@@ -150,6 +152,11 @@ export class ObservationRepository {
 
     if (!includeUnclassified) {
       sql += " AND classification IS NOT NULL AND classification != 'noise'";
+    }
+
+    if (options?.kind) {
+      sql += ' AND kind = ?';
+      params.push(options.kind);
     }
 
     if (options?.sessionId) {

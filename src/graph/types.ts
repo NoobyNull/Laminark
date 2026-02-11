@@ -16,8 +16,7 @@ export const ENTITY_TYPES = [
   'Decision',
   'Problem',
   'Solution',
-  'Tool',
-  'Person',
+  'Reference',
 ] as const;
 
 export type EntityType = (typeof ENTITY_TYPES)[number];
@@ -27,13 +26,14 @@ export type EntityType = (typeof ENTITY_TYPES)[number];
 // =============================================================================
 
 export const RELATIONSHIP_TYPES = [
-  'uses',
-  'depends_on',
-  'decided_by',
   'related_to',
-  'part_of',
-  'caused_by',
   'solved_by',
+  'caused_by',
+  'modifies',
+  'informed_by',
+  'references',
+  'verified_by',
+  'preceded_by',
 ] as const;
 
 export type RelationshipType = (typeof RELATIONSHIP_TYPES)[number];
@@ -46,7 +46,7 @@ export type RelationshipType = (typeof RELATIONSHIP_TYPES)[number];
  * A node in the knowledge graph representing a named entity.
  *
  * - id: UUID (hex-encoded randomBytes)
- * - type: one of the 7 entity types
+ * - type: one of the 6 entity types
  * - name: canonical name (e.g., "src/auth/login.ts" for File, "Use JWT" for Decision)
  * - metadata: flexible JSON for type-specific data
  * - observation_ids: source observations this entity was extracted from
@@ -71,7 +71,7 @@ export interface GraphNode {
  *
  * - id: UUID (hex-encoded randomBytes)
  * - source_id / target_id: references to GraphNode.id
- * - type: one of the 7 relationship types
+ * - type: one of the 8 relationship types
  * - weight: confidence/strength score between 0.0 and 1.0
  * - metadata: flexible JSON for relationship-specific data
  * - created_at: ISO 8601 timestamp
@@ -92,7 +92,7 @@ export interface GraphEdge {
 
 /**
  * Runtime type guard for EntityType.
- * Uses the ENTITY_TYPES const array for O(n) lookup (n=7, negligible).
+ * Uses the ENTITY_TYPES const array for O(n) lookup (n=6, negligible).
  */
 export function isEntityType(s: string): s is EntityType {
   return (ENTITY_TYPES as readonly string[]).includes(s);
@@ -100,7 +100,7 @@ export function isEntityType(s: string): s is EntityType {
 
 /**
  * Runtime type guard for RelationshipType.
- * Uses the RELATIONSHIP_TYPES const array for O(n) lookup (n=7, negligible).
+ * Uses the RELATIONSHIP_TYPES const array for O(n) lookup (n=8, negligible).
  */
 export function isRelationshipType(s: string): s is RelationshipType {
   return (RELATIONSHIP_TYPES as readonly string[]).includes(s);

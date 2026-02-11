@@ -20,8 +20,7 @@
   --color-decision: #d29922;
   --color-problem: #f85149;
   --color-solution: #a371f7;
-  --color-tool: #79c0ff;
-  --color-person: #f778ba;
+  --color-reference: #f0883e;
 
   --nav-height: 48px;
   --filter-height: 40px;
@@ -213,8 +212,7 @@ body {
 .filter-pill[data-type="Decision"].active { border-color: var(--color-decision); color: var(--color-decision); background: rgba(210, 153, 34, 0.12); }
 .filter-pill[data-type="Problem"].active { border-color: var(--color-problem); color: var(--color-problem); background: rgba(248, 81, 73, 0.12); }
 .filter-pill[data-type="Solution"].active { border-color: var(--color-solution); color: var(--color-solution); background: rgba(163, 113, 247, 0.12); }
-.filter-pill[data-type="Tool"].active { border-color: var(--color-tool); color: var(--color-tool); background: rgba(121, 192, 255, 0.12); }
-.filter-pill[data-type="Person"].active { border-color: var(--color-person); color: var(--color-person); background: rgba(247, 120, 186, 0.12); }
+.filter-pill[data-type="Reference"].active { border-color: var(--color-reference); color: var(--color-reference); background: rgba(240, 136, 62, 0.12); }
 
 /* Time range bar */
 #time-range-bar {
@@ -571,7 +569,7 @@ body {
   margin-top: 6px;
 }
 
-.observation-entry .obs-type-dot[data-type="hook:post_tool_use"] { background: var(--color-tool); }
+.observation-entry .obs-type-dot[data-type="hook:post_tool_use"] { background: var(--color-reference); }
 .observation-entry .obs-type-dot[data-type="mcp:save_memory"] { background: var(--color-decision); }
 .observation-entry .obs-type-dot[data-type="slash:remember"] { background: var(--color-solution); }
 
@@ -814,8 +812,7 @@ body {
 .type-badge[data-type="Decision"] { background: rgba(210, 153, 34, 0.15); color: var(--color-decision); }
 .type-badge[data-type="Problem"] { background: rgba(248, 81, 73, 0.15); color: var(--color-problem); }
 .type-badge[data-type="Solution"] { background: rgba(163, 113, 247, 0.15); color: var(--color-solution); }
-.type-badge[data-type="Tool"] { background: rgba(121, 192, 255, 0.15); color: var(--color-tool); }
-.type-badge[data-type="Person"] { background: rgba(247, 120, 186, 0.15); color: var(--color-person); }
+.type-badge[data-type="Reference"] { background: rgba(240, 136, 62, 0.15); color: var(--color-reference); }
 
 /* Graph view overlays */
 #graph-view {

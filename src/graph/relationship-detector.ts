@@ -35,20 +35,23 @@ export interface RelationshipCandidate {
 // =============================================================================
 
 /**
- * Ordered by specificity. First match wins.
+ * Provenance-oriented context signals. Ordered by specificity.
+ * First match wins.
  */
 const CONTEXT_SIGNALS: Array<{
   pattern: RegExp;
   type: RelationshipType;
 }> = [
-  // Most specific signals first (multi-word phrases and directional indicators)
-  { pattern: /\b(?:decided|chose|selected)\b/i, type: 'decided_by' },
-  { pattern: /\b(?:solved\s+by|fixed\s+by|resolved\s+by)\b/i, type: 'solved_by' },
+  // Provenance: modification patterns
+  { pattern: /\b(?:modified|changed|edited|created|wrote|updated)\b/i, type: 'modifies' },
+  // Provenance: research/consultation patterns
+  { pattern: /\b(?:informed|consulted|read|referenced|looked\s+at|checked)\b/i, type: 'informed_by' },
+  // Provenance: verification patterns
+  { pattern: /\b(?:verified|tested|confirmed|passed|failed|ran\s+tests?)\b/i, type: 'verified_by' },
+  // Causation
   { pattern: /\b(?:caused\s+by|because\s+of|due\s+to)\b/i, type: 'caused_by' },
-  { pattern: /\b(?:depends?\s+on|requires?|imports?)\b/i, type: 'depends_on' },
-  { pattern: /\b(?:part\s+of|belongs?\s+to|inside)\b/i, type: 'part_of' },
-  // Least specific signals last (common words that could be coincidental)
-  { pattern: /\b(?:uses?|using)\b/i, type: 'uses' },
+  // Solutions
+  { pattern: /\b(?:solved\s+by|fixed\s+by|resolved\s+by)\b/i, type: 'solved_by' },
 ];
 
 // =============================================================================
@@ -58,23 +61,22 @@ const CONTEXT_SIGNALS: Array<{
 /**
  * Default relationship type based on entity type pair.
  * Key format: "SourceType->TargetType"
+ *
+ * Provenance-oriented: tracks how entities informed, modified,
+ * or verified each other.
  */
 const TYPE_PAIR_DEFAULTS: Record<string, RelationshipType> = {
-  'File->Tool': 'uses',
-  'Tool->File': 'uses',
-  'File->File': 'related_to', // overridden by context if import/require present
-  'Decision->Tool': 'related_to',
-  'Tool->Decision': 'related_to',
-  'Decision->Person': 'decided_by',
-  'Person->Decision': 'decided_by',
-  'Problem->File': 'part_of',
-  'File->Problem': 'part_of',
+  'File->File': 'informed_by',
+  'File->Reference': 'references',
+  'Reference->File': 'references',
   'Problem->Solution': 'solved_by',
   'Solution->Problem': 'solved_by',
-  'Solution->Tool': 'uses',
-  'Tool->Solution': 'uses',
-  'Project->File': 'part_of',
-  'File->Project': 'part_of',
+  'Problem->File': 'related_to',
+  'File->Problem': 'related_to',
+  'Decision->File': 'related_to',
+  'File->Decision': 'related_to',
+  'Project->File': 'related_to',
+  'File->Project': 'related_to',
 };
 
 // =============================================================================
@@ -149,7 +151,7 @@ export function detectRelationships(
       // Special case: File->File with import/require language
       if (source.type === 'File' && target.type === 'File') {
         if (/\b(?:imports?|requires?|from)\b/i.test(contextText)) {
-          relationshipType = 'depends_on';
+          relationshipType = 'informed_by';
         }
       }
 
