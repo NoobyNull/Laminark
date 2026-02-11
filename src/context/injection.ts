@@ -1,8 +1,10 @@
 import type BetterSqlite3 from 'better-sqlite3';
 
-import type { Observation, Session } from '../shared/types.js';
+import type { Observation, ObservationKind, Session } from '../shared/types.js';
 import type { ObservationRow } from '../shared/types.js';
 import { rowToObservation } from '../shared/types.js';
+import type { ToolRegistryRepository } from '../storage/tool-registry.js';
+import type { ToolRegistryRow } from '../shared/tool-types.js';
 import { debug } from '../shared/debug.js';
 
 /**
@@ -15,6 +17,12 @@ const MAX_CONTEXT_CHARS = 6000;
  * Maximum number of characters to show per observation in the index.
  */
 const OBSERVATION_CONTENT_LIMIT = 120;
+
+/**
+ * Maximum number of tools to show in the context section.
+ * Keeps the tool section compact to preserve budget for observations.
+ */
+const MAX_TOOLS_IN_CONTEXT = 10;
 
 /**
  * Welcome message for first-ever session (no prior sessions or observations).
@@ -65,42 +73,99 @@ function truncate(text: string, maxLen: number): string {
 }
 
 /**
- * Formats the context using progressive disclosure.
+ * Queries recent observations filtered by kind with a time window.
+ */
+function getRecentByKind(
+  db: BetterSqlite3.Database,
+  projectHash: string,
+  kind: ObservationKind,
+  limit: number,
+  sinceDays: number,
+): Observation[] {
+  const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString();
+  const rows = db
+    .prepare(
+      `SELECT * FROM observations
+       WHERE project_hash = ? AND kind = ? AND deleted_at IS NULL
+         AND created_at >= ?
+       ORDER BY created_at DESC, rowid DESC
+       LIMIT ?`,
+    )
+    .all(projectHash, kind, since, limit) as ObservationRow[];
+  return rows.map(rowToObservation);
+}
+
+/**
+ * Formats the context using structured kind-aware sections.
  *
  * Produces a compact index suitable for Claude's context window:
- * - Last session summary (if available)
- * - Recent observation index with truncated content and IDs for drill-down
- *
- * @param lastSession - The most recent completed session (with summary), or null
- * @param recentObservations - Recent high-value observations
- * @returns Formatted context string
+ * - Last session summary
+ * - Recent changes (with provenance context)
+ * - Active decisions
+ * - Reference docs
+ * - Findings
  */
 export function formatContextIndex(
   lastSession: Session | null,
-  recentObservations: Observation[],
+  sections: {
+    changes: Observation[];
+    decisions: Observation[];
+    findings: Observation[];
+    references: Observation[];
+  },
 ): string {
-  if (!lastSession && recentObservations.length === 0) {
+  const hasContent = lastSession?.summary ||
+    sections.changes.length > 0 ||
+    sections.decisions.length > 0 ||
+    sections.findings.length > 0 ||
+    sections.references.length > 0;
+
+  if (!hasContent) {
     return WELCOME_MESSAGE;
   }
 
-  const lines: string[] = ['[Laminark Context - Session Recovery]', ''];
+  const lines: string[] = ['[Laminark - Session Context]', ''];
 
   if (lastSession && lastSession.summary) {
-    const timeRange = lastSession.endedAt
-      ? `${lastSession.startedAt} to ${lastSession.endedAt}`
-      : lastSession.startedAt;
-    lines.push(`## Last Session (${timeRange})`);
+    lines.push('## Previous Session');
     lines.push(lastSession.summary);
     lines.push('');
   }
 
-  if (recentObservations.length > 0) {
-    lines.push('## Recent Memories (use search tool for full details)');
-    for (const obs of recentObservations) {
-      const shortId = obs.id.slice(0, 8);
+  if (sections.changes.length > 0) {
+    lines.push('## Recent Changes');
+    for (const obs of sections.changes) {
       const content = truncate(obs.content, OBSERVATION_CONTENT_LIMIT);
       const relTime = formatRelativeTime(obs.createdAt);
-      lines.push(`- [${shortId}] ${content} (source: ${obs.source}, ${relTime})`);
+      lines.push(`- ${content} (${relTime})`);
+    }
+    lines.push('');
+  }
+
+  if (sections.decisions.length > 0) {
+    lines.push('## Active Decisions');
+    for (const obs of sections.decisions) {
+      const content = truncate(obs.content, OBSERVATION_CONTENT_LIMIT);
+      lines.push(`- ${content}`);
+    }
+    lines.push('');
+  }
+
+  if (sections.references.length > 0) {
+    lines.push('## Reference Docs');
+    for (const obs of sections.references) {
+      const content = truncate(obs.content, OBSERVATION_CONTENT_LIMIT);
+      lines.push(`- ${content}`);
+    }
+    lines.push('');
+  }
+
+  if (sections.findings.length > 0) {
+    lines.push('## Recent Findings');
+    for (const obs of sections.findings) {
+      const shortId = obs.id.slice(0, 8);
+      const content = truncate(obs.content, OBSERVATION_CONTENT_LIMIT);
+      lines.push(`- [${shortId}] ${content}`);
     }
   }
 
@@ -109,13 +174,7 @@ export function formatContextIndex(
 
 /**
  * Queries recent high-value observations for context injection.
- *
- * Priority ordering:
- * 1. Observations from source "mcp:save_memory" (user explicitly saved)
- * 2. Observations from source "slash:remember" (user explicitly saved via slash command)
- * 3. Most recent observations regardless of source
- *
- * Excludes deleted observations. Scoped to projectHash.
+ * Kind-aware: prioritizes changes, decisions, and findings.
  *
  * @param db - better-sqlite3 database connection
  * @param projectHash - Project scope identifier
@@ -129,8 +188,6 @@ export function getHighValueObservations(
 ): Observation[] {
   debug('context', 'Querying high-value observations', { projectHash, limit });
 
-  // Query with priority: explicit saves first, then recency
-  // Uses CASE expression to sort mcp:save_memory and slash:remember sources first
   const rows = db
     .prepare(
       `SELECT * FROM observations
@@ -140,7 +197,9 @@ export function getHighValueObservations(
          CASE
            WHEN source = 'mcp:save_memory' THEN 0
            WHEN source = 'slash:remember' THEN 0
-           ELSE 1
+           WHEN kind = 'change' THEN 1
+           WHEN kind = 'decision' THEN 1
+           ELSE 2
          END ASC,
          created_at DESC,
          rowid DESC
@@ -155,10 +214,6 @@ export function getHighValueObservations(
 
 /**
  * Gets the most recent completed session with a non-null summary.
- *
- * @param db - better-sqlite3 database connection
- * @param projectHash - Project scope identifier
- * @returns The last session with a summary, or null
  */
 function getLastCompletedSession(
   db: BetterSqlite3.Database,
@@ -193,45 +248,152 @@ function getLastCompletedSession(
 }
 
 /**
+ * Formats available tools as a compact section for session context.
+ *
+ * Deduplicates MCP servers vs individual MCP tools (prefers server entries).
+ * Excludes built-in tools (Claude already knows Read, Write, Edit, Bash, etc.).
+ * Limits to MAX_TOOLS_IN_CONTEXT entries to preserve context budget.
+ */
+function formatToolSection(tools: ToolRegistryRow[]): string {
+  if (tools.length === 0) return '';
+
+  // Deduplicate: prefer mcp_server entries over individual mcp_tool entries
+  const seenServers = new Set<string>();
+  const deduped: ToolRegistryRow[] = [];
+
+  // First pass: collect server-level entries
+  for (const tool of tools) {
+    if (tool.tool_type === 'mcp_server') {
+      seenServers.add(tool.server_name ?? tool.name);
+      deduped.push(tool);
+    }
+  }
+  // Second pass: add non-server entries, skipping individual tools from listed servers
+  for (const tool of tools) {
+    if (tool.tool_type !== 'mcp_server') {
+      if (tool.tool_type === 'mcp_tool' && tool.server_name && seenServers.has(tool.server_name)) {
+        continue;
+      }
+      deduped.push(tool);
+    }
+  }
+
+  // Exclude built-in tools -- Claude already knows about them
+  const displayable = deduped.filter(t => t.tool_type !== 'builtin');
+
+  if (displayable.length === 0) return '';
+
+  const limited = displayable.slice(0, MAX_TOOLS_IN_CONTEXT);
+  const lines: string[] = ['## Available Tools'];
+
+  for (const tool of limited) {
+    const scopeTag = tool.scope === 'project' ? 'project' : 'global';
+    const usageStr = tool.usage_count > 0 ? `, ${tool.usage_count}x` : '';
+
+    if (tool.tool_type === 'mcp_server') {
+      lines.push(`- MCP: ${tool.server_name ?? tool.name} (${scopeTag}${usageStr})`);
+    } else if (tool.tool_type === 'slash_command') {
+      lines.push(`- ${tool.name} (${scopeTag}${usageStr})`);
+    } else if (tool.tool_type === 'skill') {
+      const desc = tool.description ? ` - ${tool.description}` : '';
+      lines.push(`- skill: ${tool.name} (${scopeTag})${desc}`);
+    } else if (tool.tool_type === 'plugin') {
+      lines.push(`- plugin: ${tool.name} (${scopeTag})`);
+    } else {
+      lines.push(`- ${tool.name} (${scopeTag}${usageStr})`);
+    }
+  }
+
+  if (displayable.length > MAX_TOOLS_IN_CONTEXT) {
+    lines.push(`(${displayable.length - MAX_TOOLS_IN_CONTEXT} more available)`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * Assembles the complete context string for SessionStart injection.
  *
- * This is the main entry point for context injection. It queries the database
- * for the last completed session summary and recent high-value observations,
- * then formats them into a compact progressive disclosure index.
- *
- * Performance: All queries are synchronous (better-sqlite3). Expected execution
- * time is under 100ms (2-3 simple SELECT queries on indexed columns).
+ * Kind-aware: queries changes (last 24h), decisions (last 7d),
+ * findings (last 7d), and references (last 3d) separately,
+ * then assembles them into structured sections.
  *
  * Token budget: Total output stays under 2000 tokens (~6000 characters).
- * If content exceeds budget, observations are trimmed (session summary preserved).
- *
- * @param db - better-sqlite3 database connection
- * @param projectHash - Project scope identifier
- * @returns Formatted context string for injection into Claude's context window
  */
 export function assembleSessionContext(
   db: BetterSqlite3.Database,
   projectHash: string,
+  toolRegistry?: ToolRegistryRepository,
 ): string {
   debug('context', 'Assembling session context', { projectHash });
 
   const lastSession = getLastCompletedSession(db, projectHash);
-  const observations = getHighValueObservations(db, projectHash, 5);
 
-  let context = formatContextIndex(lastSession, observations);
+  // Kind-aware queries with different time windows and limits
+  const changes = getRecentByKind(db, projectHash, 'change', 10, 1);
+  const decisions = getRecentByKind(db, projectHash, 'decision', 5, 7);
+  const findings = getRecentByKind(db, projectHash, 'finding', 5, 7);
+  const references = getRecentByKind(db, projectHash, 'reference', 3, 3);
 
-  // Enforce token budget: if over limit, progressively remove observations
+  // SCOP-02: Query scope-filtered tools for this session
+  let toolSection = '';
+  if (toolRegistry) {
+    try {
+      const availableTools = toolRegistry.getAvailableForSession(projectHash);
+      toolSection = formatToolSection(availableTools);
+    } catch {
+      // Tool registry is supplementary -- never block context assembly
+    }
+  }
+
+  let context = formatContextIndex(lastSession, { changes, decisions, findings, references });
+
+  // Append tool section after observations (lower priority for budget)
+  if (toolSection) {
+    context = context + '\n\n' + toolSection;
+  }
+
+  // Enforce token budget: progressively trim sections
   if (context.length > MAX_CONTEXT_CHARS) {
-    debug('context', 'Context exceeds budget, trimming observations', {
+    debug('context', 'Context exceeds budget, trimming', {
       length: context.length,
       budget: MAX_CONTEXT_CHARS,
     });
 
-    // Remove observations one by one from the end until within budget
-    let trimmedObs = observations.slice();
-    while (trimmedObs.length > 0 && context.length > MAX_CONTEXT_CHARS) {
-      trimmedObs = trimmedObs.slice(0, -1);
-      context = formatContextIndex(lastSession, trimmedObs);
+    // Drop tool section first (lowest priority)
+    if (toolSection) {
+      context = formatContextIndex(lastSession, { changes, decisions, findings, references });
+      toolSection = ''; // Mark as dropped so we don't re-add
+    }
+  }
+
+  if (context.length > MAX_CONTEXT_CHARS) {
+    // Trim in priority order: references first, then findings, then changes
+    let trimmedRefs = references.slice();
+    let trimmedFindings = findings.slice();
+    let trimmedChanges = changes.slice();
+
+    while (context.length > MAX_CONTEXT_CHARS && trimmedRefs.length > 0) {
+      trimmedRefs = trimmedRefs.slice(0, -1);
+      context = formatContextIndex(lastSession, {
+        changes: trimmedChanges, decisions, findings: trimmedFindings, references: trimmedRefs,
+      });
+    }
+    if (context.length > MAX_CONTEXT_CHARS) {
+      while (context.length > MAX_CONTEXT_CHARS && trimmedFindings.length > 0) {
+        trimmedFindings = trimmedFindings.slice(0, -1);
+        context = formatContextIndex(lastSession, {
+          changes: trimmedChanges, decisions, findings: trimmedFindings, references: trimmedRefs,
+        });
+      }
+    }
+    if (context.length > MAX_CONTEXT_CHARS) {
+      while (context.length > MAX_CONTEXT_CHARS && trimmedChanges.length > 0) {
+        trimmedChanges = trimmedChanges.slice(0, -1);
+        context = formatContextIndex(lastSession, {
+          changes: trimmedChanges, decisions, findings: trimmedFindings, references: trimmedRefs,
+        });
+      }
     }
   }
 
