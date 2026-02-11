@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-10)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
-**Current focus:** Milestone v2.0 — Phase 11 complete, ready for Phase 12
+**Current focus:** Milestone v2.0 — Phase 12 complete, ready for Phase 13
 
 ## Current Position
 
-Phase: 11 of 16 (Scope Resolution) -- COMPLETE
+Phase: 12 of 16 (Usage Tracking) -- COMPLETE
 Plan: 1 of 1 complete
-Status: Phase 11 complete
-Last activity: 2026-02-11 — 11-01 complete (scope-filtered tool queries + session context Available Tools section)
+Status: Phase 12 complete
+Last activity: 2026-02-11 — 12-01 complete (per-event usage tracking with temporal queries)
 
-Progress (v2.0): [████░░░░░░] 38% (Phase 11 complete, 3/8 v2 phases done)
+Progress (v2.0): [█████░░░░░] 50% (Phase 12 complete, 4/8 v2 phases done)
 
 ## Performance Metrics
 
@@ -43,6 +43,7 @@ Progress (v2.0): [████░░░░░░] 38% (Phase 11 complete, 3/8 v2
 | 09-global-installation | 2/2 | 6min | 3min |
 | 10-tool-discovery-registry | 2/2 | 4min | 2min |
 | 11-scope-resolution | 1/1 | 3min | 3min |
+| 12-usage-tracking | 1/1 | 2min | 2min |
 
 ## Accumulated Context
 
@@ -71,6 +72,9 @@ Recent decisions affecting current work:
 - [11-01]: Tool section is lowest-priority context budget item -- dropped before observations on overflow
 - [11-01]: formatToolSection is module-internal (not exported) -- implementation detail of injection.ts
 - [11-01]: Built-in tools excluded from Available Tools display since Claude already knows them
+- [12-01]: Event insert inside existing try/catch -- non-fatal, supplementary to aggregate counters
+- [12-01]: sessionId=undefined skips event insert -- backward compatible with callers not providing session
+- [12-01]: No transaction wrapping aggregate+event -- independent rows, acceptable if event fails alone
 
 ### Pending Todos
 
@@ -78,6 +82,7 @@ Recent decisions affecting current work:
 - ~~[v2] Scope-aware tool registry~~ COMPLETE (Phase 10-01: storage layer)
 - ~~[v2] Tool discovery across config scopes~~ COMPLETE (Phase 10-02: config scanning + organic PostToolUse)
 - ~~[v2] Scope-filtered tool resolution~~ COMPLETE (Phase 11-01: getAvailableForSession + session context)
+- ~~[v2] Usage event tracking~~ COMPLETE (Phase 12-01: tool_usage_events + temporal queries)
 - [v2] Conversation-driven routing
 
 ### Blockers/Concerns
@@ -90,5 +95,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 11-01-PLAN.md -- Phase 11 complete. Scope resolution with getAvailableForSession() and session context Available Tools section.
+Stopped at: Completed 12-01-PLAN.md -- Phase 12 complete. Per-event usage tracking with tool_usage_events table and temporal query methods.
 Resume file: None
