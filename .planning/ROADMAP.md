@@ -184,7 +184,7 @@ Plans:
 - [x] **Phase 12: Usage Tracking** - Organic tool usage recording from hook events with project and session context
 - [x] **Phase 13: Context Enhancement** - Session start injection extended with ranked tool suggestions within budget
 - [x] **Phase 14: Conversation Routing** - Intent-to-tool mapping with confidence thresholds and cold start heuristics
-- [ ] **Phase 15: Tool Search** - MCP tool for querying the registry by keyword, scope, and semantic meaning
+- [x] **Phase 15: Tool Search** - MCP tool for querying the registry by keyword, scope, and semantic meaning
 - [ ] **Phase 16: Staleness Management** - Config rescan, age-based deprioritization, and failure-driven demotion
 
 ## Phase Details
@@ -296,7 +296,11 @@ Plans:
   1. On each session start, config rescan compares current config files against the registry and marks tools that no longer appear in any config as stale
   2. Tools not seen (neither discovered nor used) in 30+ days are automatically deprioritized in ranking and suggestions
   3. When a PostToolUseFailure event occurs, the failing tool is deprioritized in future suggestions until a successful use resets its standing
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 16-01-PLAN.md -- Migration 19 (status column), ToolRegistryRow type update, and staleness storage methods on ToolRegistryRepository (STAL-01, STAL-02, STAL-03 foundation)
+- [ ] 16-02-PLAN.md -- Config rescan staleness detection, failure demotion in PostToolUse, ranking deprioritization, routing exclusion, and search status display (STAL-01, STAL-02, STAL-03 wiring)
 
 ## Progress
 
@@ -322,4 +326,4 @@ Note: Phases 15 and 16 depend on Phases 10+12 (not on each other or on 13/14), s
 | 13. Context Enhancement | v2.0 | 1/1 | Complete | 2026-02-11 |
 | 14. Conversation Routing | v2.0 | 2/2 | Complete | 2026-02-10 |
 | 15. Tool Search | v2.0 | 2/2 | Complete | 2026-02-10 |
-| 16. Staleness Management | v2.0 | 0/TBD | Not started | - |
+| 16. Staleness Management | v2.0 | 0/2 | Not started | - |
