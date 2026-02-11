@@ -8,6 +8,7 @@ import { z } from "zod";
  * embedding is Float32Array (converted from Buffer during mapping).
  */
 type ObservationClassification = 'discovery' | 'problem' | 'solution' | 'noise';
+type ObservationKind = 'change' | 'reference' | 'finding' | 'decision' | 'verification';
 interface Observation {
   rowid: number;
   id: string;
@@ -16,6 +17,7 @@ interface Observation {
   title: string | null;
   source: string;
   sessionId: string | null;
+  kind: ObservationKind;
   embedding: Float32Array | null;
   embeddingModel: string | null;
   embeddingVersion: string | null;
@@ -33,6 +35,7 @@ declare const ObservationInsertSchema: z.ZodObject<{
   content: z.ZodString;
   title: z.ZodDefault<z.ZodNullable<z.ZodString>>;
   source: z.ZodDefault<z.ZodString>;
+  kind: z.ZodDefault<z.ZodString>;
   sessionId: z.ZodDefault<z.ZodNullable<z.ZodString>>;
   embedding: z.ZodDefault<z.ZodNullable<z.ZodCustom<Float32Array<ArrayBuffer>, Float32Array<ArrayBuffer>>>>;
   embeddingModel: z.ZodDefault<z.ZodNullable<z.ZodString>>;
@@ -97,6 +100,7 @@ declare class ObservationRepository {
     offset?: number;
     sessionId?: string;
     since?: string;
+    kind?: string;
     includeUnclassified?: boolean;
   }): Observation[];
   /**
@@ -163,4 +167,4 @@ declare class ObservationRepository {
 }
 //#endregion
 export { SearchResult as a, ObservationInsert as i, DatabaseConfig as n, Session as o, Observation as r, ObservationRepository as t };
-//# sourceMappingURL=observations-B62-p18e.d.mts.map
+//# sourceMappingURL=observations-Ch0nc47i.d.mts.map

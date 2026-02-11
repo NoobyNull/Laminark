@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-t8LZeB-u.mjs";
-import { a as rowToObservation, c as runMigrations, i as ObservationRepository, l as debug, n as jaccardSimilarity, o as openDatabase, r as SessionRepository, s as MIGRATIONS, t as SaveGuard, u as debugTimed } from "./save-guard-B6cie18b.mjs";
+import { a as jaccardSimilarity, c as ObservationRepository, d as MIGRATIONS, f as runMigrations, i as SaveGuard, l as rowToObservation, m as debugTimed, n as NotificationStore, o as hybridSearch, p as debug, r as ResearchBufferRepository, s as SessionRepository, t as ToolRegistryRepository, u as openDatabase } from "./tool-registry-Dk6m-4H_.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -503,118 +503,6 @@ async function startServer(server) {
 }
 
 //#endregion
-//#region src/search/hybrid.ts
-/**
-* Hybrid search combining FTS5 keyword results and vec0 vector results
-* using reciprocal rank fusion (RRF).
-*
-* When both keyword and vector results are available, RRF merges the two
-* ranked lists into a single score-sorted list. When only keyword results
-* are available (worker not ready, no embeddings), falls back transparently.
-*/
-/**
-* Merges multiple ranked lists into a single fused ranking using RRF.
-*
-* For each document across all lists, computes:
-*   fusedScore = sum(1 / (k + rank + 1))
-* where rank is the 0-based position in each list.
-*
-* @param rankedLists - Arrays of ranked items, each with an `id` field
-* @param k - Smoothing constant (default 60, standard RRF value)
-* @returns Fused results sorted by fusedScore descending
-*/
-function reciprocalRankFusion(rankedLists, k = 60) {
-	const scores = /* @__PURE__ */ new Map();
-	for (const list of rankedLists) for (let rank = 0; rank < list.length; rank++) {
-		const item = list[rank];
-		const current = scores.get(item.id) ?? 0;
-		scores.set(item.id, current + 1 / (k + rank + 1));
-	}
-	const results = [];
-	for (const [id, fusedScore] of scores) results.push({
-		id,
-		fusedScore
-	});
-	results.sort((a, b) => b.fusedScore - a.fusedScore);
-	return results;
-}
-/**
-* Combines FTS5 keyword search and vec0 vector search using RRF.
-*
-* Falls back to keyword-only when:
-* - Worker is null or not ready
-* - Query embedding fails
-* - No vector results returned
-*
-* @returns SearchResult[] with matchType indicating source(s)
-*/
-async function hybridSearch(params) {
-	const { searchEngine, embeddingStore, worker, query, db, projectHash, options } = params;
-	const limit = options?.limit ?? 20;
-	return debugTimed("search", "Hybrid search", async () => {
-		const keywordResults = searchEngine.searchKeyword(query, {
-			limit,
-			sessionId: options?.sessionId
-		});
-		debug("search", "Keyword results", { count: keywordResults.length });
-		let vectorResults = [];
-		if (worker && worker.isReady()) {
-			const queryEmbedding = await worker.embed(query);
-			if (queryEmbedding) {
-				vectorResults = embeddingStore.search(queryEmbedding, limit * 2);
-				debug("search", "Vector results", { count: vectorResults.length });
-			} else debug("search", "Query embedding failed, keyword-only");
-		} else debug("search", "Worker not ready, keyword-only");
-		if (vectorResults.length === 0) {
-			debug("search", "Returning keyword-only results", { count: keywordResults.length });
-			return keywordResults;
-		}
-		const fused = reciprocalRankFusion([keywordResults.map((r) => ({ id: r.observation.id })), vectorResults.map((r) => ({ id: r.observationId }))]);
-		const keywordMap = /* @__PURE__ */ new Map();
-		for (const r of keywordResults) keywordMap.set(r.observation.id, r);
-		const vectorIdSet = new Set(vectorResults.map((r) => r.observationId));
-		const obsRepo = new ObservationRepository(db, projectHash);
-		const merged = [];
-		for (const item of fused) {
-			if (merged.length >= limit) break;
-			const fromKeyword = keywordMap.get(item.id);
-			const fromVector = vectorIdSet.has(item.id);
-			if (fromKeyword && fromVector) merged.push({
-				observation: fromKeyword.observation,
-				score: item.fusedScore,
-				matchType: "hybrid",
-				snippet: fromKeyword.snippet
-			});
-			else if (fromKeyword) merged.push({
-				observation: fromKeyword.observation,
-				score: item.fusedScore,
-				matchType: "fts",
-				snippet: fromKeyword.snippet
-			});
-			else if (fromVector) {
-				const obs = obsRepo.getById(item.id);
-				if (obs) {
-					const snippet = (obs.content ?? "").replace(/\n/g, " ").slice(0, 100);
-					merged.push({
-						observation: obs,
-						score: item.fusedScore,
-						matchType: "vector",
-						snippet
-					});
-				}
-			}
-		}
-		debug("search", "Hybrid search complete", {
-			keyword: keywordResults.length,
-			vector: vectorResults.length,
-			fused: merged.length,
-			hybrid: merged.filter((r) => r.matchType === "hybrid").length
-		});
-		return merged;
-	});
-}
-
-//#endregion
 //#region src/mcp/token-budget.ts
 const TOKEN_BUDGET = 2e3;
 const FULL_VIEW_BUDGET = 4e3;
@@ -673,19 +561,19 @@ function formatTimelineGroup(date, items) {
 function formatFullItem(obs) {
 	return `--- ${shortId(obs.id)} | ${obs.title ?? "untitled"} | ${obs.createdAt} ---\n${obs.content}`;
 }
-function prependNotifications$4(notificationStore, projectHash, responseText) {
+function prependNotifications$5(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$4(text) {
+function textResponse$5(text) {
 	return { content: [{
 		type: "text",
 		text
 	}] };
 }
-function errorResponse$1(text) {
+function errorResponse$2(text) {
 	return {
 		content: [{
 			type: "text",
@@ -713,17 +601,24 @@ function registerRecall(server, db, projectHash, worker = null, embeddingStore =
 				"timeline",
 				"full"
 			]).default("compact").describe("View detail level: compact (index ~80 tokens/result), timeline (date-grouped), full (complete text)"),
+			kind: z.enum([
+				"change",
+				"reference",
+				"finding",
+				"decision",
+				"verification"
+			]).optional().describe("Filter results by observation kind: change, reference, finding, decision, verification"),
 			limit: z.number().int().min(1).max(50).default(10).describe("Maximum results to return"),
 			include_purged: z.boolean().default(false).describe("Include soft-deleted items in results (needed for restore)")
 		}
 	}, async (args) => {
-		const withNotifications = (text) => textResponse$4(prependNotifications$4(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$5(prependNotifications$5(notificationStore, projectHash, text));
 		try {
 			const repo = new ObservationRepository(db, projectHash);
 			const searchEngine = new SearchEngine(db, projectHash);
 			const hasSearch = args.query !== void 0 || args.id !== void 0 || args.title !== void 0;
-			if (args.ids && hasSearch) return errorResponse$1("Provide either a search query or IDs to act on, not both.");
-			if ((args.action === "purge" || args.action === "restore") && !args.ids && !args.id) return errorResponse$1(`Provide ids array or id to specify which memories to ${args.action}.`);
+			if (args.ids && hasSearch) return errorResponse$2("Provide either a search query or IDs to act on, not both.");
+			if ((args.action === "purge" || args.action === "restore") && !args.ids && !args.id) return errorResponse$2(`Provide ids array or id to specify which memories to ${args.action}.`);
 			let observations = [];
 			let searchResults = null;
 			if (args.ids) {
@@ -754,11 +649,15 @@ function registerRecall(server, db, projectHash, worker = null, embeddingStore =
 				limit: args.limit,
 				includePurged: args.include_purged
 			});
-			else observations = args.include_purged ? repo.listIncludingDeleted({ limit: args.limit }) : repo.list({ limit: args.limit });
+			else observations = args.include_purged ? repo.listIncludingDeleted({ limit: args.limit }) : repo.list({
+				limit: args.limit,
+				kind: args.kind
+			});
+			if (args.kind && observations.length > 0) observations = observations.filter((obs) => obs.kind === args.kind);
 			if (observations.length === 0) return withNotifications(`No memories found matching '${args.query ?? args.title ?? args.id ?? ""}'. Try broader search terms or check the ID.`);
 			if (args.action === "view") {
 				const originalText = formatViewResponse(observations, searchResults, args.detail, args.id !== void 0).content[0].text;
-				return textResponse$4(prependNotifications$4(notificationStore, projectHash, originalText));
+				return textResponse$5(prependNotifications$5(notificationStore, projectHash, originalText));
 			}
 			if (args.action === "purge") {
 				const targetIds = args.ids ?? (args.id ? [args.id] : []);
@@ -788,11 +687,11 @@ function registerRecall(server, db, projectHash, worker = null, embeddingStore =
 				if (failures.length > 0) msg += ` Not found: ${failures.join(", ")}`;
 				return withNotifications(msg);
 			}
-			return errorResponse$1(`Unknown action: ${args.action}`);
+			return errorResponse$2(`Unknown action: ${args.action}`);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "recall: error", { error: message });
-			return errorResponse$1(`Recall error: ${message}`);
+			return errorResponse$2(`Recall error: ${message}`);
 		}
 	});
 }
@@ -852,7 +751,7 @@ function formatViewResponse(observations, searchResults, detail, isSingleIdLooku
 	}
 	let footer = `---\n${observations.length} result(s) | ~${tokenEstimate} tokens | detail: ${detail}`;
 	if (truncated) footer += " | truncated (use id for full view)";
-	return textResponse$4(`${body}\n${footer}`);
+	return textResponse$5(`${body}\n${footer}`);
 }
 function buildScoreMap(searchResults) {
 	const map = /* @__PURE__ */ new Map();
@@ -885,7 +784,14 @@ function registerSaveMemory(server, db, projectHash, notificationStore = null, w
 		inputSchema: {
 			text: z.string().min(1).max(1e4).describe("The text content to save as a memory"),
 			title: z.string().max(200).optional().describe("Optional title for the memory. Auto-generated from text if omitted."),
-			source: z.string().default("manual").describe("Source identifier (e.g., manual, hook:PostToolUse)")
+			source: z.string().default("manual").describe("Source identifier (e.g., manual, hook:PostToolUse)"),
+			kind: z.enum([
+				"change",
+				"reference",
+				"finding",
+				"decision",
+				"verification"
+			]).default("finding").describe("Observation kind: change, reference, finding, decision, or verification")
 		}
 	}, async (args) => {
 		try {
@@ -908,7 +814,8 @@ function registerSaveMemory(server, db, projectHash, notificationStore = null, w
 			const obs = repo.createClassified({
 				content: args.text,
 				title: resolvedTitle,
-				source: args.source
+				source: args.source,
+				kind: args.kind
 			}, "discovery");
 			debug("mcp", "save_memory: saved", {
 				id: obs.id,
@@ -1006,13 +913,13 @@ function formatStashes(stashes) {
 	if (stashes.length <= 8) return formatDetail(stashes);
 	return formatCompact(stashes);
 }
-function prependNotifications$3(notificationStore, projectHash, responseText) {
+function prependNotifications$4(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$3(text) {
+function textResponse$4(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1034,7 +941,7 @@ function registerTopicContext(server, db, projectHash, notificationStore = null)
 			limit: z.number().int().min(1).max(20).default(5).describe("Max threads to return")
 		}
 	}, async (args) => {
-		const withNotifications = (text) => textResponse$3(prependNotifications$3(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$4(prependNotifications$4(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "topic_context: request", {
 				query: args.query,
@@ -1053,7 +960,7 @@ function registerTopicContext(server, db, projectHash, notificationStore = null)
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "topic_context: error", { error: message });
-			return textResponse$3(`Error retrieving context threads: ${message}`);
+			return textResponse$4(`Error retrieving context threads: ${message}`);
 		}
 	});
 }
@@ -1073,28 +980,28 @@ const ENTITY_TYPES = [
 	"Decision",
 	"Problem",
 	"Solution",
-	"Tool",
-	"Person"
+	"Reference"
 ];
 const RELATIONSHIP_TYPES = [
-	"uses",
-	"depends_on",
-	"decided_by",
 	"related_to",
-	"part_of",
+	"solved_by",
 	"caused_by",
-	"solved_by"
+	"modifies",
+	"informed_by",
+	"references",
+	"verified_by",
+	"preceded_by"
 ];
 /**
 * Runtime type guard for EntityType.
-* Uses the ENTITY_TYPES const array for O(n) lookup (n=7, negligible).
+* Uses the ENTITY_TYPES const array for O(n) lookup (n=6, negligible).
 */
 function isEntityType(s) {
 	return ENTITY_TYPES.includes(s);
 }
 /**
 * Runtime type guard for RelationshipType.
-* Uses the RELATIONSHIP_TYPES const array for O(n) lookup (n=7, negligible).
+* Uses the RELATIONSHIP_TYPES const array for O(n) lookup (n=8, negligible).
 */
 function isRelationshipType(s) {
 	return RELATIONSHIP_TYPES.includes(s);
@@ -1112,12 +1019,12 @@ const MAX_NODE_DEGREE = 50;
 * Migration 001: Create graph_nodes and graph_edges tables.
 *
 * Graph tables are managed separately from the main observation/session tables
-* because the knowledge graph is a distinct subsystem (Phase 7) that operates
+* because the knowledge graph is a distinct subsystem that operates
 * on extracted entities rather than raw observations.
 *
 * Tables:
-*   - graph_nodes: entities with type-checked taxonomy (7 types)
-*   - graph_edges: directed relationships with type-checked taxonomy (7 types),
+*   - graph_nodes: entities with type-checked taxonomy (6 types)
+*   - graph_edges: directed relationships with type-checked taxonomy (8 types),
 *     weight confidence, and unique constraint on (source_id, target_id, type)
 *
 * Indexes:
@@ -1127,7 +1034,7 @@ const MAX_NODE_DEGREE = 50;
 const up = `
   CREATE TABLE IF NOT EXISTS graph_nodes (
     id TEXT PRIMARY KEY,
-    type TEXT NOT NULL CHECK(type IN ('Project','File','Decision','Problem','Solution','Tool','Person')),
+    type TEXT NOT NULL CHECK(type IN ('Project','File','Decision','Problem','Solution','Reference')),
     name TEXT NOT NULL,
     metadata TEXT DEFAULT '{}',
     observation_ids TEXT DEFAULT '[]',
@@ -1140,7 +1047,7 @@ const up = `
     id TEXT PRIMARY KEY,
     source_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
     target_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
-    type TEXT NOT NULL CHECK(type IN ('uses','depends_on','decided_by','related_to','part_of','caused_by','solved_by')),
+    type TEXT NOT NULL CHECK(type IN ('related_to','solved_by','caused_by','modifies','informed_by','references','verified_by','preceded_by')),
     weight REAL NOT NULL DEFAULT 1.0 CHECK(weight >= 0.0 AND weight <= 1.0),
     metadata TEXT DEFAULT '{}',
     project_hash TEXT,
@@ -1422,19 +1329,19 @@ function formatAge(isoDate) {
 	const months = Math.floor(days / 30);
 	return `${months} month${months !== 1 ? "s" : ""} ago`;
 }
-function prependNotifications$2(notificationStore, projectHash, responseText) {
+function prependNotifications$3(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$2(text) {
+function textResponse$3(text) {
 	return { content: [{
 		type: "text",
 		text
 	}] };
 }
-function errorResponse(text) {
+function errorResponse$1(text) {
 	return {
 		content: [{
 			type: "text",
@@ -1453,7 +1360,7 @@ function registerQueryGraph(server, db, projectHash, notificationStore = null) {
 	initGraphSchema(db);
 	server.registerTool("query_graph", {
 		title: "Query Knowledge Graph",
-		description: "Query the knowledge graph to find entities and their relationships. Use to answer questions like 'what files does this decision affect?' or 'what tools does this project use?'",
+		description: "Query the knowledge graph to find entities and their relationships. Use to answer questions like 'what files does this decision affect?' or 'what references informed this change?'",
 		inputSchema: {
 			query: z.string().min(1).describe("Entity name or search text to look for"),
 			entity_type: z.string().optional().describe(`Filter to entity type: ${ENTITY_TYPES.join(", ")}`),
@@ -1462,17 +1369,17 @@ function registerQueryGraph(server, db, projectHash, notificationStore = null) {
 			limit: z.number().int().min(1).max(50).default(20).describe("Max root entities to return (default: 20, max: 50)")
 		}
 	}, async (args) => {
-		const withNotifications = (text) => textResponse$2(prependNotifications$2(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$3(prependNotifications$3(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "query_graph: request", {
 				query: args.query,
 				entity_type: args.entity_type,
 				depth: args.depth
 			});
-			if (args.entity_type !== void 0 && !isEntityType(args.entity_type)) return errorResponse(`Invalid entity_type "${args.entity_type}". Valid types: ${ENTITY_TYPES.join(", ")}`);
+			if (args.entity_type !== void 0 && !isEntityType(args.entity_type)) return errorResponse$1(`Invalid entity_type "${args.entity_type}". Valid types: ${ENTITY_TYPES.join(", ")}`);
 			const entityType = args.entity_type;
 			if (args.relationship_types) {
-				for (const rt of args.relationship_types) if (!isRelationshipType(rt)) return errorResponse(`Invalid relationship_type "${rt}". Valid types: ${RELATIONSHIP_TYPES.join(", ")}`);
+				for (const rt of args.relationship_types) if (!isRelationshipType(rt)) return errorResponse$1(`Invalid relationship_type "${rt}". Valid types: ${RELATIONSHIP_TYPES.join(", ")}`);
 			}
 			const relationshipTypes = args.relationship_types;
 			const rootNodes = [];
@@ -1543,7 +1450,7 @@ function registerQueryGraph(server, db, projectHash, notificationStore = null) {
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "query_graph: error", { error: message });
-			return errorResponse(`Graph query error: ${message}`);
+			return errorResponse$1(`Graph query error: ${message}`);
 		}
 	});
 }
@@ -1814,13 +1721,13 @@ function formatStats(stats) {
 	}
 	return lines.join("\n");
 }
-function prependNotifications$1(notificationStore, projectHash, responseText) {
+function prependNotifications$2(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$1(text) {
+function textResponse$2(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1848,11 +1755,11 @@ function registerGraphStats(server, db, projectHash, notificationStore = null) {
 				nodes: stats.total_nodes,
 				edges: stats.total_edges
 			});
-			return textResponse$1(prependNotifications$1(notificationStore, projectHash, formatted));
+			return textResponse$2(prependNotifications$2(notificationStore, projectHash, formatted));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "graph_stats: error", { error: message });
-			return textResponse$1(`Graph stats error: ${message}`);
+			return textResponse$2(`Graph stats error: ${message}`);
 		}
 	});
 }
@@ -1934,13 +1841,13 @@ function formatStatus(status) {
 	lines.push(`Nodes: ${status.graph.nodes} | Edges: ${status.graph.edges}`);
 	return lines.join("\n");
 }
-function prependNotifications(notificationStore, projectHash, responseText) {
+function prependNotifications$1(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse(text) {
+function textResponse$1(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1960,11 +1867,106 @@ function registerStatus(server, db, projectHash, projectPath, hasVectorSupport, 
 				memories: status.memories.total,
 				tokens: status.tokens.estimatedTotal
 			});
-			return textResponse(prependNotifications(notificationStore, projectHash, formatted));
+			return textResponse$1(prependNotifications$1(notificationStore, projectHash, formatted));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "status: error", { error: message });
-			return textResponse(`Status error: ${message}`);
+			return textResponse$1(`Status error: ${message}`);
+		}
+	});
+}
+
+//#endregion
+//#region src/mcp/tools/discover-tools.ts
+function textResponse(text) {
+	return { content: [{
+		type: "text",
+		text
+	}] };
+}
+function errorResponse(text) {
+	return {
+		content: [{
+			type: "text",
+			text
+		}],
+		isError: true
+	};
+}
+function prependNotifications(notificationStore, projectHash, responseText) {
+	if (!notificationStore) return responseText;
+	const pending = notificationStore.consumePending(projectHash);
+	if (pending.length === 0) return responseText;
+	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
+}
+function formatToolResult(result, index) {
+	const { tool, score } = result;
+	const description = tool.description ? ` -- ${tool.description}` : "";
+	const statusTag = tool.status !== "active" ? ` [${tool.status}]` : "";
+	const usageStr = tool.usage_count > 0 ? `${tool.usage_count} uses` : "never used";
+	const lastUsedStr = tool.last_used_at ? `last: ${tool.last_used_at.slice(0, 10)}` : "never";
+	return `${index}. ${tool.name}${statusTag}${description}\n   [${tool.scope}] | ${usageStr} | ${lastUsedStr} | score: ${score.toFixed(2)}`;
+}
+/**
+* Registers the discover_tools MCP tool on the server.
+*
+* Allows Claude to search the tool registry by keyword or semantic description,
+* with optional scope filtering. Returns ranked results with scope, usage count,
+* and last used timestamp metadata.
+*/
+function registerDiscoverTools(server, toolRegistry, worker, hasVectorSupport, notificationStore, projectHash) {
+	server.registerTool("discover_tools", {
+		title: "Discover Tools",
+		description: "Search the tool registry to find available tools by keyword or description. Supports semantic search -- \"file manipulation\" finds tools described as \"read and write files\". Returns scope, usage count, and last used timestamp for each result.",
+		inputSchema: {
+			query: z.string().min(1).describe("Search query: keywords or natural language description"),
+			scope: z.enum([
+				"global",
+				"project",
+				"plugin"
+			]).optional().describe("Optional scope filter. Omit to search all scopes."),
+			limit: z.number().int().min(1).max(50).default(20).describe("Maximum results to return (default: 20)")
+		}
+	}, async (args) => {
+		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
+		try {
+			debug("mcp", "discover_tools: request", {
+				query: args.query,
+				scope: args.scope,
+				limit: args.limit
+			});
+			const searchResults = await toolRegistry.searchTools(args.query, {
+				scope: args.scope,
+				limit: args.limit,
+				worker,
+				hasVectorSupport
+			});
+			if (searchResults.length === 0) {
+				const scopeContext = args.scope ? ` in scope "${args.scope}"` : "";
+				return withNotifications(`No tools found matching "${args.query}"${scopeContext}.`);
+			}
+			const seenServers = /* @__PURE__ */ new Set();
+			for (const result of searchResults) if (result.tool.tool_type === "mcp_server") seenServers.add(result.tool.server_name ?? result.tool.name);
+			const deduped = searchResults.filter((result) => {
+				if (result.tool.tool_type === "mcp_tool" && result.tool.server_name && seenServers.has(result.tool.server_name)) return false;
+				return true;
+			});
+			const budgetResult = enforceTokenBudget(deduped, (r) => formatToolResult(r, deduped.indexOf(r) + 1), TOKEN_BUDGET);
+			const body = budgetResult.items.map((r, i) => formatToolResult(r, i + 1)).join("\n");
+			const scopeLabel = args.scope ?? "all";
+			let footer = `---\n${deduped.length} result(s) | query: "${args.query}" | scope: ${scopeLabel}`;
+			if (budgetResult.truncated) footer += " | truncated";
+			debug("mcp", "discover_tools: returning", {
+				total: searchResults.length,
+				deduped: deduped.length,
+				displayed: budgetResult.items.length,
+				truncated: budgetResult.truncated
+			});
+			return withNotifications(`${body}\n${footer}`);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Unknown error";
+			debug("mcp", "discover_tools: error", { error: message });
+			return errorResponse(`Discover tools error: ${message}`);
 		}
 	});
 }
@@ -2703,44 +2705,6 @@ function applyConfig(config, detector, adaptiveManager) {
 }
 
 //#endregion
-//#region src/storage/notifications.ts
-var NotificationStore = class {
-	stmtInsert;
-	stmtConsume;
-	stmtSelect;
-	constructor(db) {
-		db.exec(`
-      CREATE TABLE IF NOT EXISTS pending_notifications (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        message TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )
-    `);
-		this.stmtInsert = db.prepare("INSERT INTO pending_notifications (id, project_id, message) VALUES (?, ?, ?)");
-		this.stmtSelect = db.prepare("SELECT * FROM pending_notifications WHERE project_id = ? ORDER BY created_at ASC LIMIT 10");
-		this.stmtConsume = db.prepare("DELETE FROM pending_notifications WHERE project_id = ?");
-		debug("db", "NotificationStore initialized");
-	}
-	add(projectId, message) {
-		const id = randomBytes(16).toString("hex");
-		this.stmtInsert.run(id, projectId, message);
-		debug("db", "Notification added", { projectId });
-	}
-	/** Fetch and delete all pending notifications for a project (consume pattern). */
-	consumePending(projectId) {
-		const rows = this.stmtSelect.all(projectId);
-		if (rows.length > 0) this.stmtConsume.run(projectId);
-		return rows.map((r) => ({
-			id: r.id,
-			projectId: r.project_id,
-			message: r.message,
-			createdAt: r.created_at
-		}));
-	}
-};
-
-//#endregion
 //#region src/graph/extraction-rules.ts
 /**
 * Matches file paths like src/foo/bar.ts, ./config.json, /absolute/path.ext, package.json
@@ -2813,171 +2777,26 @@ const decisionRule = (text) => {
 	}
 	return matches;
 };
-const toolPattern = new RegExp(`\\b(${[
-	"eslint",
-	"prettier",
-	"biome",
-	"stylelint",
-	"oxlint",
-	"typescript",
-	"javascript",
-	"python",
-	"rust",
-	"golang",
-	"node",
-	"deno",
-	"bun",
-	"npm",
-	"pnpm",
-	"yarn",
-	"cargo",
-	"pip",
-	"webpack",
-	"vite",
-	"rollup",
-	"esbuild",
-	"tsup",
-	"tsdown",
-	"turbopack",
-	"parcel",
-	"swc",
-	"jest",
-	"vitest",
-	"mocha",
-	"cypress",
-	"playwright",
-	"pytest",
-	"react",
-	"vue",
-	"svelte",
-	"angular",
-	"solid",
-	"astro",
-	"next",
-	"nuxt",
-	"remix",
-	"gatsby",
-	"tailwind",
-	"tailwindcss",
-	"bootstrap",
-	"chakra",
-	"sqlite",
-	"postgres",
-	"postgresql",
-	"mysql",
-	"mongodb",
-	"redis",
-	"supabase",
-	"dynamodb",
-	"prisma",
-	"drizzle",
-	"typeorm",
-	"sequelize",
-	"knex",
-	"kysely",
-	"docker",
-	"kubernetes",
-	"terraform",
-	"nginx",
-	"caddy",
-	"git",
-	"github",
-	"gitlab",
-	"circleci",
-	"jenkins",
-	"jwt",
-	"oauth",
-	"bcrypt",
-	"argon2",
-	"jose",
-	"graphql",
-	"grpc",
-	"trpc",
-	"express",
-	"fastify",
-	"hono",
-	"koa",
-	"openai",
-	"anthropic",
-	"langchain",
-	"huggingface",
-	"onnx",
-	"zod",
-	"ajv",
-	"winston",
-	"pino",
-	"socket.io",
-	"rxjs",
-	"storybook",
-	"chromatic",
-	"figma"
-].map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`, "gi");
-const toolRule = (text) => {
-	const matches = [];
-	const seen = /* @__PURE__ */ new Set();
-	let match;
-	toolPattern.lastIndex = 0;
-	while ((match = toolPattern.exec(text)) !== null) {
-		const name = match[1].toLowerCase();
-		if (seen.has(name)) continue;
-		seen.add(name);
-		matches.push({
-			name,
-			type: "Tool",
-			confidence: .9,
-			span: [match.index, match.index + match[0].length]
-		});
-	}
-	return matches;
-};
 /**
-* Matches @-mentions and "by/with [Capitalized Name]" patterns.
-* Confidence: 0.6 (names are tricky, keep conservative)
+* Matches URLs as Reference entities.
+* Captures http/https URLs from observation text.
+* Confidence: 0.9
 */
-const personRule = (text) => {
+const referenceRule = (text) => {
 	const matches = [];
 	const seen = /* @__PURE__ */ new Set();
-	const mentionRegex = /@([a-zA-Z][a-zA-Z0-9_-]{1,38})\b/g;
+	const urlRegex = /https?:\/\/[^\s"'<>\])}]+/g;
 	let match;
-	while ((match = mentionRegex.exec(text)) !== null) {
-		const name = match[1];
-		const lower = name.toLowerCase();
-		if (seen.has(lower)) continue;
-		seen.add(lower);
+	while ((match = urlRegex.exec(text)) !== null) {
+		let url = match[0];
+		url = url.replace(/[.,;:!?)]+$/, "");
+		if (seen.has(url)) continue;
+		seen.add(url);
 		matches.push({
-			name: `@${name}`,
-			type: "Person",
-			confidence: .6,
-			span: [match.index, match.index + match[0].length]
-		});
-	}
-	const byRegex = /\bby\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b/g;
-	while ((match = byRegex.exec(text)) !== null) {
-		const name = match[1];
-		const lower = name.toLowerCase();
-		if (seen.has(lower)) continue;
-		seen.add(lower);
-		matches.push({
-			name,
-			type: "Person",
-			confidence: .6,
-			span: [match.index, match.index + match[0].length]
-		});
-	}
-	const withVerbRegex = /\b(?:[Dd]ecided|[Ww]orked|[Pp]aired|[Cc]ollaborated|[Dd]iscussed|[Mm]et)\s+with\s+/g;
-	while ((match = withVerbRegex.exec(text)) !== null) {
-		const nameMatch = text.slice(match.index + match[0].length).match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b/);
-		if (!nameMatch) continue;
-		const name = nameMatch[1];
-		const lower = name.toLowerCase();
-		if (seen.has(lower)) continue;
-		seen.add(lower);
-		const fullEnd = match.index + match[0].length + nameMatch[0].length;
-		matches.push({
-			name,
-			type: "Person",
-			confidence: .6,
-			span: [match.index, fullEnd]
+			name: url,
+			type: "Reference",
+			confidence: .9,
+			span: [match.index, match.index + url.length]
 		});
 	}
 	return matches;
@@ -3112,12 +2931,11 @@ const projectRule = (text) => {
 */
 const ALL_RULES = [
 	filePathRule,
-	toolRule,
 	projectRule,
+	referenceRule,
 	decisionRule,
 	problemRule,
-	solutionRule,
-	personRule
+	solutionRule
 ];
 
 //#endregion
@@ -3313,23 +3131,7 @@ const ABBREVIATION_MAP = {
 	js: "javascript",
 	py: "python",
 	rb: "ruby",
-	rs: "rust",
-	pg: "postgresql",
-	postgres: "postgresql",
-	mongo: "mongodb",
-	k8s: "kubernetes",
-	tf: "terraform",
-	gh: "github",
-	gl: "gitlab",
-	ci: "circleci",
-	gql: "graphql",
-	tw: "tailwind",
-	tailwindcss: "tailwind",
-	sw: "swc",
-	np: "numpy",
-	pd: "pandas",
-	wp: "webpack",
-	nx: "next"
+	rs: "rust"
 };
 /**
 * Finds potential duplicate entities in the graph.
@@ -3425,54 +3227,50 @@ function findDuplicateEntities(db, opts) {
 //#endregion
 //#region src/graph/relationship-detector.ts
 /**
-* Ordered by specificity. First match wins.
+* Provenance-oriented context signals. Ordered by specificity.
+* First match wins.
 */
 const CONTEXT_SIGNALS = [
 	{
-		pattern: /\b(?:decided|chose|selected)\b/i,
-		type: "decided_by"
+		pattern: /\b(?:modified|changed|edited|created|wrote|updated)\b/i,
+		type: "modifies"
 	},
 	{
-		pattern: /\b(?:solved\s+by|fixed\s+by|resolved\s+by)\b/i,
-		type: "solved_by"
+		pattern: /\b(?:informed|consulted|read|referenced|looked\s+at|checked)\b/i,
+		type: "informed_by"
+	},
+	{
+		pattern: /\b(?:verified|tested|confirmed|passed|failed|ran\s+tests?)\b/i,
+		type: "verified_by"
 	},
 	{
 		pattern: /\b(?:caused\s+by|because\s+of|due\s+to)\b/i,
 		type: "caused_by"
 	},
 	{
-		pattern: /\b(?:depends?\s+on|requires?|imports?)\b/i,
-		type: "depends_on"
-	},
-	{
-		pattern: /\b(?:part\s+of|belongs?\s+to|inside)\b/i,
-		type: "part_of"
-	},
-	{
-		pattern: /\b(?:uses?|using)\b/i,
-		type: "uses"
+		pattern: /\b(?:solved\s+by|fixed\s+by|resolved\s+by)\b/i,
+		type: "solved_by"
 	}
 ];
 /**
 * Default relationship type based on entity type pair.
 * Key format: "SourceType->TargetType"
+*
+* Provenance-oriented: tracks how entities informed, modified,
+* or verified each other.
 */
 const TYPE_PAIR_DEFAULTS = {
-	"File->Tool": "uses",
-	"Tool->File": "uses",
-	"File->File": "related_to",
-	"Decision->Tool": "related_to",
-	"Tool->Decision": "related_to",
-	"Decision->Person": "decided_by",
-	"Person->Decision": "decided_by",
-	"Problem->File": "part_of",
-	"File->Problem": "part_of",
+	"File->File": "informed_by",
+	"File->Reference": "references",
+	"Reference->File": "references",
 	"Problem->Solution": "solved_by",
 	"Solution->Problem": "solved_by",
-	"Solution->Tool": "uses",
-	"Tool->Solution": "uses",
-	"Project->File": "part_of",
-	"File->Project": "part_of"
+	"Problem->File": "related_to",
+	"File->Problem": "related_to",
+	"Decision->File": "related_to",
+	"File->Decision": "related_to",
+	"Project->File": "related_to",
+	"File->Project": "related_to"
 };
 /**
 * Detects typed relationships between co-occurring entities in observation text.
@@ -3510,7 +3308,7 @@ function detectRelationships(text, entities) {
 			break;
 		}
 		if (source.type === "File" && target.type === "File") {
-			if (/\b(?:imports?|requires?|from)\b/i.test(contextText)) relationshipType = "depends_on";
+			if (/\b(?:imports?|requires?|from)\b/i.test(contextText)) relationshipType = "informed_by";
 		}
 		let confidence;
 		if (relationshipType === "related_to" && !TYPE_PAIR_DEFAULTS[pairKey]) confidence = .3;
@@ -5351,6 +5149,12 @@ try {
       last_seen_at = excluded.last_seen_at
   `).run(projectHash, process.cwd());
 } catch {}
+let toolRegistry = null;
+try {
+	toolRegistry = new ToolRegistryRepository(db.db);
+} catch {
+	debug("mcp", "Tool registry not available (pre-migration-16)");
+}
 const embeddingStore = db.hasVectorSupport ? new EmbeddingStore(db.db, projectHash) : null;
 const worker = new AnalysisWorker();
 worker.start().catch(() => {
@@ -5435,6 +5239,64 @@ async function processUnembedded() {
 						type: n.type
 					}));
 					detectAndPersist(db.db, text, entityPairs, { projectHash });
+					if (obs.kind === "change" && obs.content.includes("Research context:")) try {
+						const researchSection = obs.content.split("Research context:\n")[1];
+						if (researchSection) {
+							const researchPaths = researchSection.split("\n").map((line) => {
+								const match = line.match(/\[(?:Read|Glob|Grep)\]\s+(.+)/);
+								return match ? match[1].trim() : null;
+							}).filter((p) => p !== null);
+							const changeFileNodes = nodes.filter((n) => n.type === "File");
+							for (const changeNode of changeFileNodes) for (const researchPath of researchPaths) {
+								const researchNode = upsertNode(db.db, {
+									type: "File",
+									name: researchPath,
+									metadata: {},
+									observation_ids: [String(id)],
+									project_hash: projectHash
+								});
+								try {
+									insertEdge(db.db, {
+										source_id: changeNode.id,
+										target_id: researchNode.id,
+										type: "informed_by",
+										weight: .7,
+										metadata: { source: "research_buffer" },
+										project_hash: projectHash
+									});
+								} catch {}
+							}
+						}
+					} catch (provErr) {
+						debug("embed", "Provenance edge error (non-fatal)", { error: provErr instanceof Error ? provErr.message : String(provErr) });
+					}
+					if (obs.kind === "change" && obs.sessionId) try {
+						const priorChange = db.db.prepare(`
+                SELECT id, content FROM observations
+                WHERE project_hash = ? AND session_id = ? AND kind = 'change'
+                  AND deleted_at IS NULL AND id != ?
+                ORDER BY created_at DESC, rowid DESC LIMIT 1
+              `).get(projectHash, obs.sessionId, obs.id);
+						if (priorChange) {
+							const changeFileNodes = nodes.filter((n) => n.type === "File");
+							const priorFileMatch = priorChange.content.match(/\[(?:Write|Edit)\]\s+(?:Created|Modified)\s+(\S+)/);
+							if (priorFileMatch && changeFileNodes.length > 0) {
+								const priorNode = getNodeByNameAndType(db.db, priorFileMatch[1], "File");
+								if (priorNode) try {
+									insertEdge(db.db, {
+										source_id: changeFileNodes[0].id,
+										target_id: priorNode.id,
+										type: "preceded_by",
+										weight: .6,
+										metadata: { source: "temporal" },
+										project_hash: projectHash
+									});
+								} catch {}
+							}
+						}
+					} catch (tempErr) {
+						debug("embed", "Temporal ordering error (non-fatal)", { error: tempErr instanceof Error ? tempErr.message : String(tempErr) });
+					}
 					debug("embed", "Graph updated", {
 						id,
 						entities: nodes.length
@@ -5453,10 +5315,33 @@ async function processUnembedded() {
 		}
 	}
 }
+let researchBufferForFlush = null;
+try {
+	researchBufferForFlush = new ResearchBufferRepository(db.db, projectHash);
+} catch {}
+async function processUnembeddedTools() {
+	if (!toolRegistry || !worker.isReady() || !db.hasVectorSupport) return;
+	try {
+		const unembedded = toolRegistry.findUnembeddedTools(5);
+		for (const tool of unembedded) {
+			const text = `${tool.name} ${tool.description}`;
+			const embedding = await worker.embed(text);
+			if (embedding) toolRegistry.storeEmbedding(tool.id, embedding);
+		}
+	} catch (err) {
+		debug("embed", "Tool embedding error (non-fatal)", { error: err instanceof Error ? err.message : String(err) });
+	}
+}
 const embedTimer = setInterval(() => {
 	processUnembedded().catch((err) => {
 		debug("embed", "Background embedding error", { error: err instanceof Error ? err.message : String(err) });
 	});
+	processUnembeddedTools().catch((err) => {
+		debug("embed", "Tool embedding background error", { error: err instanceof Error ? err.message : String(err) });
+	});
+	try {
+		researchBufferForFlush?.flush(30);
+	} catch {}
 }, 5e3);
 const server = createServer();
 registerSaveMemory(server, db.db, projectHash, notificationStore, worker, embeddingStore);
@@ -5465,6 +5350,7 @@ registerTopicContext(server, db.db, projectHash, notificationStore);
 registerQueryGraph(server, db.db, projectHash, notificationStore);
 registerGraphStats(server, db.db, projectHash, notificationStore);
 registerStatus(server, db.db, projectHash, process.cwd(), db.hasVectorSupport, () => worker.isReady(), notificationStore);
+if (toolRegistry) registerDiscoverTools(server, toolRegistry, worker, db.hasVectorSupport, notificationStore, projectHash);
 const classifier = new ObservationClassifier(db.db, projectHash, server, {
 	intervalMs: 45e3,
 	contextWindow: 5,
