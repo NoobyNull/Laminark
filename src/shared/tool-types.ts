@@ -38,6 +38,7 @@ export interface ToolRegistryRow {
   last_used_at: string | null;
   discovered_at: string;
   updated_at: string;
+  status: string;  // 'active' | 'stale' | 'demoted'
 }
 
 /**
