@@ -39,3 +39,24 @@ export interface ToolRegistryRow {
   discovered_at: string;
   updated_at: string;
 }
+
+/**
+ * Raw database row from the tool_usage_events table.
+ */
+export interface ToolUsageEvent {
+  id: number;
+  tool_name: string;
+  session_id: string | null;
+  project_hash: string | null;
+  success: number;  // 0 = failure, 1 = success
+  created_at: string;
+}
+
+/**
+ * Aggregated usage stats for temporal queries.
+ */
+export interface ToolUsageStats {
+  tool_name: string;
+  usage_count: number;
+  last_used: string;
+}

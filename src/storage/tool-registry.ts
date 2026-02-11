@@ -1,7 +1,7 @@
 import type BetterSqlite3 from 'better-sqlite3';
 
 import { debug } from '../shared/debug.js';
-import type { DiscoveredTool, ToolRegistryRow } from '../shared/tool-types.js';
+import type { DiscoveredTool, ToolRegistryRow, ToolUsageStats } from '../shared/tool-types.js';
 
 /**
  * Repository for tool registry CRUD operations.
@@ -24,6 +24,7 @@ export class ToolRegistryRepository {
   private readonly stmtGetAll: BetterSqlite3.Statement;
   private readonly stmtCount: BetterSqlite3.Statement;
   private readonly stmtGetAvailableForSession: BetterSqlite3.Statement;
+  private readonly stmtInsertEvent: BetterSqlite3.Statement;
 
   constructor(db: BetterSqlite3.Database) {
     this.db = db;
@@ -87,6 +88,11 @@ export class ToolRegistryRepository {
           discovered_at DESC
       `);
 
+      this.stmtInsertEvent = db.prepare(`
+        INSERT INTO tool_usage_events (tool_name, session_id, project_hash, success)
+        VALUES (?, ?, ?, ?)
+      `);
+
       debug('tool-registry', 'ToolRegistryRepository initialized');
     } catch (err) {
       // Table may not exist if database is pre-migration-16.
@@ -136,12 +142,21 @@ export class ToolRegistryRepository {
    * First tries recordUsage. If the tool is not in the registry (changes === 0),
    * calls upsert with the full tool info, which initializes it with usage_count = 0.
    */
-  recordOrCreate(name: string, defaults: Omit<DiscoveredTool, 'name'>): void {
+  recordOrCreate(
+    name: string,
+    defaults: Omit<DiscoveredTool, 'name'>,
+    sessionId?: string | null,
+    success?: boolean,
+  ): void {
     try {
       const result = this.stmtRecordUsage.run(name, defaults.projectHash);
       if (result.changes === 0) {
         // Tool not yet in registry -- create it
         this.upsert({ name, ...defaults });
+      }
+      // Insert usage event with session context (UTRK-02)
+      if (sessionId !== undefined) {
+        this.stmtInsertEvent.run(name, sessionId, defaults.projectHash, success === false ? 0 : 1);
       }
       debug('tool-registry', 'recordOrCreate completed', { name, created: result.changes === 0 });
     } catch (err) {
