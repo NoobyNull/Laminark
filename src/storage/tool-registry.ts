@@ -28,6 +28,7 @@ export class ToolRegistryRepository {
   private readonly stmtGetUsageForTool: BetterSqlite3.Statement;
   private readonly stmtGetUsageForSession: BetterSqlite3.Statement;
   private readonly stmtGetUsageSince: BetterSqlite3.Statement;
+  private readonly stmtGetRecentUsage: BetterSqlite3.Statement;
 
   constructor(db: BetterSqlite3.Database) {
     this.db = db;
@@ -117,6 +118,19 @@ export class ToolRegistryRepository {
         FROM tool_usage_events
         WHERE project_hash = ?
           AND created_at >= datetime('now', ?)
+        GROUP BY tool_name
+        ORDER BY usage_count DESC
+      `);
+
+      this.stmtGetRecentUsage = db.prepare(`
+        SELECT tool_name, COUNT(*) as usage_count, MAX(created_at) as last_used
+        FROM (
+          SELECT tool_name, created_at
+          FROM tool_usage_events
+          WHERE project_hash = ?
+          ORDER BY created_at DESC
+          LIMIT ?
+        )
         GROUP BY tool_name
         ORDER BY usage_count DESC
       `);
@@ -252,5 +266,14 @@ export class ToolRegistryRepository {
    */
   getUsageSince(projectHash: string, timeModifier: string = '-7 days'): ToolUsageStats[] {
     return this.stmtGetUsageSince.all(projectHash, timeModifier) as ToolUsageStats[];
+  }
+
+  /**
+   * Returns per-tool usage stats from the last N events for a project.
+   * Event-count-based window instead of time-based — immune to usage gaps.
+   * @param limit - Number of recent events to consider (default 200)
+   */
+  getRecentUsage(projectHash: string, limit: number = 200): ToolUsageStats[] {
+    return this.stmtGetRecentUsage.all(projectHash, limit) as ToolUsageStats[];
   }
 }
