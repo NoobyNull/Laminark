@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-10)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
-**Current focus:** Milestone v2.0 — Phase 14 complete, ready for Phase 15
+**Current focus:** Milestone v2.0 — Phase 15 in progress (Tool Search)
 
 ## Current Position
 
-Phase: 14 of 16 (Conversation Routing) COMPLETE
-Plan: 2 of 2 complete
-Status: Phase 14 complete
-Last activity: 2026-02-11 — 14-02 complete (learned patterns, ConversationRouter, handler/session lifecycle wiring)
+Phase: 15 of 16 (Tool Search)
+Plan: 1 of 2 complete
+Status: Executing phase 15
+Last activity: 2026-02-11 — 15-01 complete (FTS5+vec0 migration, hybrid search methods on ToolRegistryRepository)
 
-Progress (v2.0): [███████░░░] 74% (Phase 14 complete)
+Progress (v2.0): [████████░░] 80% (Phase 15 plan 1/2)
 
 ## Performance Metrics
 
@@ -46,6 +46,7 @@ Progress (v2.0): [███████░░░] 74% (Phase 14 complete)
 | 12-usage-tracking | 1/1 | 2min | 2min |
 | 13-context-enhancement | 1/1 | 3min | 3min |
 | 14-conversation-routing | 2/2 | 5min | 2.5min |
+| 15-tool-search | 1/2 | 2min | 2min |
 
 ## Accumulated Context
 
@@ -88,6 +89,10 @@ Recent decisions affecting current work:
 - [14-02]: routing_state/routing_patterns tables created inline (no migration) -- transient data refreshed each session
 - [14-02]: db parameter added explicitly to processPostToolUseFiltered (clean separation, Option A)
 - [14-02]: Learned tier first, heuristic fallback -- progressive takeover as usage data accumulates
+- [15-01]: FTS5 BM25 weights name 2x over description for tool name relevance boost
+- [15-01]: Functional migration with try/catch for vec0 -- FTS5 always runs, vec0 degrades gracefully
+- [15-01]: sanitizeQuery duplicated from SearchEngine (not imported) -- ToolRegistryRepository is not observation-scoped
+- [15-01]: searchByVector returns snake_case tool_id matching SQL column convention
 
 ### Pending Todos
 
@@ -108,5 +113,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-11
-Stopped at: Completed 14-02-PLAN.md -- Learned patterns, ConversationRouter, handler/session lifecycle wiring. Phase 14 complete (2/2 plans done).
+Stopped at: Completed 15-01-PLAN.md -- FTS5+vec0 migration, ToolSearchResult type, hybrid search methods on ToolRegistryRepository. Phase 15 plan 1/2 done.
 Resume file: None
