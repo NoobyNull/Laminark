@@ -180,7 +180,7 @@ Plans:
 
 - [x] **Phase 9: Global Installation** - Plugin manifest, global deployment, and project-aware session bootstrapping
 - [x] **Phase 10: Tool Discovery and Registry** - Config parsing, tool enumeration, and scope-aware registry storage
-- [ ] **Phase 11: Scope Resolution** - Prefix-based scope detection and per-session tool filtering
+- [x] **Phase 11: Scope Resolution** - Prefix-based scope detection and per-session tool filtering
 - [ ] **Phase 12: Usage Tracking** - Organic tool usage recording from hook events with project and session context
 - [ ] **Phase 13: Context Enhancement** - Session start injection extended with ranked tool suggestions within budget
 - [ ] **Phase 14: Conversation Routing** - Intent-to-tool mapping with confidence thresholds and cold start heuristics
@@ -228,10 +228,10 @@ Plans:
   2. Session start context only surfaces tools that are available in the current project's resolved scope (built-in + global + current project + team)
   3. A tool registered from project A's `.mcp.json` is never suggested or surfaced when working in project B
   4. Scope detection correctly parses tool_name prefixes: bare names are built-in, `mcp__` prefix is MCP server, `mcp__plugin_` prefix is plugin-provided
-**Plans**: 1 plan
+**Plans**: 1 plan (complete)
 
 Plans:
-- [ ] 11-01-PLAN.md -- Scope-filtered query (getAvailableForSession), tool section formatting, and session context wiring
+- [x] 11-01-PLAN.md -- Scope-filtered query (getAvailableForSession), tool section formatting, and session context wiring
 
 ### Phase 12: Usage Tracking
 **Goal**: Laminark builds a usage profile of which tools are used, how often, and in what context, providing the data foundation for intelligent routing
@@ -303,7 +303,7 @@ Note: Phases 15 and 16 depend on Phases 10+12 (not on each other or on 13/14), s
 | 8. Web Visualization | v1.0 | 5/5 | Complete | 2026-02-08 |
 | 9. Global Installation | v2.0 | 2/2 | Complete | 2026-02-10 |
 | 10. Tool Discovery and Registry | v2.0 | 2/2 | Complete | 2026-02-11 |
-| 11. Scope Resolution | v2.0 | 0/TBD | Not started | - |
+| 11. Scope Resolution | v2.0 | 1/1 | Complete | 2026-02-11 |
 | 12. Usage Tracking | v2.0 | 0/TBD | Not started | - |
 | 13. Context Enhancement | v2.0 | 0/TBD | Not started | - |
 | 14. Conversation Routing | v2.0 | 0/TBD | Not started | - |
