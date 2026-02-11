@@ -60,3 +60,12 @@ export interface ToolUsageStats {
   usage_count: number;
   last_used: string;
 }
+
+/**
+ * A search result from hybrid tool search (FTS5 + vector via RRF).
+ */
+export interface ToolSearchResult {
+  tool: ToolRegistryRow;
+  score: number;
+  matchType: 'fts' | 'vector' | 'hybrid';
+}
