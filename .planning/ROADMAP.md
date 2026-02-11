@@ -282,11 +282,11 @@ Plans:
   1. Claude can call a `discover_tools` MCP tool to search the registry by keyword and optionally filter by scope
   2. Tool descriptions are indexed for semantic search using the existing hybrid search infrastructure (FTS5 + vector), so "file manipulation" finds tools described as "read and write files"
   3. Search results include each tool's scope, total usage count, and last used timestamp, giving Claude enough context to recommend the right tool
-**Plans**: 2 plans
+**Plans**: 2 plans (complete)
 
 Plans:
-- [ ] 15-01-PLAN.md -- Migration 18 (FTS5 + vec0 for tool registry), ToolSearchResult type, and hybrid search methods on ToolRegistryRepository (SRCH-02)
-- [ ] 15-02-PLAN.md -- discover_tools MCP tool with result formatting, background tool embedding loop, and MCP server wiring (SRCH-01, SRCH-03)
+- [x] 15-01-PLAN.md -- Migration 18 (FTS5 + vec0 for tool registry), ToolSearchResult type, and hybrid search methods on ToolRegistryRepository (SRCH-02)
+- [x] 15-02-PLAN.md -- discover_tools MCP tool with result formatting, background tool embedding loop, and MCP server wiring (SRCH-01, SRCH-03)
 
 ### Phase 16: Staleness Management
 **Goal**: The tool registry stays accurate over time by detecting removed tools, deprioritizing stale entries, and demoting tools that consistently fail
@@ -321,5 +321,5 @@ Note: Phases 15 and 16 depend on Phases 10+12 (not on each other or on 13/14), s
 | 12. Usage Tracking | v2.0 | 1/1 | Complete | 2026-02-11 |
 | 13. Context Enhancement | v2.0 | 1/1 | Complete | 2026-02-11 |
 | 14. Conversation Routing | v2.0 | 2/2 | Complete | 2026-02-10 |
-| 15. Tool Search | v2.0 | 0/2 | Planned | - |
+| 15. Tool Search | v2.0 | 2/2 | Complete | 2026-02-10 |
 | 16. Staleness Management | v2.0 | 0/TBD | Not started | - |
