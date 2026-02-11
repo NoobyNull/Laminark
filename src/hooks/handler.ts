@@ -9,6 +9,8 @@ import { redactSensitiveContent, isExcludedFile } from './privacy-filter.js';
 import { shouldAdmit, isMeaningfulBashCommand } from './admission-filter.js';
 import { SaveGuard } from './save-guard.js';
 import { isLaminarksOwnTool } from './self-referential.js';
+import { ToolRegistryRepository } from '../storage/tool-registry.js';
+import { inferToolType, inferScope, extractServerName } from './tool-name-parser.js';
 import { debug } from '../shared/debug.js';
 
 /**
@@ -26,6 +28,7 @@ import { debug } from '../shared/debug.js';
  * - Imports only storage modules -- NO @modelcontextprotocol/sdk (cold start overhead)
  *
  * Filter pipeline (PostToolUse/PostToolUseFailure):
+ *   0. Organic tool discovery (DISC-05: records ALL tools including Laminark's own)
  *   1. Self-referential filter (dual-prefix: mcp__laminark__ and mcp__plugin_laminark_laminark__)
  *   2. Extract observation text from payload
  *   3. Privacy filter: exclude sensitive files, redact secrets
@@ -58,6 +61,8 @@ export function processPostToolUseFiltered(
   input: Record<string, unknown>,
   obsRepo: ObservationRepository,
   researchBuffer?: ResearchBufferRepository,
+  toolRegistry?: ToolRegistryRepository,
+  projectHash?: string,
 ): void {
   const toolName = input.tool_name as string | undefined;
   const hookEventName = input.hook_event_name as string | undefined;
@@ -65,6 +70,23 @@ export function processPostToolUseFiltered(
   if (!toolName) {
     debug('hook', 'PostToolUse missing tool_name, skipping');
     return;
+  }
+
+  // 0. DISC-05: Organic tool discovery -- record every tool we see
+  // This runs BEFORE the self-referential filter so Laminark's own tools are registered
+  if (toolRegistry) {
+    try {
+      toolRegistry.recordOrCreate(toolName, {
+        toolType: inferToolType(toolName),
+        scope: inferScope(toolName),
+        source: 'hook:PostToolUse',
+        projectHash: projectHash ?? null,
+        description: null,
+        serverName: extractServerName(toolName),
+      });
+    } catch {
+      // Non-fatal: registry is supplementary to core memory function
+    }
   }
 
   // 1. Skip self-referential capture (Laminark observing its own operations)
@@ -208,14 +230,20 @@ async function main(): Promise<void> {
     } catch {
       // research_buffer table may not exist yet before migration 13
     }
+    let toolRegistry: ToolRegistryRepository | undefined;
+    try {
+      toolRegistry = new ToolRegistryRepository(laminarkDb.db);
+    } catch {
+      // tool_registry table may not exist yet before migration 16
+    }
 
     switch (eventName) {
       case 'PostToolUse':
       case 'PostToolUseFailure':
-        processPostToolUseFiltered(input, obsRepo, researchBuffer);
+        processPostToolUseFiltered(input, obsRepo, researchBuffer, toolRegistry, projectHash);
         break;
       case 'SessionStart': {
-        const context = handleSessionStart(input, sessionRepo, laminarkDb.db, projectHash);
+        const context = handleSessionStart(input, sessionRepo, laminarkDb.db, projectHash, toolRegistry);
         // SessionStart is synchronous -- stdout is injected into Claude's context window
         if (context) {
           process.stdout.write(context);
