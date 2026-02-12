@@ -16,6 +16,7 @@
       <button class="nav-tab" data-view="timeline-view">Timeline</button>
       <button class="nav-tab" data-view="activity-view">Activity</button>
       <button class="nav-tab" data-view="settings-view">Settings</button>
+      <button class="nav-tab" data-view="help-view">Help</button>
     </div>
     <div class="nav-status">
       <span id="sse-status" class="status-indicator disconnected" title="SSE connection status"></span>
@@ -55,27 +56,28 @@
       <div id="graph-breadcrumbs" class="graph-breadcrumbs hidden">
         <button class="breadcrumb-item" data-action="full">Full Graph</button>
       </div>
-      <div id="cy"></div>
-      <div id="graph-stats" class="graph-stats">0 nodes, 0 edges</div>
-      <div class="graph-toolbar">
-        <div class="layout-selector">
-          <button class="layout-btn active" data-layout="clustered" title="Force-directed layout">Clustered</button>
-          <button class="layout-btn" data-layout="hierarchical" title="Top-down tree layout">Hierarchical</button>
-          <button class="layout-btn" data-layout="concentric" title="Rings by entity type">Concentric</button>
-          <button class="layout-btn" data-layout="communities" title="Community-grouped layout">Communities</button>
+      <div class="graph-area">
+        <div id="cy"></div>
+        <div id="graph-stats" class="graph-stats">0 nodes, 0 edges</div>
+        <div class="graph-toolbar">
+          <div class="layout-selector">
+            <button class="layout-btn active" data-layout="clustered" title="Force-directed layout">Clustered</button>
+            <button class="layout-btn" data-layout="hierarchical" title="Top-down tree layout">Hierarchical</button>
+            <button class="layout-btn" data-layout="concentric" title="Rings by entity type">Concentric</button>
+            <button class="layout-btn" data-layout="communities" title="Community-grouped layout">Communities</button>
+          </div>
+          <button id="analysis-btn" class="analysis-btn" title="Graph analysis">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M1 14h14v1H0V0h1v14zM3 12V8h2v4H3zm3 0V5h2v7H6zm3 0V2h2v10H9zm3 0V6h2v6h-2z"/>
+            </svg>
+          </button>
+          <button id="fit-btn" class="fit-btn" title="Fit to view" onclick="window.laminarkGraph && window.laminarkGraph.fitToView()">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M2 2h4v1.5H3.5V6H2V2zm8 0h4v4h-1.5V3.5H10V2zM2 10h1.5v2.5H6V14H2v-4zm10.5 2.5V10H14v4h-4v-1.5h2.5z"/>
+            </svg>
+          </button>
         </div>
-        <button id="analysis-btn" class="analysis-btn" title="Graph analysis">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M1 14h14v1H0V0h1v14zM3 12V8h2v4H3zm3 0V5h2v7H6zm3 0V2h2v10H9zm3 0V6h2v6h-2z"/>
-          </svg>
-        </button>
-        <button id="fit-btn" class="fit-btn" title="Fit to view" onclick="window.laminarkGraph && window.laminarkGraph.fitToView()">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M2 2h4v1.5H3.5V6H2V2zm8 0h4v4h-1.5V3.5H10V2zM2 10h1.5v2.5H6V14H2v-4zm10.5 2.5V10H14v4h-4v-1.5h2.5z"/>
-          </svg>
-        </button>
-      </div>
-      <div class="graph-legend" id="graph-legend">
+        <div class="graph-legend" id="graph-legend">
         <div class="graph-legend-title">Entity Types</div>
         <div class="graph-legend-item"><span class="legend-color" style="background:#58a6ff; border-radius:3px;"></span> Project</div>
         <div class="graph-legend-item"><span class="legend-color" style="background:#7ee787; border-radius:2px;"></span> File</div>
@@ -83,6 +85,7 @@
         <div class="graph-legend-item"><span class="legend-color legend-triangle" style="background:transparent; border-left:6px solid transparent; border-right:6px solid transparent; border-bottom:11px solid #f85149; border-radius:0; width:0; height:0;"></span> Problem</div>
         <div class="graph-legend-item"><span class="legend-color" style="background:#3fb950; clip-path:polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);"></span> Solution</div>
         <div class="graph-legend-item"><span class="legend-color" style="background:#f0883e; clip-path:polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);"></span> Reference</div>
+        </div>
       </div>
     </div>
 
@@ -150,6 +153,12 @@
         </div>
       </div>
     </div>
+
+    <div id="help-view" class="view-container">
+      <div class="help-container" id="help-content">
+        <p class="empty-state">Loading help...</p>
+      </div>
+    </div>
   </main>
 
   <div id="confirm-overlay" class="confirm-overlay hidden">
@@ -197,5 +206,6 @@
   <script src="/timeline.js"></script>
   <script src="/activity.js"></script>
   <script src="/settings.js"></script>
+  <script src="/help.js"></script>
 </body>
 </html>
