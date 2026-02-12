@@ -1314,6 +1314,51 @@ var SaveGuard = class {
 };
 
 //#endregion
+//#region src/hooks/tool-name-parser.ts
+/**
+* Infers the tool type from a tool name seen in PostToolUse.
+*
+* - MCP tools have the `mcp__` prefix
+* - Built-in tools are PascalCase single words (Write, Edit, Bash, Read, etc.)
+* - Anything else is unknown
+*/
+function inferToolType(toolName) {
+	if (toolName.startsWith("mcp__")) return "mcp_tool";
+	if (/^[A-Z][a-zA-Z]+$/.test(toolName)) return "builtin";
+	return "unknown";
+}
+/**
+* Infers the scope of a tool from its name.
+*
+* - Plugin MCP tools (mcp__plugin_*) are plugin-scoped
+* - Other MCP tools default to project-scoped (conservative; may be global but unknown from name alone)
+* - Non-MCP tools (builtins) are always global
+*/
+function inferScope(toolName) {
+	if (toolName.startsWith("mcp__plugin_")) return "plugin";
+	if (toolName.startsWith("mcp__")) return "project";
+	return "global";
+}
+/**
+* Extracts the MCP server name from a tool name.
+*
+* Plugin MCP tools: `mcp__plugin_<pluginName>_<serverName>__<tool>`
+*   Example: `mcp__plugin_laminark_laminark__recall` -> server is `laminark`
+*
+* Project MCP tools: `mcp__<serverName>__<tool>`
+*   Example: `mcp__playwright__browser_screenshot` -> server is `playwright`
+*
+* Returns null for non-MCP tools.
+*/
+function extractServerName(toolName) {
+	const pluginMatch = toolName.match(/^mcp__plugin_([^_]+(?:_[^_]+)*)_([^_]+(?:_[^_]+)*)__/);
+	if (pluginMatch) return pluginMatch[2];
+	const projectMatch = toolName.match(/^mcp__([^_]+(?:_[^_]+)*)__/);
+	if (projectMatch) return projectMatch[1];
+	return null;
+}
+
+//#endregion
 //#region src/storage/research-buffer.ts
 /**
 * Lightweight buffer for exploration tool events (Read, Glob, Grep).
@@ -1931,5 +1976,5 @@ var ToolRegistryRepository = class {
 };
 
 //#endregion
-export { jaccardSimilarity as a, ObservationRepository as c, MIGRATIONS as d, runMigrations as f, SaveGuard as i, rowToObservation as l, debugTimed as m, NotificationStore as n, hybridSearch as o, debug as p, ResearchBufferRepository as r, SessionRepository as s, ToolRegistryRepository as t, openDatabase as u };
-//# sourceMappingURL=tool-registry-Dk6m-4H_.mjs.map
+export { debugTimed as _, inferScope as a, jaccardSimilarity as c, ObservationRepository as d, rowToObservation as f, debug as g, runMigrations as h, extractServerName as i, hybridSearch as l, MIGRATIONS as m, NotificationStore as n, inferToolType as o, openDatabase as p, ResearchBufferRepository as r, SaveGuard as s, ToolRegistryRepository as t, SessionRepository as u };
+//# sourceMappingURL=tool-registry-BWSzC89L.mjs.map

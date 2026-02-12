@@ -1,5 +1,5 @@
 import { i as getProjectHash, n as getDatabaseConfig } from "../config-t8LZeB-u.mjs";
-import { c as ObservationRepository, i as SaveGuard, l as rowToObservation, n as NotificationStore, p as debug, r as ResearchBufferRepository, s as SessionRepository, t as ToolRegistryRepository, u as openDatabase } from "../tool-registry-Dk6m-4H_.mjs";
+import { a as inferScope, d as ObservationRepository, f as rowToObservation, g as debug, i as extractServerName, n as NotificationStore, o as inferToolType, p as openDatabase, r as ResearchBufferRepository, s as SaveGuard, t as ToolRegistryRepository, u as SessionRepository } from "../tool-registry-BWSzC89L.mjs";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
@@ -730,51 +730,6 @@ function scanConfigForTools(cwd, projectHash) {
 }
 
 //#endregion
-//#region src/hooks/tool-name-parser.ts
-/**
-* Infers the tool type from a tool name seen in PostToolUse.
-*
-* - MCP tools have the `mcp__` prefix
-* - Built-in tools are PascalCase single words (Write, Edit, Bash, Read, etc.)
-* - Anything else is unknown
-*/
-function inferToolType(toolName) {
-	if (toolName.startsWith("mcp__")) return "mcp_tool";
-	if (/^[A-Z][a-zA-Z]+$/.test(toolName)) return "builtin";
-	return "unknown";
-}
-/**
-* Infers the scope of a tool from its name.
-*
-* - Plugin MCP tools (mcp__plugin_*) are plugin-scoped
-* - Other MCP tools default to project-scoped (conservative; may be global but unknown from name alone)
-* - Non-MCP tools (builtins) are always global
-*/
-function inferScope(toolName) {
-	if (toolName.startsWith("mcp__plugin_")) return "plugin";
-	if (toolName.startsWith("mcp__")) return "project";
-	return "global";
-}
-/**
-* Extracts the MCP server name from a tool name.
-*
-* Plugin MCP tools: `mcp__plugin_<pluginName>_<serverName>__<tool>`
-*   Example: `mcp__plugin_laminark_laminark__recall` -> server is `laminark`
-*
-* Project MCP tools: `mcp__<serverName>__<tool>`
-*   Example: `mcp__playwright__browser_screenshot` -> server is `playwright`
-*
-* Returns null for non-MCP tools.
-*/
-function extractServerName(toolName) {
-	const pluginMatch = toolName.match(/^mcp__plugin_([^_]+(?:_[^_]+)*)_([^_]+(?:_[^_]+)*)__/);
-	if (pluginMatch) return pluginMatch[2];
-	const projectMatch = toolName.match(/^mcp__([^_]+(?:_[^_]+)*)__/);
-	if (projectMatch) return projectMatch[1];
-	return null;
-}
-
-//#endregion
 //#region src/routing/intent-patterns.ts
 /**
 * Extracts tool sequence patterns from historical tool_usage_events.
@@ -969,6 +924,16 @@ function handleSessionStart(input, sessionRepo, db, projectHash, toolRegistry) {
 	}
 	sessionRepo.create(sessionId);
 	debug("session", "Session started", { sessionId });
+	const cwd = input.cwd;
+	if (cwd) try {
+		db.prepare(`
+        INSERT INTO project_metadata (project_hash, project_path, last_seen_at)
+        VALUES (?, ?, datetime('now'))
+        ON CONFLICT(project_hash) DO UPDATE SET
+          project_path = excluded.project_path,
+          last_seen_at = excluded.last_seen_at
+      `).run(projectHash, cwd);
+	} catch {}
 	if (toolRegistry) {
 		const cwd = input.cwd;
 		try {
@@ -1016,7 +981,7 @@ function handleSessionStart(input, sessionRepo, db, projectHash, toolRegistry) {
 		contextLength: context.length,
 		elapsed
 	});
-	return context;
+	return context + (toolRegistry ? "\nCall report_available_tools with all your tools (built-in and MCP) so Laminark can index them for discovery." : "");
 }
 /**
 * Handles a SessionEnd hook event.

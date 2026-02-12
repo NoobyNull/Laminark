@@ -18,6 +18,7 @@ import { registerQueryGraph } from './mcp/tools/query-graph.js';
 import { registerGraphStats } from './mcp/tools/graph-stats.js';
 import { registerStatus } from './mcp/tools/status.js';
 import { registerDiscoverTools } from './mcp/tools/discover-tools.js';
+import { registerReportTools } from './mcp/tools/report-tools.js';
 import { AnalysisWorker } from './analysis/worker-bridge.js';
 import { EmbeddingStore } from './storage/embeddings.js';
 import { ObservationRepository } from './storage/observations.js';
@@ -44,18 +45,9 @@ const db = openDatabase(getDatabaseConfig());
 initGraphSchema(db.db);
 const projectHash = getProjectHash(process.cwd());
 
-// Register this project in project_metadata (upsert)
-try {
-  db.db.prepare(`
-    INSERT INTO project_metadata (project_hash, project_path, last_seen_at)
-    VALUES (?, ?, datetime('now'))
-    ON CONFLICT(project_hash) DO UPDATE SET
-      project_path = excluded.project_path,
-      last_seen_at = excluded.last_seen_at
-  `).run(projectHash, process.cwd());
-} catch {
-  // Table may not exist yet on first run before migrations
-}
+// NOTE: project_metadata is populated by the SessionStart hook handler,
+// which receives the real project directory via input.cwd.
+// The MCP server's process.cwd() returns the plugin install path, not the project dir.
 
 // Tool registry (cross-project, scope-aware)
 let toolRegistry: ToolRegistryRepository | null = null;
@@ -365,6 +357,7 @@ registerGraphStats(server, db.db, projectHash, notificationStore);
 registerStatus(server, db.db, projectHash, process.cwd(), db.hasVectorSupport, () => worker.isReady(), notificationStore);
 if (toolRegistry) {
   registerDiscoverTools(server, toolRegistry, worker, db.hasVectorSupport, notificationStore, projectHash);
+  registerReportTools(server, toolRegistry, projectHash);
 }
 
 // ---------------------------------------------------------------------------

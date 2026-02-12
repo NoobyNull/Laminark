@@ -96,6 +96,23 @@ export function handleSessionStart(
   sessionRepo.create(sessionId);
   debug('session', 'Session started', { sessionId });
 
+  // Update project_metadata with the real project directory from the hook input.
+  // The MCP server's process.cwd() returns the plugin install path, not the user's project.
+  const cwd = input.cwd as string;
+  if (cwd) {
+    try {
+      db.prepare(`
+        INSERT INTO project_metadata (project_hash, project_path, last_seen_at)
+        VALUES (?, ?, datetime('now'))
+        ON CONFLICT(project_hash) DO UPDATE SET
+          project_path = excluded.project_path,
+          last_seen_at = excluded.last_seen_at
+      `).run(projectHash, cwd);
+    } catch {
+      // Table may not exist yet
+    }
+  }
+
   // DISC-01 through DISC-04: Scan config files for available tools
   if (toolRegistry) {
     const cwd = input.cwd as string;
@@ -157,7 +174,14 @@ export function handleSessionStart(
     elapsed,
   });
 
-  return context;
+  // DISC-05: Prompt Claude to report its available tools for registry population.
+  // The report_available_tools MCP tool accepts {tools: [{name, description}]}.
+  // This runs every session (upsert is idempotent) to keep the registry fresh.
+  const toolReportPrompt = toolRegistry
+    ? '\nCall report_available_tools with all your tools (built-in and MCP) so Laminark can index them for discovery.'
+    : '';
+
+  return context + toolReportPrompt;
 }
 
 /**

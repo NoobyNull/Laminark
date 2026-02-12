@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-t8LZeB-u.mjs";
-import { a as jaccardSimilarity, c as ObservationRepository, d as MIGRATIONS, f as runMigrations, i as SaveGuard, l as rowToObservation, m as debugTimed, n as NotificationStore, o as hybridSearch, p as debug, r as ResearchBufferRepository, s as SessionRepository, t as ToolRegistryRepository, u as openDatabase } from "./tool-registry-Dk6m-4H_.mjs";
+import { _ as debugTimed, a as inferScope, c as jaccardSimilarity, d as ObservationRepository, f as rowToObservation, g as debug, h as runMigrations, i as extractServerName, l as hybridSearch, m as MIGRATIONS, n as NotificationStore, o as inferToolType, p as openDatabase, r as ResearchBufferRepository, s as SaveGuard, t as ToolRegistryRepository, u as SessionRepository } from "./tool-registry-BWSzC89L.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -567,7 +567,7 @@ function prependNotifications$5(notificationStore, projectHash, responseText) {
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$5(text) {
+function textResponse$6(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -612,7 +612,7 @@ function registerRecall(server, db, projectHash, worker = null, embeddingStore =
 			include_purged: z.boolean().default(false).describe("Include soft-deleted items in results (needed for restore)")
 		}
 	}, async (args) => {
-		const withNotifications = (text) => textResponse$5(prependNotifications$5(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$6(prependNotifications$5(notificationStore, projectHash, text));
 		try {
 			const repo = new ObservationRepository(db, projectHash);
 			const searchEngine = new SearchEngine(db, projectHash);
@@ -657,7 +657,7 @@ function registerRecall(server, db, projectHash, worker = null, embeddingStore =
 			if (observations.length === 0) return withNotifications(`No memories found matching '${args.query ?? args.title ?? args.id ?? ""}'. Try broader search terms or check the ID.`);
 			if (args.action === "view") {
 				const originalText = formatViewResponse(observations, searchResults, args.detail, args.id !== void 0).content[0].text;
-				return textResponse$5(prependNotifications$5(notificationStore, projectHash, originalText));
+				return textResponse$6(prependNotifications$5(notificationStore, projectHash, originalText));
 			}
 			if (args.action === "purge") {
 				const targetIds = args.ids ?? (args.id ? [args.id] : []);
@@ -751,7 +751,7 @@ function formatViewResponse(observations, searchResults, detail, isSingleIdLooku
 	}
 	let footer = `---\n${observations.length} result(s) | ~${tokenEstimate} tokens | detail: ${detail}`;
 	if (truncated) footer += " | truncated (use id for full view)";
-	return textResponse$5(`${body}\n${footer}`);
+	return textResponse$6(`${body}\n${footer}`);
 }
 function buildScoreMap(searchResults) {
 	const map = /* @__PURE__ */ new Map();
@@ -919,7 +919,7 @@ function prependNotifications$4(notificationStore, projectHash, responseText) {
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$4(text) {
+function textResponse$5(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -941,7 +941,7 @@ function registerTopicContext(server, db, projectHash, notificationStore = null)
 			limit: z.number().int().min(1).max(20).default(5).describe("Max threads to return")
 		}
 	}, async (args) => {
-		const withNotifications = (text) => textResponse$4(prependNotifications$4(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$5(prependNotifications$4(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "topic_context: request", {
 				query: args.query,
@@ -960,7 +960,7 @@ function registerTopicContext(server, db, projectHash, notificationStore = null)
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "topic_context: error", { error: message });
-			return textResponse$4(`Error retrieving context threads: ${message}`);
+			return textResponse$5(`Error retrieving context threads: ${message}`);
 		}
 	});
 }
@@ -1335,7 +1335,7 @@ function prependNotifications$3(notificationStore, projectHash, responseText) {
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$3(text) {
+function textResponse$4(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1369,7 +1369,7 @@ function registerQueryGraph(server, db, projectHash, notificationStore = null) {
 			limit: z.number().int().min(1).max(50).default(20).describe("Max root entities to return (default: 20, max: 50)")
 		}
 	}, async (args) => {
-		const withNotifications = (text) => textResponse$3(prependNotifications$3(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$4(prependNotifications$3(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "query_graph: request", {
 				query: args.query,
@@ -1727,7 +1727,7 @@ function prependNotifications$2(notificationStore, projectHash, responseText) {
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$2(text) {
+function textResponse$3(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1755,11 +1755,11 @@ function registerGraphStats(server, db, projectHash, notificationStore = null) {
 				nodes: stats.total_nodes,
 				edges: stats.total_edges
 			});
-			return textResponse$2(prependNotifications$2(notificationStore, projectHash, formatted));
+			return textResponse$3(prependNotifications$2(notificationStore, projectHash, formatted));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "graph_stats: error", { error: message });
-			return textResponse$2(`Graph stats error: ${message}`);
+			return textResponse$3(`Graph stats error: ${message}`);
 		}
 	});
 }
@@ -1847,7 +1847,7 @@ function prependNotifications$1(notificationStore, projectHash, responseText) {
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$1(text) {
+function textResponse$2(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1867,18 +1867,18 @@ function registerStatus(server, db, projectHash, projectPath, hasVectorSupport, 
 				memories: status.memories.total,
 				tokens: status.tokens.estimatedTotal
 			});
-			return textResponse$1(prependNotifications$1(notificationStore, projectHash, formatted));
+			return textResponse$2(prependNotifications$1(notificationStore, projectHash, formatted));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "status: error", { error: message });
-			return textResponse$1(`Status error: ${message}`);
+			return textResponse$2(`Status error: ${message}`);
 		}
 	});
 }
 
 //#endregion
 //#region src/mcp/tools/discover-tools.ts
-function textResponse(text) {
+function textResponse$1(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1928,7 +1928,7 @@ function registerDiscoverTools(server, toolRegistry, worker, hasVectorSupport, n
 			limit: z.number().int().min(1).max(50).default(20).describe("Maximum results to return (default: 20)")
 		}
 	}, async (args) => {
-		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$1(prependNotifications(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "discover_tools: request", {
 				query: args.query,
@@ -1967,6 +1967,72 @@ function registerDiscoverTools(server, toolRegistry, worker, hasVectorSupport, n
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "discover_tools: error", { error: message });
 			return errorResponse(`Discover tools error: ${message}`);
+		}
+	});
+}
+
+//#endregion
+//#region src/mcp/tools/report-tools.ts
+function textResponse(text) {
+	return { content: [{
+		type: "text",
+		text
+	}] };
+}
+/**
+* Registers the report_available_tools MCP tool on the server.
+*
+* Accepts an array of tool names (with optional descriptions) and upserts
+* each into the tool registry. Tool type, scope, and server name are inferred
+* from the tool name using the same parser as PostToolUse organic discovery.
+*/
+function registerReportTools(server, toolRegistry, projectHash) {
+	server.registerTool("report_available_tools", {
+		title: "Report Available Tools",
+		description: "Register all tools available in this session with Laminark. Call this once at session start with every tool name you have access to (built-in and MCP). This populates the tool registry for discovery and routing.",
+		inputSchema: { tools: z.array(z.object({
+			name: z.string().min(1).describe("Tool name exactly as it appears (e.g., \"Read\", \"mcp__playwright__browser_click\")"),
+			description: z.string().optional().describe("Brief description of the tool")
+		})).min(1).describe("Array of tools available in this session") }
+	}, async (args) => {
+		try {
+			let registered = 0;
+			let skipped = 0;
+			for (const tool of args.tools) {
+				if (tool.name.startsWith("mcp__plugin_laminark_") || tool.name.startsWith("mcp__laminark__")) {
+					skipped++;
+					continue;
+				}
+				const toolType = inferToolType(tool.name);
+				const scope = inferScope(tool.name);
+				const serverName = extractServerName(tool.name);
+				toolRegistry.upsert({
+					name: tool.name,
+					toolType,
+					scope,
+					source: "config:session-report",
+					projectHash: scope === "global" ? null : projectHash,
+					description: tool.description ?? null,
+					serverName
+				});
+				registered++;
+			}
+			debug("mcp", "report_available_tools: completed", {
+				total: args.tools.length,
+				registered,
+				skipped
+			});
+			return textResponse(`Registered ${registered} tools in the tool registry.${skipped > 0 ? ` Skipped ${skipped} Laminark tools (already known).` : ""}`);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Unknown error";
+			debug("mcp", "report_available_tools: error", { error: message });
+			return {
+				content: [{
+					type: "text",
+					text: `Report tools error: ${message}`
+				}],
+				isError: true
+			};
 		}
 	});
 }
@@ -5140,15 +5206,6 @@ function startWebServer(app, port = 37820) {
 const db = openDatabase(getDatabaseConfig());
 initGraphSchema(db.db);
 const projectHash = getProjectHash(process.cwd());
-try {
-	db.db.prepare(`
-    INSERT INTO project_metadata (project_hash, project_path, last_seen_at)
-    VALUES (?, ?, datetime('now'))
-    ON CONFLICT(project_hash) DO UPDATE SET
-      project_path = excluded.project_path,
-      last_seen_at = excluded.last_seen_at
-  `).run(projectHash, process.cwd());
-} catch {}
 let toolRegistry = null;
 try {
 	toolRegistry = new ToolRegistryRepository(db.db);
@@ -5350,7 +5407,10 @@ registerTopicContext(server, db.db, projectHash, notificationStore);
 registerQueryGraph(server, db.db, projectHash, notificationStore);
 registerGraphStats(server, db.db, projectHash, notificationStore);
 registerStatus(server, db.db, projectHash, process.cwd(), db.hasVectorSupport, () => worker.isReady(), notificationStore);
-if (toolRegistry) registerDiscoverTools(server, toolRegistry, worker, db.hasVectorSupport, notificationStore, projectHash);
+if (toolRegistry) {
+	registerDiscoverTools(server, toolRegistry, worker, db.hasVectorSupport, notificationStore, projectHash);
+	registerReportTools(server, toolRegistry, projectHash);
+}
 const classifier = new ObservationClassifier(db.db, projectHash, server, {
 	intervalMs: 45e3,
 	contextWindow: 5,
