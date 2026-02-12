@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-02-10)
 Phase: 16 of 16 (Staleness Management) -- COMPLETE
 Plan: 2 of 2 complete
 Status: Phase 16 complete. All v2.0 phases complete.
-Last activity: 2026-02-11 — 16-02 complete (staleness wiring: config detection, failure demotion, ranking penalties, routing exclusion, search display)
+Last activity: 2026-02-12 - Completed quick task 2: add in a help section to the Laminark GUI
 
 Progress (v2.0): [██████████] 100% (Phase 16 plan 2/2 complete)
 
@@ -117,6 +117,12 @@ Recent decisions affecting current work:
 - ~~[v2] Usage event tracking~~ COMPLETE (Phase 12-01: tool_usage_events + temporal queries)
 - ~~[v2] Conversation-driven routing~~ COMPLETE (Phase 14: types, heuristic, learned patterns, router, handler + session integration)
 - ~~[v2] Tool search and discovery~~ COMPLETE (Phase 15: FTS5+vec0 search foundation + discover_tools MCP tool + background embedding)
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 2 | add in a help section to the Laminark GUI | 2026-02-12 | cd7bc1d | [2-add-in-a-help-section-to-the-laminark-gu](./quick/2-add-in-a-help-section-to-the-laminark-gu/) |
 
 ### Blockers/Concerns
 
