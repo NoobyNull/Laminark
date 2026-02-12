@@ -52,7 +52,7 @@ afterEach(() => {
 
 describe('Graph Wiring Integration', () => {
   describe('extractAndPersist creates graph nodes from observation text', () => {
-    it('extracts file paths and tools into graph_nodes', () => {
+    it('extracts file paths into graph_nodes', () => {
       const { db, tmpDir } = createTempDb();
       cleanups.push(() => {
         db.close();
@@ -60,10 +60,12 @@ describe('Graph Wiring Integration', () => {
       });
 
       const text =
-        'Modified src/components/Header.tsx using the Read tool to check layout';
+        'Modified src/components/Header.tsx to fix responsive layout';
       const obsId = 'obs-001';
 
-      const nodes = extractAndPersist(db, text, obsId);
+      const nodes = extractAndPersist(db, text, obsId, {
+        isChangeObservation: true,
+      });
 
       expect(nodes.length).toBeGreaterThan(0);
 
@@ -87,7 +89,9 @@ describe('Graph Wiring Integration', () => {
       });
 
       const obsId = 'obs-002';
-      extractAndPersist(db, 'Editing src/index.ts for the server', obsId);
+      extractAndPersist(db, 'Editing src/index.ts for the server', obsId, {
+        isChangeObservation: true,
+      });
 
       const rows = db
         .prepare('SELECT observation_ids FROM graph_nodes')
@@ -104,20 +108,24 @@ describe('Graph Wiring Integration', () => {
   });
 
   describe('detectAndPersist creates edges between extracted entities', () => {
-    it('creates edges between co-occurring entities', () => {
+    it('creates edges between co-occurring entities of different types', () => {
       const { db, tmpDir } = createTempDb();
       cleanups.push(() => {
         db.close();
         rmSync(tmpDir, { recursive: true, force: true });
       });
 
-      // Text with multiple entity types that co-occur
+      // Text with a Decision and a File that co-occur -- Decision->File has
+      // a type-pair default of 'modifies' so an edge will be created.
+      // Decision rule triggers on "decided to" and File rule on the path.
       const text =
-        'Used the Bash tool to modify src/utils/parser.ts and src/utils/lexer.ts';
+        'Decided to refactor src/auth/middleware.ts for better error handling';
       const obsId = 'obs-003';
 
       // First extract entities (creates nodes)
-      const nodes = extractAndPersist(db, text, obsId);
+      const nodes = extractAndPersist(db, text, obsId, {
+        isChangeObservation: true,
+      });
       expect(nodes.length).toBeGreaterThanOrEqual(2);
 
       // Build entity pairs from extracted nodes
@@ -144,6 +152,43 @@ describe('Graph Wiring Integration', () => {
       }
     });
 
+    it('skips entity pairs with no type-pair default and no context signal', () => {
+      const { db, tmpDir } = createTempDb();
+      cleanups.push(() => {
+        db.close();
+        rmSync(tmpDir, { recursive: true, force: true });
+      });
+
+      // Two File entities with neutral context -- File->File has no type-pair
+      // default and words like "and" don't match any context signal, so no
+      // edges should be created. Avoid verbs like "looked at", "read",
+      // "modified" etc. that match CONTEXT_SIGNALS.
+      const text =
+        'Files src/utils/parser.ts and src/utils/lexer.ts exist in the project';
+      const obsId = 'obs-003b';
+
+      const nodes = extractAndPersist(db, text, obsId, {
+        isChangeObservation: true,
+      });
+      // Should have at least 2 File nodes
+      const fileNodes = nodes.filter((n) => n.type === 'File');
+      expect(fileNodes.length).toBeGreaterThanOrEqual(2);
+
+      const entityPairs = nodes.map((n) => ({
+        name: n.name,
+        type: n.type,
+      }));
+
+      const edges = detectAndPersist(db, text, entityPairs);
+
+      // File->File with no import/require signal should produce no edges
+      const edgeRows = db
+        .prepare('SELECT * FROM graph_edges')
+        .all() as Array<{ source_id: string; target_id: string; type: string }>;
+      expect(edgeRows.length).toBe(0);
+      expect(edges.length).toBe(0);
+    });
+
     it('handles text with no relationships gracefully', () => {
       const { db, tmpDir } = createTempDb();
       cleanups.push(() => {
@@ -152,7 +197,9 @@ describe('Graph Wiring Integration', () => {
       });
 
       // Single entity -- no pair to relate
-      const nodes = extractAndPersist(db, 'Edited package.json', 'obs-004');
+      const nodes = extractAndPersist(db, 'Edited package.json', 'obs-004', {
+        isChangeObservation: true,
+      });
       const entityPairs = nodes.map((n) => ({
         name: n.name,
         type: n.type,
@@ -230,13 +277,17 @@ describe('Graph Wiring Integration', () => {
         rmSync(tmpDir, { recursive: true, force: true });
       });
 
-      // Simulate what processUnembedded does
+      // Simulate what processUnembedded does.
+      // Use text with a Decision + File -- Decision->File has a type-pair
+      // default of 'modifies' so edges will be created between them.
       const text =
-        'Decided to use the Write tool to update src/graph/schema.ts for the knowledge graph';
+        'Decided to update src/graph/schema.ts for the knowledge graph';
       const obsId = 'obs-end-to-end';
 
       // Step 1: Extract entities (mirrors processUnembedded logic)
-      const nodes = extractAndPersist(db, text, obsId);
+      const nodes = extractAndPersist(db, text, obsId, {
+        isChangeObservation: true,
+      });
 
       if (nodes.length > 0) {
         // Step 2: Detect relationships (mirrors processUnembedded logic)
@@ -255,7 +306,8 @@ describe('Graph Wiring Integration', () => {
       ).cnt;
       expect(nodeCount).toBeGreaterThan(0);
 
-      // If multiple entities were extracted, check for edges too
+      // Should have Decision + File nodes, so edges should exist
+      // Decision->File has 'modifies' type-pair default
       if (nodes.length >= 2) {
         const edgeCount = (
           db

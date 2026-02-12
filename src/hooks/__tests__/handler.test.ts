@@ -215,8 +215,8 @@ describe('processPostToolUseFiltered', () => {
         cwd: '/tmp',
         hook_event_name: 'PostToolUse',
         tool_name: 'Bash',
-        tool_input: { command: 'git log --oneline -5' },
-        tool_response: { stdout: 'abc1234 feat: add new feature\ndef5678 fix: resolve bug' },
+        tool_input: { command: 'npx vitest run' },
+        tool_response: { stdout: 'Tests: 5 passed, 5 total\nTime: 1.23s' },
       },
       obsRepo,
     );

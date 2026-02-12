@@ -17,6 +17,7 @@ import { registerTopicContext } from './mcp/tools/topic-context.js';
 import { registerQueryGraph } from './mcp/tools/query-graph.js';
 import { registerGraphStats } from './mcp/tools/graph-stats.js';
 import { registerStatus } from './mcp/tools/status.js';
+import { StatusCache } from './mcp/status-cache.js';
 import { registerDiscoverTools } from './mcp/tools/discover-tools.js';
 import { registerReportTools } from './mcp/tools/report-tools.js';
 import { AnalysisWorker } from './analysis/worker-bridge.js';
@@ -28,6 +29,8 @@ import { TopicShiftDetector } from './intelligence/topic-detector.js';
 import { AdaptiveThresholdManager } from './intelligence/adaptive-threshold.js';
 import { TopicShiftDecisionLogger } from './intelligence/decision-logger.js';
 import { loadTopicDetectionConfig, applyConfig } from './config/topic-detection-config.js';
+import { loadGraphExtractionConfig } from './config/graph-extraction-config.js';
+import { classifySignal } from './graph/signal-classifier.js';
 import { StashManager } from './storage/stash-manager.js';
 import { ThresholdStore } from './storage/threshold-store.js';
 import { NotificationStore } from './storage/notifications.js';
@@ -40,6 +43,8 @@ import { ObservationClassifier } from './curation/observation-classifier.js';
 import { broadcast } from './web/routes/sse.js';
 import { createWebServer, startWebServer } from './web/server.js';
 import { ToolRegistryRepository } from './storage/tool-registry.js';
+
+const noGui = process.argv.includes('--no_gui');
 
 const db = openDatabase(getDatabaseConfig());
 initGraphSchema(db.db);
@@ -80,6 +85,7 @@ void workerReady;
 // ---------------------------------------------------------------------------
 
 const topicConfig = loadTopicDetectionConfig();
+const graphConfig = loadGraphExtractionConfig();
 const detector = new TopicShiftDetector();
 const adaptiveManager = new AdaptiveThresholdManager({
   sensitivityMultiplier: topicConfig.sensitivityMultiplier,
@@ -125,6 +131,9 @@ async function processUnembedded(): Promise<void> {
 
   const obsRepo = new ObservationRepository(db.db, projectHash);
 
+  // At most one topic shift notification per processing cycle
+  let shiftDetectedThisCycle = false;
+
   for (const id of ids) {
     const obs = obsRepo.getById(id);
     if (!obs) continue;
@@ -152,7 +161,8 @@ async function processUnembedded(): Promise<void> {
 
       // Topic shift detection -- only evaluate user-directed observations
       // (Write/Edit/Bash reflect user intent; Read/Glob/Grep are exploration noise)
-      if (topicConfig.enabled && TOPIC_SHIFT_SOURCES.has(obs.source)) {
+      // Only one shift notification per processing cycle to avoid spam.
+      if (topicConfig.enabled && !shiftDetectedThisCycle && TOPIC_SHIFT_SOURCES.has(obs.source)) {
         try {
           // Build the observation with its newly generated embedding
           const obsWithEmbedding = { ...obs, embedding };
@@ -162,6 +172,7 @@ async function processUnembedded(): Promise<void> {
             projectHash,
           );
           if (result.stashed && result.notification) {
+            shiftDetectedThisCycle = true;
             notificationStore.add(projectHash, result.notification);
             debug('embed', 'Topic shift detected, notification queued', { id });
 
@@ -181,14 +192,30 @@ async function processUnembedded(): Promise<void> {
       }
 
       // Knowledge graph -- extract entities and detect relationships
-      try {
-        const nodes = extractAndPersist(db.db, text, String(id), { projectHash });
+      // Signal classification gates which observations trigger graph extraction
+      const signal = graphConfig.enabled
+        ? classifySignal(obs.source, text, graphConfig)
+        : { level: 'skip' as const, reason: 'Graph extraction disabled' };
+
+      if (signal.level !== 'skip') try {
+        const isChangeObs = obs.kind === 'change' || obs.source === 'hook:Write' || obs.source === 'hook:Edit';
+        const nodes = extractAndPersist(db.db, text, String(id), {
+          projectHash,
+          isChangeObservation: isChangeObs,
+          graphConfig,
+        });
         if (nodes.length > 0) {
           const entityPairs = nodes.map(n => ({
             name: n.name,
             type: n.type,
           }));
-          detectAndPersist(db.db, text, entityPairs, { projectHash });
+          // Medium signal: entities only, skip relationship detection
+          if (signal.level === 'high') {
+            detectAndPersist(db.db, text, entityPairs, {
+              projectHash,
+              minConfidence: graphConfig.relationshipDetector.minEdgeConfidence,
+            });
+          }
 
           // Provenance edges: link research context files to changed files
           if (obs.kind === 'change' && obs.content.includes('Research context:')) {
@@ -279,6 +306,7 @@ async function processUnembedded(): Promise<void> {
             id,
             entities: nodes.length,
           });
+          statusCache.markDirty();
 
           // Broadcast entity updates to SSE clients
           for (const node of nodes) {
@@ -342,19 +370,25 @@ const embedTimer = setInterval(() => {
   } catch {
     // Non-fatal
   }
+  // Refresh status cache if data changed since last build
+  statusCache.refreshIfDirty();
 }, 5000);
 
 // ---------------------------------------------------------------------------
 // MCP server setup
 // ---------------------------------------------------------------------------
 
+const statusCache = new StatusCache(
+  db.db, projectHash, process.cwd(), db.hasVectorSupport, () => worker.isReady(),
+);
+
 const server = createServer();
-registerSaveMemory(server, db.db, projectHash, notificationStore, worker, embeddingStore);
-registerRecall(server, db.db, projectHash, worker, embeddingStore, notificationStore);
+registerSaveMemory(server, db.db, projectHash, notificationStore, worker, embeddingStore, statusCache);
+registerRecall(server, db.db, projectHash, worker, embeddingStore, notificationStore, statusCache);
 registerTopicContext(server, db.db, projectHash, notificationStore);
 registerQueryGraph(server, db.db, projectHash, notificationStore);
 registerGraphStats(server, db.db, projectHash, notificationStore);
-registerStatus(server, db.db, projectHash, process.cwd(), db.hasVectorSupport, () => worker.isReady(), notificationStore);
+registerStatus(server, statusCache, projectHash, notificationStore);
 if (toolRegistry) {
   registerDiscoverTools(server, toolRegistry, worker, db.hasVectorSupport, notificationStore, projectHash);
   registerReportTools(server, toolRegistry, projectHash);
@@ -383,12 +417,16 @@ startServer(server).then(() => {
 // Web visualization server (runs alongside MCP server)
 // ---------------------------------------------------------------------------
 
-const webPort = parseInt(process.env.LAMINARK_WEB_PORT || '37820', 10);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const uiRoot = path.resolve(__dirname, '..', 'ui');
-const webApp = createWebServer(db.db, uiRoot, projectHash);
-startWebServer(webApp, webPort);
+if (!noGui) {
+  const webPort = parseInt(process.env.LAMINARK_WEB_PORT || '37820', 10);
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const uiRoot = path.resolve(__dirname, '..', 'ui');
+  const webApp = createWebServer(db.db, uiRoot, projectHash);
+  startWebServer(webApp, webPort);
+} else {
+  debug('mcp', 'Web UI disabled (--no_gui)');
+}
 
 // ---------------------------------------------------------------------------
 // Background curation agent (graph maintenance)
@@ -396,13 +434,17 @@ startWebServer(webApp, webPort);
 
 const curationAgent = new CurationAgent(db.db, {
   intervalMs: 5 * 60 * 1000, // 5 minutes
+  graphConfig,
   onComplete: (report) => {
     debug('db', 'Curation complete', {
       merged: report.observationsMerged,
       deduped: report.entitiesDeduplicated,
       stale: report.stalenessFlagsAdded,
       pruned: report.lowValuePruned,
+      decayed: report.temporalDecayUpdated,
+      decayDeleted: report.temporalDecayDeleted,
     });
+    statusCache.markDirty();
   },
 });
 curationAgent.start();

@@ -105,6 +105,9 @@ apiRoutes.get('/projects', (c) => {
     ).all() as ProjectRow[];
   } catch { /* table may not exist yet */ }
 
+  // Prefer the most recently active project as default (first in list, sorted by last_seen_at DESC)
+  const resolvedDefault = (projects.length > 0 ? projects[0].project_hash : null) || defaultProject;
+
   return c.json({
     projects: projects.map(p => ({
       hash: p.project_hash,
@@ -112,7 +115,7 @@ apiRoutes.get('/projects', (c) => {
       displayName: p.display_name || p.project_path.split('/').pop() || p.project_hash.substring(0, 8),
       lastSeenAt: p.last_seen_at,
     })),
-    defaultProject,
+    defaultProject: resolvedDefault,
   });
 });
 

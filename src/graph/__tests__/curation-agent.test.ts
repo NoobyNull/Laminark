@@ -102,7 +102,7 @@ describe('findMergeableClusters', () => {
 
     // Link to an entity
     upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'React',
       metadata: {},
       observation_ids: ['obs-1', 'obs-2', 'obs-3'],
@@ -159,7 +159,7 @@ describe('findMergeableClusters', () => {
     });
 
     upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'TwoObs',
       metadata: {},
       observation_ids: ['obs-only-1', 'obs-only-2'],
@@ -208,7 +208,7 @@ describe('mergeObservationCluster', () => {
     });
 
     const node = upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'React-merge-test',
       metadata: {},
       observation_ids: ['merge-1', 'merge-2', 'merge-3'],
@@ -321,7 +321,7 @@ describe('pruneLowValue', () => {
     });
 
     upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'LinkedTool',
       metadata: {},
       observation_ids: ['linked-obs'],
@@ -387,7 +387,7 @@ describe('runCuration', () => {
     });
 
     upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'React-curation',
       metadata: {},
       observation_ids: ['cur-obs-1', 'cur-obs-2', 'cur-obs-3'],
@@ -403,13 +403,13 @@ describe('runCuration', () => {
   it('deduplicates entities during curation', async () => {
     // Set up: two Tool nodes "React" and "react" (case difference)
     upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'React',
       metadata: {},
       observation_ids: ['obs-react-1'],
     });
     upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'react',
       metadata: {},
       observation_ids: ['obs-react-2'],
@@ -433,7 +433,7 @@ describe('runCuration', () => {
 
     // Should only have one Tool node for React now
     const nodes = db
-      .prepare("SELECT * FROM graph_nodes WHERE type = 'Tool' AND LOWER(name) = 'react'")
+      .prepare("SELECT * FROM graph_nodes WHERE type = 'Project' AND LOWER(name) = 'react'")
       .all();
     expect(nodes).toHaveLength(1);
   });
@@ -453,7 +453,7 @@ describe('runCuration', () => {
 
     // Create entity with both observations, set updated_at to now
     upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'Redux-curation',
       metadata: {},
       observation_ids: ['stale-old', 'stale-new'],
@@ -476,7 +476,7 @@ describe('runCuration', () => {
     // Mock: create a node pointing to non-existent observations
     db.prepare(
       `INSERT INTO graph_nodes (id, type, name, metadata, observation_ids, created_at, updated_at)
-       VALUES (?, 'Tool', 'BrokenTool', '{}', '["nonexistent-1", "nonexistent-2", "nonexistent-3"]', datetime('now'), datetime('now'))`,
+       VALUES (?, 'Project', 'BrokenTool', '{}', '["nonexistent-1", "nonexistent-2", "nonexistent-3"]', datetime('now'), datetime('now'))`,
     ).run('broken-node-id');
 
     // Should not throw, should still complete
@@ -487,6 +487,8 @@ describe('runCuration', () => {
     expect(typeof report.entitiesDeduplicated).toBe('number');
     expect(typeof report.stalenessFlagsAdded).toBe('number');
     expect(typeof report.lowValuePruned).toBe('number');
+    expect(typeof report.temporalDecayUpdated).toBe('number');
+    expect(typeof report.temporalDecayDeleted).toBe('number');
   });
 
   it('is idempotent -- running twice produces the same result', async () => {

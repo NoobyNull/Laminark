@@ -187,7 +187,7 @@ describe('detectStaleness', () => {
 
     // Create entity linked to both observations
     upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'Redux',
       metadata: {},
       observation_ids: ['obs-old', 'obs-new'],
@@ -204,7 +204,7 @@ describe('detectStaleness', () => {
     expect(reports[0].newerObservation.id).toBe('obs-new');
     expect(reports[0].reason).toContain('negation');
     expect(reports[0].entityName).toBe('Redux');
-    expect(reports[0].entityType).toBe('Tool');
+    expect(reports[0].entityType).toBe('Project');
   });
 
   it('detects staleness from replacement pattern', () => {
@@ -220,7 +220,7 @@ describe('detectStaleness', () => {
     });
 
     upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'jsonwebtoken',
       metadata: {},
       observation_ids: ['obs-jwt-old', 'obs-jwt-new'],
@@ -301,7 +301,7 @@ describe('detectStaleness', () => {
     });
 
     upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'single-obs-entity',
       metadata: {},
       observation_ids: ['obs-single'],
@@ -469,13 +469,13 @@ describe('getStaleObservations', () => {
 
     // Create entities
     upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'Entity-A',
       metadata: {},
       observation_ids: ['obs-entity-a'],
     });
     upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'Entity-B',
       metadata: {},
       observation_ids: ['obs-entity-b'],
@@ -579,7 +579,7 @@ describe('getObservationsByTimeRange', () => {
     });
 
     upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'LinkedEntity',
       metadata: {},
       observation_ids: ['obs-linked'],
@@ -693,7 +693,7 @@ describe('getRecentEntities', () => {
   it('returns entities created within the time window', () => {
     // Entities created with default datetime('now') will be "recent"
     upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'RecentTool',
       metadata: {},
       observation_ids: [],
@@ -706,19 +706,19 @@ describe('getRecentEntities', () => {
 
   it('filters by entity type', () => {
     upsertNode(db, {
-      type: 'Tool',
+      type: 'Project',
       name: 'TypeFilterTool',
       metadata: {},
       observation_ids: [],
     });
     upsertNode(db, {
-      type: 'Person',
+      type: 'Reference',
       name: 'TypeFilterPerson',
       metadata: {},
       observation_ids: [],
     });
 
-    const tools = getRecentEntities(db, { hours: 1, type: 'Tool' });
+    const tools = getRecentEntities(db, { hours: 1, type: 'Project' });
     expect(tools.some((n) => n.name === 'TypeFilterTool')).toBe(true);
     expect(tools.some((n) => n.name === 'TypeFilterPerson')).toBe(false);
   });

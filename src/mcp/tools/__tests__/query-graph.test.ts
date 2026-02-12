@@ -51,7 +51,7 @@ describe('query_graph MCP tool', () => {
     });
 
     const toolNode = upsertNode(ldb.db, {
-      type: 'Tool',
+      type: 'Reference',
       name: 'jose',
       metadata: {},
       observation_ids: [],
@@ -67,7 +67,7 @@ describe('query_graph MCP tool', () => {
     insertEdge(ldb.db, {
       source_id: fileNode.id,
       target_id: toolNode.id,
-      type: 'uses',
+      type: 'references',
       weight: 0.9,
       metadata: {},
     });
@@ -110,9 +110,9 @@ describe('query_graph MCP tool', () => {
   // =============================================================================
 
   it('filters by entity type', () => {
-    // Insert Tool "react" and File "react.config.js"
+    // Insert Reference "react" and File "react.config.js"
     upsertNode(ldb.db, {
-      type: 'Tool',
+      type: 'Reference',
       name: 'react',
       metadata: {},
       observation_ids: [],
@@ -125,16 +125,16 @@ describe('query_graph MCP tool', () => {
       observation_ids: [],
     });
 
-    // Search with type filter for Tool only
+    // Search with type filter for Reference only
     const rows = ldb.db
       .prepare(
         'SELECT * FROM graph_nodes WHERE name LIKE ? COLLATE NOCASE AND type = ?',
       )
-      .all('%react%', 'Tool') as Array<{ name: string; type: string }>;
+      .all('%react%', 'Reference') as Array<{ name: string; type: string }>;
 
     expect(rows).toHaveLength(1);
     expect(rows[0].name).toBe('react');
-    expect(rows[0].type).toBe('Tool');
+    expect(rows[0].type).toBe('Reference');
   });
 
   // =============================================================================
@@ -171,21 +171,21 @@ describe('query_graph MCP tool', () => {
     insertEdge(ldb.db, {
       source_id: nodeA.id,
       target_id: nodeB.id,
-      type: 'depends_on',
+      type: 'related_to',
       weight: 0.8,
       metadata: {},
     });
     insertEdge(ldb.db, {
       source_id: nodeB.id,
       target_id: nodeC.id,
-      type: 'depends_on',
+      type: 'related_to',
       weight: 0.8,
       metadata: {},
     });
     insertEdge(ldb.db, {
       source_id: nodeC.id,
       target_id: nodeD.id,
-      type: 'depends_on',
+      type: 'related_to',
       weight: 0.8,
       metadata: {},
     });
@@ -217,7 +217,7 @@ describe('query_graph MCP tool', () => {
     // Verify the tool would return a "no entities found" message
     // (Simulating the tool logic)
     const query = 'nonexistent';
-    const message = `No entities matching "${query}" found. Try: entity types Project, File, Decision, Problem, Solution, Tool, Person`;
+    const message = `No entities matching "${query}" found. Try: entity types Project, File, Decision, Problem, Solution, Reference`;
     expect(message).toContain('No entities matching');
     expect(message).toContain('nonexistent');
   });
@@ -239,7 +239,7 @@ describe('query_graph MCP tool', () => {
     });
 
     upsertNode(ldb.db, {
-      type: 'Tool',
+      type: 'Reference',
       name: 'long-tool',
       metadata: {},
       observation_ids: [obs.id],
@@ -286,7 +286,7 @@ describe('query_graph MCP tool', () => {
       observation_ids: [],
     });
     const nodeB = upsertNode(ldb.db, {
-      type: 'Tool',
+      type: 'Reference',
       name: 'vitest',
       metadata: {},
       observation_ids: [],
@@ -301,7 +301,7 @@ describe('query_graph MCP tool', () => {
     insertEdge(ldb.db, {
       source_id: nodeA.id,
       target_id: nodeB.id,
-      type: 'uses',
+      type: 'references',
       weight: 0.9,
       metadata: {},
     });
@@ -313,13 +313,13 @@ describe('query_graph MCP tool', () => {
       metadata: {},
     });
 
-    // Only traverse 'uses' relationships
-    const usesOnly = traverseFrom(ldb.db, nodeA.id, {
+    // Only traverse 'references' relationships
+    const referencesOnly = traverseFrom(ldb.db, nodeA.id, {
       depth: 2,
-      edgeTypes: ['uses'],
+      edgeTypes: ['references'],
     });
-    expect(usesOnly).toHaveLength(1);
-    expect(usesOnly[0].node.name).toBe('vitest');
+    expect(referencesOnly).toHaveLength(1);
+    expect(referencesOnly[0].node.name).toBe('vitest');
 
     // Only traverse 'related_to' relationships
     const relatedOnly = traverseFrom(ldb.db, nodeA.id, {

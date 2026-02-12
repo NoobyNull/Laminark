@@ -130,8 +130,8 @@ describe('handleStashCommand', () => {
     expect(result.success).toBe(true);
 
     const stashInput = stashManager.createStash.mock.calls[0][0] as CreateStashInput;
-    // Label from oldest observation (last in DESC list), first 50 chars
-    expect(stashInput.topicLabel).toBe('Initial setup of the Express server with middlewar');
+    // Label from oldest observation (last in DESC list), up to 80 chars
+    expect(stashInput.topicLabel).toBe('Initial setup of the Express server with middleware');
   });
 
   it('creates observation snapshots with correct fields', async () => {

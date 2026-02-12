@@ -48,15 +48,15 @@ function createTestDb(): { db: Database.Database; tmpDir: string } {
 // ---------------------------------------------------------------------------
 
 describe('detectRelationships', () => {
-  it('detects "uses" relationship between File and Tool', () => {
-    const text = 'src/app.ts uses the react framework';
+  it('detects "references" relationship between File and Reference', () => {
+    const text = 'src/app.ts references the react documentation';
     const entities: Array<{ name: string; type: EntityType }> = [
       { name: 'src/app.ts', type: 'File' },
-      { name: 'react', type: 'Tool' },
+      { name: 'react documentation', type: 'Reference' },
     ];
     const candidates = detectRelationships(text, entities);
     expect(candidates).toHaveLength(1);
-    expect(candidates[0].relationshipType).toBe('uses');
+    expect(candidates[0].relationshipType).toBe('references');
     expect(candidates[0].confidence).toBeGreaterThan(0.3);
   });
 
@@ -72,34 +72,33 @@ describe('detectRelationships', () => {
     expect(candidates[0].relationshipType).toBe('solved_by');
   });
 
-  it('detects "decided_by" between Decision and Person', () => {
-    const text = 'Decided by @matt to use Tailwind CSS';
+  it('detects "modifies" between Decision and File', () => {
+    const text = 'Decided to update src/config.ts with new settings';
     const entities: Array<{ name: string; type: EntityType }> = [
-      { name: 'use Tailwind CSS', type: 'Decision' },
-      { name: '@matt', type: 'Person' },
+      { name: 'update src/config.ts', type: 'Decision' },
+      { name: 'src/config.ts', type: 'File' },
     ];
     const candidates = detectRelationships(text, entities);
     expect(candidates).toHaveLength(1);
-    expect(candidates[0].relationshipType).toBe('decided_by');
+    expect(candidates[0].relationshipType).toBe('modifies');
   });
 
-  it('defaults to "related_to" for ambiguous co-occurrences', () => {
-    const text = 'Updated the readme and cleaned up tests';
+  it('produces no relationship for File-File without context signals', () => {
+    const text = 'The readme and the tests are both in the repo';
     const entities: Array<{ name: string; type: EntityType }> = [
       { name: 'readme', type: 'File' },
       { name: 'tests', type: 'File' },
     ];
     const candidates = detectRelationships(text, entities);
-    expect(candidates).toHaveLength(1);
-    expect(candidates[0].relationshipType).toBe('related_to');
-    // Lower confidence for default
-    expect(candidates[0].confidence).toBeLessThan(0.8);
+    // File->File was removed from TYPE_PAIR_DEFAULTS and related_to fallback
+    // was eliminated, so no relationship is produced without context signals
+    expect(candidates).toHaveLength(0);
   });
 
   it('does not create self-relationships', () => {
     const text = 'eslint checks eslint config';
     const entities: Array<{ name: string; type: EntityType }> = [
-      { name: 'eslint', type: 'Tool' },
+      { name: 'eslint', type: 'Reference' },
     ];
     const candidates = detectRelationships(text, entities);
     expect(candidates).toHaveLength(0);
@@ -107,19 +106,19 @@ describe('detectRelationships', () => {
 
   it('boosts confidence for proximate entities', () => {
     // Close entities (within 50 chars)
-    const closeText = 'src/app.ts uses react for rendering';
+    const closeText = 'src/app.ts references react docs for rendering';
     const closeEntities: Array<{ name: string; type: EntityType }> = [
       { name: 'src/app.ts', type: 'File' },
-      { name: 'react', type: 'Tool' },
+      { name: 'react docs', type: 'Reference' },
     ];
     const closeCandidates = detectRelationships(closeText, closeEntities);
 
     // Far entities (200+ chars apart)
     const padding = ' '.repeat(200);
-    const farText = `src/app.ts${padding}uses react for rendering`;
+    const farText = `src/app.ts${padding}references react docs for rendering`;
     const farEntities: Array<{ name: string; type: EntityType }> = [
       { name: 'src/app.ts', type: 'File' },
-      { name: 'react', type: 'Tool' },
+      { name: 'react docs', type: 'Reference' },
     ];
     const farCandidates = detectRelationships(farText, farEntities);
 
@@ -134,13 +133,13 @@ describe('detectRelationships', () => {
   it('returns empty array for less than 2 entities', () => {
     const text = 'Just one entity here: eslint';
     const entities: Array<{ name: string; type: EntityType }> = [
-      { name: 'eslint', type: 'Tool' },
+      { name: 'eslint', type: 'Reference' },
     ];
     const candidates = detectRelationships(text, entities);
     expect(candidates).toHaveLength(0);
   });
 
-  it('detects "depends_on" between File and File with import language', () => {
+  it('detects "references" between File and File with import language', () => {
     const text = 'src/main.ts imports from src/utils.ts for helpers';
     const entities: Array<{ name: string; type: EntityType }> = [
       { name: 'src/main.ts', type: 'File' },
@@ -148,10 +147,10 @@ describe('detectRelationships', () => {
     ];
     const candidates = detectRelationships(text, entities);
     expect(candidates).toHaveLength(1);
-    expect(candidates[0].relationshipType).toBe('depends_on');
+    expect(candidates[0].relationshipType).toBe('references');
   });
 
-  it('detects "part_of" between Problem and File', () => {
+  it('detects "modifies" between Problem and File', () => {
     const text = 'There is a null pointer bug in src/auth/login.ts causing failures';
     const entities: Array<{ name: string; type: EntityType }> = [
       { name: 'null pointer bug', type: 'Problem' },
@@ -159,14 +158,14 @@ describe('detectRelationships', () => {
     ];
     const candidates = detectRelationships(text, entities);
     expect(candidates).toHaveLength(1);
-    expect(candidates[0].relationshipType).toBe('part_of');
+    expect(candidates[0].relationshipType).toBe('modifies');
   });
 
   it('provides evidence snippet in candidates', () => {
-    const text = 'src/app.ts uses react for rendering';
+    const text = 'src/app.ts references react docs for rendering';
     const entities: Array<{ name: string; type: EntityType }> = [
       { name: 'src/app.ts', type: 'File' },
-      { name: 'react', type: 'Tool' },
+      { name: 'react docs', type: 'Reference' },
     ];
     const candidates = detectRelationships(text, entities);
     expect(candidates[0].evidence).toBeDefined();
@@ -202,19 +201,19 @@ describe('detectAndPersist', () => {
       observation_ids: ['obs-1'],
     });
     upsertNode(db, {
-      type: 'Tool',
-      name: 'react',
+      type: 'Reference',
+      name: 'react docs',
       metadata: {},
       observation_ids: ['obs-1'],
     });
 
-    const edges = detectAndPersist(db, 'src/app.ts uses react framework', [
+    const edges = detectAndPersist(db, 'src/app.ts references react docs', [
       { name: 'src/app.ts', type: 'File' },
-      { name: 'react', type: 'Tool' },
+      { name: 'react docs', type: 'Reference' },
     ]);
 
     expect(edges.length).toBeGreaterThanOrEqual(1);
-    expect(edges[0].type).toBe('uses');
+    expect(edges[0].type).toBe('references');
   });
 
   it('skips candidates when nodes do not exist in graph', () => {
@@ -226,20 +225,20 @@ describe('detectAndPersist', () => {
       observation_ids: ['obs-1'],
     });
 
-    const edges = detectAndPersist(db, 'src/app.ts uses react framework', [
+    const edges = detectAndPersist(db, 'src/app.ts references react docs', [
       { name: 'src/app.ts', type: 'File' },
-      { name: 'react', type: 'Tool' },
+      { name: 'react docs', type: 'Reference' },
     ]);
 
-    // Should skip because 'react' node doesn't exist
+    // Should skip because 'react docs' node doesn't exist
     expect(edges).toHaveLength(0);
   });
 
   it('enforces max degree after inserting edges', () => {
     // Create a hub node and 51 satellite nodes
     const hub = upsertNode(db, {
-      type: 'Tool',
-      name: 'hub-tool',
+      type: 'Reference',
+      name: 'hub-reference',
       metadata: {},
       observation_ids: ['obs-hub'],
     });
@@ -254,7 +253,7 @@ describe('detectAndPersist', () => {
       insertEdge(db, {
         source_id: hub.id,
         target_id: satellite.id,
-        type: 'uses',
+        type: 'references',
         weight: (i + 1) / 51, // Incrementing weight
         metadata: {},
       });
@@ -268,8 +267,8 @@ describe('detectAndPersist', () => {
       observation_ids: ['obs-new'],
     });
 
-    detectAndPersist(db, 'hub-tool uses new-file.ts for testing', [
-      { name: 'hub-tool', type: 'Tool' },
+    detectAndPersist(db, 'hub-reference references new-file.ts for testing', [
+      { name: 'hub-reference', type: 'Reference' },
       { name: 'new-file.ts', type: 'File' },
     ]);
 
@@ -301,12 +300,11 @@ describe('constraints', () => {
   describe('validateEntityType', () => {
     it('returns true for valid entity types', () => {
       expect(validateEntityType('File')).toBe(true);
-      expect(validateEntityType('Tool')).toBe(true);
-      expect(validateEntityType('Person')).toBe(true);
+      expect(validateEntityType('Project')).toBe(true);
       expect(validateEntityType('Decision')).toBe(true);
       expect(validateEntityType('Problem')).toBe(true);
       expect(validateEntityType('Solution')).toBe(true);
-      expect(validateEntityType('Project')).toBe(true);
+      expect(validateEntityType('Reference')).toBe(true);
     });
 
     it('returns false for invalid entity types', () => {
@@ -314,32 +312,39 @@ describe('constraints', () => {
       expect(validateEntityType('file')).toBe(false);
       expect(validateEntityType('')).toBe(false);
       expect(validateEntityType('Concept')).toBe(false);
+      expect(validateEntityType('Tool')).toBe(false);
+      expect(validateEntityType('Person')).toBe(false);
     });
   });
 
   describe('validateRelationshipType', () => {
     it('returns true for valid relationship types', () => {
-      expect(validateRelationshipType('uses')).toBe(true);
-      expect(validateRelationshipType('depends_on')).toBe(true);
-      expect(validateRelationshipType('decided_by')).toBe(true);
       expect(validateRelationshipType('related_to')).toBe(true);
-      expect(validateRelationshipType('part_of')).toBe(true);
-      expect(validateRelationshipType('caused_by')).toBe(true);
       expect(validateRelationshipType('solved_by')).toBe(true);
+      expect(validateRelationshipType('caused_by')).toBe(true);
+      expect(validateRelationshipType('modifies')).toBe(true);
+      expect(validateRelationshipType('informed_by')).toBe(true);
+      expect(validateRelationshipType('references')).toBe(true);
+      expect(validateRelationshipType('verified_by')).toBe(true);
+      expect(validateRelationshipType('preceded_by')).toBe(true);
     });
 
     it('returns false for invalid relationship types', () => {
       expect(validateRelationshipType('connects')).toBe(false);
       expect(validateRelationshipType('Uses')).toBe(false);
       expect(validateRelationshipType('')).toBe(false);
+      expect(validateRelationshipType('uses')).toBe(false);
+      expect(validateRelationshipType('depends_on')).toBe(false);
+      expect(validateRelationshipType('decided_by')).toBe(false);
+      expect(validateRelationshipType('part_of')).toBe(false);
     });
   });
 
   describe('enforceMaxDegree', () => {
     it('prunes lowest-weight edges when exceeding max degree', () => {
       const node = upsertNode(db, {
-        type: 'Tool',
-        name: 'central-tool',
+        type: 'Reference',
+        name: 'central-reference',
         metadata: {},
         observation_ids: ['obs-1'],
       });
@@ -355,7 +360,7 @@ describe('constraints', () => {
         insertEdge(db, {
           source_id: node.id,
           target_id: satellite.id,
-          type: 'uses',
+          type: 'references',
           weight: (i + 1) / 100, // 0.01, 0.02, ..., 0.55
           metadata: {},
         });
@@ -380,8 +385,8 @@ describe('constraints', () => {
 
     it('does nothing when under max degree', () => {
       const node = upsertNode(db, {
-        type: 'Tool',
-        name: 'small-tool',
+        type: 'Reference',
+        name: 'small-reference',
         metadata: {},
         observation_ids: ['obs-1'],
       });
@@ -396,7 +401,7 @@ describe('constraints', () => {
         insertEdge(db, {
           source_id: node.id,
           target_id: satellite.id,
-          type: 'uses',
+          type: 'references',
           weight: 0.5,
           metadata: {},
         });
@@ -409,8 +414,8 @@ describe('constraints', () => {
 
     it('supports custom max degree', () => {
       const node = upsertNode(db, {
-        type: 'Tool',
-        name: 'custom-tool',
+        type: 'Reference',
+        name: 'custom-reference',
         metadata: {},
         observation_ids: ['obs-1'],
       });
@@ -425,7 +430,7 @@ describe('constraints', () => {
         insertEdge(db, {
           source_id: node.id,
           target_id: satellite.id,
-          type: 'uses',
+          type: 'references',
           weight: (i + 1) / 10,
           metadata: {},
         });
@@ -441,13 +446,13 @@ describe('constraints', () => {
     it('reroutes edges and deletes merged node', () => {
       // Create two nodes representing the same entity
       const keepNode = upsertNode(db, {
-        type: 'Tool',
+        type: 'Reference',
         name: 'React',
         metadata: { source: 'extraction-1' },
         observation_ids: ['obs-1'],
       });
       const mergeNode = upsertNode(db, {
-        type: 'Tool',
+        type: 'Reference',
         name: 'react',
         metadata: { source: 'extraction-2' },
         observation_ids: ['obs-2'],
@@ -464,14 +469,14 @@ describe('constraints', () => {
       insertEdge(db, {
         source_id: satellite.id,
         target_id: keepNode.id,
-        type: 'uses',
+        type: 'references',
         weight: 0.6,
         metadata: {},
       });
       insertEdge(db, {
         source_id: satellite.id,
         target_id: mergeNode.id,
-        type: 'depends_on',
+        type: 'informed_by',
         weight: 0.7,
         metadata: {},
       });
@@ -479,16 +484,16 @@ describe('constraints', () => {
       mergeEntities(db, keepNode.id, mergeNode.id);
 
       // Merged node should be deleted
-      const mergedLookup = getNodeByNameAndType(db, 'react', 'Tool');
+      const mergedLookup = getNodeByNameAndType(db, 'react', 'Reference');
       // 'react' might still exist as 'React' since keepNode was 'React'
       // The mergeNode 'react' should be gone
-      const allTools = db
+      const allRefs = db
         .prepare('SELECT * FROM graph_nodes WHERE type = ?')
-        .all('Tool');
-      expect(allTools).toHaveLength(1);
+        .all('Reference');
+      expect(allRefs).toHaveLength(1);
 
       // Keep node should have merged observation_ids
-      const updated = getNodeByNameAndType(db, 'React', 'Tool');
+      const updated = getNodeByNameAndType(db, 'React', 'Reference');
       expect(updated).not.toBeNull();
       expect(updated!.observation_ids).toContain('obs-1');
       expect(updated!.observation_ids).toContain('obs-2');
@@ -500,13 +505,13 @@ describe('constraints', () => {
 
     it('handles duplicate edge conflicts by keeping higher weight', () => {
       const keepNode = upsertNode(db, {
-        type: 'Tool',
+        type: 'Reference',
         name: 'TypeScript',
         metadata: {},
         observation_ids: ['obs-1'],
       });
       const mergeNode = upsertNode(db, {
-        type: 'Tool',
+        type: 'Reference',
         name: 'typescript',
         metadata: {},
         observation_ids: ['obs-2'],
@@ -518,18 +523,18 @@ describe('constraints', () => {
         observation_ids: ['obs-3'],
       });
 
-      // Both have 'uses' edge from the same file
+      // Both have 'references' edge from the same file
       insertEdge(db, {
         source_id: file.id,
         target_id: keepNode.id,
-        type: 'uses',
+        type: 'references',
         weight: 0.5,
         metadata: {},
       });
       insertEdge(db, {
         source_id: file.id,
         target_id: mergeNode.id,
-        type: 'uses',
+        type: 'references',
         weight: 0.8,
         metadata: {},
       });
@@ -538,24 +543,24 @@ describe('constraints', () => {
 
       // Should have one edge with the higher weight
       const edges = getEdgesForNode(db, keepNode.id);
-      const usesEdge = edges.find(
-        (e) => e.source_id === file.id && e.type === 'uses',
+      const referencesEdge = edges.find(
+        (e) => e.source_id === file.id && e.type === 'references',
       );
-      expect(usesEdge).toBeDefined();
-      expect(usesEdge!.weight).toBe(0.8);
+      expect(referencesEdge).toBeDefined();
+      expect(referencesEdge!.weight).toBe(0.8);
     });
   });
 
   describe('findDuplicateEntities', () => {
     it('detects case-insensitive name duplicates', () => {
       upsertNode(db, {
-        type: 'Tool',
+        type: 'Reference',
         name: 'React',
         metadata: {},
         observation_ids: ['obs-1'],
       });
       upsertNode(db, {
-        type: 'Tool',
+        type: 'Reference',
         name: 'react',
         metadata: {},
         observation_ids: ['obs-2'],
@@ -574,13 +579,13 @@ describe('constraints', () => {
 
     it('detects common abbreviation duplicates', () => {
       upsertNode(db, {
-        type: 'Tool',
+        type: 'Reference',
         name: 'TypeScript',
         metadata: {},
         observation_ids: ['obs-1'],
       });
       upsertNode(db, {
-        type: 'Tool',
+        type: 'Reference',
         name: 'TS',
         metadata: {},
         observation_ids: ['obs-2'],
@@ -597,13 +602,13 @@ describe('constraints', () => {
 
     it('filters by entity type when specified', () => {
       upsertNode(db, {
-        type: 'Tool',
+        type: 'Reference',
         name: 'React',
         metadata: {},
         observation_ids: ['obs-1'],
       });
       upsertNode(db, {
-        type: 'Tool',
+        type: 'Reference',
         name: 'react',
         metadata: {},
         observation_ids: ['obs-2'],
@@ -621,12 +626,12 @@ describe('constraints', () => {
         observation_ids: ['obs-4'],
       });
 
-      const toolDupes = findDuplicateEntities(db, { type: 'Tool' });
-      expect(toolDupes.length).toBeGreaterThanOrEqual(1);
-      // All dupes should be Tool type only
-      for (const group of toolDupes) {
+      const refDupes = findDuplicateEntities(db, { type: 'Reference' });
+      expect(refDupes.length).toBeGreaterThanOrEqual(1);
+      // All dupes should be Reference type only
+      for (const group of refDupes) {
         for (const entity of group.entities) {
-          expect(entity.type).toBe('Tool');
+          expect(entity.type).toBe('Reference');
         }
       }
     });
@@ -635,8 +640,8 @@ describe('constraints', () => {
   describe('getGraphHealth', () => {
     it('returns accurate graph health metrics', () => {
       const node1 = upsertNode(db, {
-        type: 'Tool',
-        name: 'react',
+        type: 'Reference',
+        name: 'react docs',
         metadata: {},
         observation_ids: ['obs-1'],
       });
@@ -647,8 +652,8 @@ describe('constraints', () => {
         observation_ids: ['obs-2'],
       });
       const node3 = upsertNode(db, {
-        type: 'Person',
-        name: '@alice',
+        type: 'Project',
+        name: 'my-project',
         metadata: {},
         observation_ids: ['obs-3'],
       });
@@ -656,14 +661,14 @@ describe('constraints', () => {
       insertEdge(db, {
         source_id: node2.id,
         target_id: node1.id,
-        type: 'uses',
+        type: 'references',
         weight: 0.8,
         metadata: {},
       });
       insertEdge(db, {
         source_id: node2.id,
         target_id: node3.id,
-        type: 'related_to',
+        type: 'references',
         weight: 0.5,
         metadata: {},
       });
@@ -678,8 +683,8 @@ describe('constraints', () => {
 
     it('identifies hotspot nodes approaching degree limit', () => {
       const hub = upsertNode(db, {
-        type: 'Tool',
-        name: 'hub-tool',
+        type: 'Reference',
+        name: 'hub-reference',
         metadata: {},
         observation_ids: ['obs-1'],
       });
@@ -695,7 +700,7 @@ describe('constraints', () => {
         insertEdge(db, {
           source_id: hub.id,
           target_id: satellite.id,
-          type: 'uses',
+          type: 'references',
           weight: 0.5,
           metadata: {},
         });
@@ -704,7 +709,7 @@ describe('constraints', () => {
       const health = getGraphHealth(db);
       expect(health.hotspots.length).toBeGreaterThanOrEqual(1);
       const hubHotspot = health.hotspots.find(
-        (h) => h.node.name === 'hub-tool',
+        (h) => h.node.name === 'hub-reference',
       );
       expect(hubHotspot).toBeDefined();
       expect(hubHotspot!.degree).toBe(42);

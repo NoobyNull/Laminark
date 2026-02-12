@@ -18,6 +18,8 @@ import type { EntityType } from './types.js';
 import type { GraphNode } from './types.js';
 import { upsertNode } from './schema.js';
 import { ALL_RULES, type ExtractionMatch } from './extraction-rules.js';
+import { applyQualityGate } from './write-quality-gate.js';
+import type { GraphExtractionConfig } from '../config/graph-extraction-config.js';
 
 // =============================================================================
 // Types
@@ -110,13 +112,22 @@ export function extractAndPersist(
   db: BetterSqlite3.Database,
   text: string,
   observationId: string,
-  opts?: { minConfidence?: number; projectHash?: string },
+  opts?: {
+    minConfidence?: number;
+    projectHash?: string;
+    isChangeObservation?: boolean;
+    graphConfig?: GraphExtractionConfig;
+  },
 ): GraphNode[] {
   const result = extractEntities(text, observationId, opts);
   const persisted: GraphNode[] = [];
 
+  // Apply write-quality gate filter
+  const isChange = opts?.isChangeObservation ?? false;
+  const gateResult = applyQualityGate(result.entities, isChange, opts?.graphConfig);
+
   const persist = db.transaction(() => {
-    for (const entity of result.entities) {
+    for (const entity of gateResult.passed) {
       try {
         const node = upsertNode(db, {
           type: entity.type,

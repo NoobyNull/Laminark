@@ -338,7 +338,7 @@ describe('TopicShiftHandler', () => {
     expect(stashInput.summary.length).toBeLessThanOrEqual(200);
   });
 
-  it('handles shift with no previous observations gracefully', async () => {
+  it('skips stash when no previous observations exist (session start)', async () => {
     const shiftResult: TopicShiftResult = {
       shifted: true,
       distance: 0.8,
@@ -351,7 +351,7 @@ describe('TopicShiftHandler', () => {
       detect: vi.fn().mockReturnValue(shiftResult) as TopicShiftDetector['detect'],
     });
 
-    // No previous observations
+    // No previous observations (clean context / session start)
     observationStore = createMockObservationStore([]);
 
     handler = new TopicShiftHandler({
@@ -368,14 +368,10 @@ describe('TopicShiftHandler', () => {
 
     const result = await handler.handleObservation(currentObs, 'sess-001', 'proj-001');
 
-    expect(result.stashed).toBe(true);
-    expect(result.notification).toContain('Unknown topic');
-    expect(stashManager.createStash).toHaveBeenCalledOnce();
-
-    const stashInput = stashManager.createStash.mock.calls[0][0] as CreateStashInput;
-    expect(stashInput.topicLabel).toBe('Unknown topic');
-    expect(stashInput.summary).toBe('');
-    expect(stashInput.observations).toHaveLength(0);
+    // Nothing to stash at session start -- no empty stashes
+    expect(result.stashed).toBe(false);
+    expect(result.notification).toBeNull();
+    expect(stashManager.createStash).not.toHaveBeenCalled();
   });
 
   it('passes observation list query with correct sessionId', async () => {
@@ -407,6 +403,7 @@ describe('TopicShiftHandler', () => {
     expect(observationStore.list).toHaveBeenCalledWith({
       sessionId: 'sess-xyz',
       limit: 20,
+      includeUnclassified: true,
     });
   });
 

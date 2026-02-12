@@ -16,6 +16,7 @@ import {
   FULL_VIEW_BUDGET,
   TOKEN_BUDGET,
 } from '../token-budget.js';
+import type { StatusCache } from '../status-cache.js';
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -110,6 +111,7 @@ export function registerRecall(
   worker: AnalysisWorker | null = null,
   embeddingStore: EmbeddingStore | null = null,
   notificationStore: NotificationStore | null = null,
+  statusCache: StatusCache | null = null,
 ): void {
   server.registerTool(
     'recall',
@@ -298,6 +300,7 @@ export function registerRecall(
             }
           }
           debug('mcp', 'recall: purge', { success, total: targetIds.length });
+          if (success > 0) statusCache?.markDirty();
           let msg = `Purged ${success}/${targetIds.length} memories.`;
           if (failures.length > 0) {
             msg += ` Not found or already purged: ${failures.join(', ')}`;
@@ -321,6 +324,7 @@ export function registerRecall(
             success,
             total: targetIds.length,
           });
+          if (success > 0) statusCache?.markDirty();
           let msg = `Restored ${success}/${targetIds.length} memories.`;
           if (failures.length > 0) {
             msg += ` Not found: ${failures.join(', ')}`;

@@ -33,6 +33,8 @@ import {
   initStalenessSchema,
 } from './staleness.js';
 import { MAX_NODE_DEGREE } from './types.js';
+import { applyTemporalDecay } from './temporal-decay.js';
+import type { GraphExtractionConfig } from '../config/graph-extraction-config.js';
 
 // =============================================================================
 // Types
@@ -48,6 +50,8 @@ export interface CurationReport {
   entitiesDeduplicated: number;
   stalenessFlagsAdded: number;
   lowValuePruned: number;
+  temporalDecayUpdated: number;
+  temporalDecayDeleted: number;
   errors: string[];
 }
 
@@ -77,6 +81,7 @@ export interface CurationReport {
  */
 export async function runCuration(
   db: BetterSqlite3.Database,
+  graphConfig?: GraphExtractionConfig,
 ): Promise<CurationReport> {
   const startedAt = new Date().toISOString();
   const errors: string[] = [];
@@ -84,6 +89,8 @@ export async function runCuration(
   let entitiesDeduplicated = 0;
   let stalenessFlagsAdded = 0;
   let lowValuePruned = 0;
+  let temporalDecayUpdated = 0;
+  let temporalDecayDeleted = 0;
 
   // Ensure staleness schema exists
   try {
@@ -230,6 +237,19 @@ export async function runCuration(
     );
   }
 
+  // -----------------------------------------------------------------------
+  // Step 6: Temporal decay of edge weights
+  // -----------------------------------------------------------------------
+  try {
+    const decayResult = applyTemporalDecay(db, graphConfig);
+    temporalDecayUpdated = decayResult.updated;
+    temporalDecayDeleted = decayResult.deleted;
+  } catch (err) {
+    errors.push(
+      `Step 6 (temporal decay): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
   const completedAt = new Date().toISOString();
 
   const report: CurationReport = {
@@ -239,11 +259,13 @@ export async function runCuration(
     entitiesDeduplicated,
     stalenessFlagsAdded,
     lowValuePruned,
+    temporalDecayUpdated,
+    temporalDecayDeleted,
     errors,
   };
 
   process.stderr.write(
-    `[laminark:curation] Cycle complete: ${observationsMerged} merged, ${entitiesDeduplicated} deduped, ${stalenessFlagsAdded} flagged stale, ${lowValuePruned} pruned\n`,
+    `[laminark:curation] Cycle complete: ${observationsMerged} merged, ${entitiesDeduplicated} deduped, ${stalenessFlagsAdded} flagged stale, ${lowValuePruned} pruned, ${temporalDecayUpdated} decayed, ${temporalDecayDeleted} decay-deleted\n`,
   );
 
   return report;
@@ -263,6 +285,7 @@ export class CurationAgent {
   private db: BetterSqlite3.Database;
   private intervalMs: number;
   private onComplete?: (report: CurationReport) => void;
+  private graphConfig?: GraphExtractionConfig;
   private running: boolean = false;
   private lastRun: string | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -272,11 +295,13 @@ export class CurationAgent {
     opts?: {
       intervalMs?: number;
       onComplete?: (report: CurationReport) => void;
+      graphConfig?: GraphExtractionConfig;
     },
   ) {
     this.db = db;
     this.intervalMs = opts?.intervalMs ?? 300_000; // 5 minutes default
     this.onComplete = opts?.onComplete;
+    this.graphConfig = opts?.graphConfig;
   }
 
   /**
@@ -312,7 +337,7 @@ export class CurationAgent {
    * Execute one curation cycle. This is the main entry point.
    */
   async runOnce(): Promise<CurationReport> {
-    const report = await runCuration(this.db);
+    const report = await runCuration(this.db, this.graphConfig);
     this.lastRun = report.completedAt;
 
     if (this.onComplete) {

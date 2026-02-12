@@ -66,17 +66,18 @@ const CONTEXT_SIGNALS: Array<{
  * or verified each other.
  */
 const TYPE_PAIR_DEFAULTS: Record<string, RelationshipType> = {
-  'File->File': 'informed_by',
+  // File->File removed: was generating 1,400+ low-signal informed_by edges.
+  // File->File edges now require an actual context signal match (import/require).
   'File->Reference': 'references',
   'Reference->File': 'references',
   'Problem->Solution': 'solved_by',
   'Solution->Problem': 'solved_by',
-  'Problem->File': 'related_to',
-  'File->Problem': 'related_to',
-  'Decision->File': 'related_to',
-  'File->Decision': 'related_to',
-  'Project->File': 'related_to',
-  'File->Project': 'related_to',
+  'Problem->File': 'modifies',
+  'File->Problem': 'modifies',
+  'Decision->File': 'modifies',
+  'File->Decision': 'modifies',
+  'Project->File': 'references',
+  'File->Project': 'references',
 };
 
 // =============================================================================
@@ -138,7 +139,8 @@ export function detectRelationships(
 
       // Determine relationship type
       const pairKey = `${source.type}->${target.type}`;
-      let relationshipType = TYPE_PAIR_DEFAULTS[pairKey] ?? 'related_to';
+      const defaultType = TYPE_PAIR_DEFAULTS[pairKey] ?? null;
+      let relationshipType: RelationshipType | null = defaultType;
 
       // Check context signals in the text between entities
       for (const signal of CONTEXT_SIGNALS) {
@@ -148,21 +150,22 @@ export function detectRelationships(
         }
       }
 
-      // Special case: File->File with import/require language
+      // Special case: File->File with import/require language -> references
       if (source.type === 'File' && target.type === 'File') {
         if (/\b(?:imports?|requires?|from)\b/i.test(contextText)) {
-          relationshipType = 'informed_by';
+          relationshipType = 'references';
         }
       }
 
-      // Calculate base confidence
-      let confidence: number;
-      if (relationshipType === 'related_to' && !TYPE_PAIR_DEFAULTS[pairKey]) {
-        // Default fallback for unknown type pairs
-        confidence = 0.3;
-      } else {
-        confidence = 0.5;
+      // If no type-pair default and no context signal matched, skip this pair.
+      // This eliminates the old 'related_to' fallback that generated 800+ low-signal edges.
+      if (relationshipType === null) {
+        continue;
       }
+
+      // Calculate base confidence
+      const confidence_base = 0.5;
+      let confidence = confidence_base;
 
       // Proximity boost: entities within 50 characters of each other
       const distance = Math.abs(sourcePos - targetPos);
@@ -209,16 +212,17 @@ export function detectAndPersist(
   db: BetterSqlite3.Database,
   text: string,
   entities: Array<{ name: string; type: EntityType }>,
-  opts?: { projectHash?: string },
+  opts?: { projectHash?: string; minConfidence?: number },
 ): GraphEdge[] {
   const candidates = detectRelationships(text, entities);
   const persisted: GraphEdge[] = [];
   const affectedNodeIds = new Set<string>();
+  const minConfidence = opts?.minConfidence ?? 0.45;
 
   const persist = db.transaction(() => {
     for (const candidate of candidates) {
-      // Filter low-confidence candidates
-      if (candidate.confidence <= 0.3) continue;
+      // Filter low-confidence candidates (raised from 0.3 to 0.45)
+      if (candidate.confidence <= minConfidence) continue;
 
       // Resolve entity names to node IDs
       const sourceNode = getNodeByNameAndType(

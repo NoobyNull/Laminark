@@ -96,7 +96,7 @@ describe('extractObservation', () => {
     expect(result).toContain('All tests passed');
   });
 
-  it('extracts Read observation with file path', () => {
+  it('returns null for Read (routed to research buffer)', () => {
     const result = extractObservation(
       makePayload({
         tool_name: 'Read',
@@ -104,10 +104,10 @@ describe('extractObservation', () => {
       }),
     );
 
-    expect(result).toBe('[Read] /src/config.ts');
+    expect(result).toBeNull();
   });
 
-  it('extracts Glob observation with pattern and path', () => {
+  it('returns null for Glob (routed to research buffer)', () => {
     const result = extractObservation(
       makePayload({
         tool_name: 'Glob',
@@ -115,10 +115,10 @@ describe('extractObservation', () => {
       }),
     );
 
-    expect(result).toBe('[Glob] pattern=**/*.ts in /src');
+    expect(result).toBeNull();
   });
 
-  it('extracts Grep observation with pattern and path', () => {
+  it('returns null for Grep (routed to research buffer)', () => {
     const result = extractObservation(
       makePayload({
         tool_name: 'Grep',
@@ -126,10 +126,10 @@ describe('extractObservation', () => {
       }),
     );
 
-    expect(result).toBe('[Grep] pattern=TODO in /src');
+    expect(result).toBeNull();
   });
 
-  it('extracts Glob observation without path defaults to cwd', () => {
+  it('returns null for Glob without path (routed to research buffer)', () => {
     const result = extractObservation(
       makePayload({
         tool_name: 'Glob',
@@ -137,7 +137,7 @@ describe('extractObservation', () => {
       }),
     );
 
-    expect(result).toBe('[Glob] pattern=*.js in cwd');
+    expect(result).toBeNull();
   });
 
   it('extracts default/MCP tool observation with JSON input', () => {

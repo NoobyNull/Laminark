@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-t8LZeB-u.mjs";
-import { _ as debugTimed, a as inferScope, c as jaccardSimilarity, d as ObservationRepository, f as rowToObservation, g as debug, h as runMigrations, i as extractServerName, l as hybridSearch, m as MIGRATIONS, n as NotificationStore, o as inferToolType, p as openDatabase, r as ResearchBufferRepository, s as SaveGuard, t as ToolRegistryRepository, u as SessionRepository } from "./tool-registry-BWSzC89L.mjs";
+import { _ as debugTimed, a as inferScope, c as jaccardSimilarity$1, d as ObservationRepository, f as rowToObservation, g as debug, h as runMigrations, i as extractServerName, l as hybridSearch, m as MIGRATIONS, n as NotificationStore, o as inferToolType, p as openDatabase, r as ResearchBufferRepository, s as SaveGuard, t as ToolRegistryRepository, u as SessionRepository } from "./tool-registry-BWSzC89L.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -582,7 +582,7 @@ function errorResponse$2(text) {
 		isError: true
 	};
 }
-function registerRecall(server, db, projectHash, worker = null, embeddingStore = null, notificationStore = null) {
+function registerRecall(server, db, projectHash, worker = null, embeddingStore = null, notificationStore = null, statusCache = null) {
 	server.registerTool("recall", {
 		title: "Recall Memories",
 		description: "Search, view, purge, or restore memories. Search first to find matches, then act on specific results by ID.",
@@ -669,6 +669,7 @@ function registerRecall(server, db, projectHash, worker = null, embeddingStore =
 					success,
 					total: targetIds.length
 				});
+				if (success > 0) statusCache?.markDirty();
 				let msg = `Purged ${success}/${targetIds.length} memories.`;
 				if (failures.length > 0) msg += ` Not found or already purged: ${failures.join(", ")}`;
 				return withNotifications(msg);
@@ -683,6 +684,7 @@ function registerRecall(server, db, projectHash, worker = null, embeddingStore =
 					success,
 					total: targetIds.length
 				});
+				if (success > 0) statusCache?.markDirty();
 				let msg = `Restored ${success}/${targetIds.length} memories.`;
 				if (failures.length > 0) msg += ` Not found: ${failures.join(", ")}`;
 				return withNotifications(msg);
@@ -777,7 +779,7 @@ function generateTitle(content) {
 * save_memory persists user-provided text as a new observation with an optional title.
 * If title is omitted, one is auto-generated from the text content.
 */
-function registerSaveMemory(server, db, projectHash, notificationStore = null, worker = null, embeddingStore = null) {
+function registerSaveMemory(server, db, projectHash, notificationStore = null, worker = null, embeddingStore = null, statusCache = null) {
 	server.registerTool("save_memory", {
 		title: "Save Memory",
 		description: "Save a new memory observation. Provide text content and an optional title. If title is omitted, one is auto-generated from the text.",
@@ -821,6 +823,7 @@ function registerSaveMemory(server, db, projectHash, notificationStore = null, w
 				id: obs.id,
 				title: resolvedTitle
 			});
+			statusCache?.markDirty();
 			let responseText = `Saved memory "${resolvedTitle}" (id: ${obs.id})`;
 			if (notificationStore) {
 				const pending = notificationStore.consumePending(projectHash);
@@ -1766,81 +1769,6 @@ function registerGraphStats(server, db, projectHash, notificationStore = null) {
 
 //#endregion
 //#region src/mcp/tools/status.ts
-function collectStatus(db, projectHash, projectPath, hasVectorSupport, workerReady) {
-	const totalObs = db.prepare("SELECT COUNT(*) as cnt FROM observations WHERE project_hash = ? AND deleted_at IS NULL").get(projectHash).cnt;
-	const embeddedObs = db.prepare("SELECT COUNT(*) as cnt FROM observations WHERE project_hash = ? AND deleted_at IS NULL AND embedding_model IS NOT NULL").get(projectHash).cnt;
-	const deletedObs = db.prepare("SELECT COUNT(*) as cnt FROM observations WHERE project_hash = ? AND deleted_at IS NOT NULL").get(projectHash).cnt;
-	const sessions = db.prepare("SELECT COUNT(DISTINCT session_id) as cnt FROM observations WHERE project_hash = ? AND session_id IS NOT NULL AND deleted_at IS NULL").get(projectHash).cnt;
-	let stashes = 0;
-	try {
-		stashes = db.prepare("SELECT COUNT(*) as cnt FROM context_stashes WHERE project_hash = ? AND status = 'stashed'").get(projectHash).cnt;
-	} catch {}
-	const totalChars = db.prepare("SELECT COALESCE(SUM(LENGTH(content)), 0) as chars FROM observations WHERE project_hash = ? AND deleted_at IS NULL").get(projectHash).chars;
-	let graphNodes = 0;
-	let graphEdges = 0;
-	try {
-		graphNodes = db.prepare("SELECT COUNT(*) as cnt FROM graph_nodes").get().cnt;
-		graphEdges = db.prepare("SELECT COUNT(*) as cnt FROM graph_edges").get().cnt;
-	} catch {}
-	return {
-		project: {
-			path: projectPath,
-			hash: projectHash
-		},
-		database: { path: getDbPath() },
-		capabilities: {
-			vectorSearch: hasVectorSupport,
-			embeddingWorker: workerReady
-		},
-		memories: {
-			total: totalObs,
-			embedded: embeddedObs,
-			deleted: deletedObs,
-			sessions,
-			stashes
-		},
-		tokens: { estimatedTotal: estimateTokens(String("x").repeat(totalChars)) },
-		graph: {
-			nodes: graphNodes,
-			edges: graphEdges
-		},
-		uptime: Math.floor(process.uptime())
-	};
-}
-function formatUptime(seconds) {
-	const h = Math.floor(seconds / 3600);
-	const m = Math.floor(seconds % 3600 / 60);
-	const s = seconds % 60;
-	if (h > 0) return `${h}h ${m}m`;
-	if (m > 0) return `${m}m ${s}s`;
-	return `${s}s`;
-}
-function formatStatus(status) {
-	const lines = [];
-	lines.push("## Laminark Status");
-	lines.push("");
-	lines.push("### Connection");
-	lines.push(`Project: ${status.project.path}`);
-	lines.push(`Project hash: ${status.project.hash}`);
-	lines.push(`Database: ${status.database.path}`);
-	lines.push(`Uptime: ${formatUptime(status.uptime)}`);
-	lines.push("");
-	lines.push("### Capabilities");
-	lines.push(`Vector search: ${status.capabilities.vectorSearch ? "active" : "unavailable (keyword-only)"}`);
-	lines.push(`Embedding worker: ${status.capabilities.embeddingWorker ? "ready" : "degraded"}`);
-	lines.push("");
-	lines.push("### Memories");
-	lines.push(`Observations: ${status.memories.total} (${status.memories.embedded} embedded, ${status.memories.deleted} deleted)`);
-	lines.push(`Sessions: ${status.memories.sessions}`);
-	lines.push(`Stashed threads: ${status.memories.stashes}`);
-	lines.push("");
-	lines.push("### Tokens");
-	lines.push(`Estimated total: ~${status.tokens.estimatedTotal.toLocaleString()} tokens across all memories`);
-	lines.push("");
-	lines.push("### Knowledge Graph");
-	lines.push(`Nodes: ${status.graph.nodes} | Edges: ${status.graph.edges}`);
-	return lines.join("\n");
-}
 function prependNotifications$1(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
@@ -1853,21 +1781,15 @@ function textResponse$2(text) {
 		text
 	}] };
 }
-function registerStatus(server, db, projectHash, projectPath, hasVectorSupport, isWorkerReady, notificationStore = null) {
+function registerStatus(server, cache, projectHash, notificationStore = null) {
 	server.registerTool("status", {
 		title: "Laminark Status",
 		description: "Show Laminark system status: connection info, memory count, token estimates, and capabilities.",
 		inputSchema: {}
 	}, async () => {
 		try {
-			debug("mcp", "status: request");
-			const status = collectStatus(db, projectHash, projectPath, hasVectorSupport, isWorkerReady());
-			const formatted = formatStatus(status);
-			debug("mcp", "status: returning", {
-				memories: status.memories.total,
-				tokens: status.tokens.estimatedTotal
-			});
-			return textResponse$2(prependNotifications$1(notificationStore, projectHash, formatted));
+			debug("mcp", "status: request (cached)");
+			return textResponse$2(prependNotifications$1(notificationStore, projectHash, cache.getFormatted()));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "status: error", { error: message });
@@ -1875,6 +1797,110 @@ function registerStatus(server, db, projectHash, projectPath, hasVectorSupport, 
 		}
 	});
 }
+
+//#endregion
+//#region src/mcp/status-cache.ts
+function formatUptime(seconds) {
+	const h = Math.floor(seconds / 3600);
+	const m = Math.floor(seconds % 3600 / 60);
+	const s = seconds % 60;
+	if (h > 0) return `${h}h ${m}m`;
+	if (m > 0) return `${m}m ${s}s`;
+	return `${s}s`;
+}
+var StatusCache = class {
+	db;
+	projectHash;
+	projectPath;
+	hasVectorSupport;
+	isWorkerReady;
+	/** Pre-built markdown string (everything except the uptime line). */
+	cachedBody = "";
+	/** Uptime snapshot at the time cachedBody was built. */
+	builtAtUptime = 0;
+	dirty = false;
+	constructor(db, projectHash, projectPath, hasVectorSupport, isWorkerReady) {
+		this.db = db;
+		this.projectHash = projectHash;
+		this.projectPath = projectPath;
+		this.hasVectorSupport = hasVectorSupport;
+		this.isWorkerReady = isWorkerReady;
+		this.rebuild();
+	}
+	/** Flag that underlying data has changed (cheap -- no queries). */
+	markDirty() {
+		this.dirty = true;
+	}
+	/** Re-query and rebuild if dirty. Call from a background timer. */
+	refreshIfDirty() {
+		if (!this.dirty) return;
+		this.dirty = false;
+		this.rebuild();
+	}
+	/**
+	* Return the formatted status string instantly.
+	* Patches the uptime line inline so it's always current.
+	*/
+	getFormatted() {
+		const currentUptime = formatUptime(Math.floor(process.uptime()));
+		const workerReady = this.isWorkerReady();
+		return this.cachedBody.replace(`Uptime: ${formatUptime(this.builtAtUptime)}`, `Uptime: ${currentUptime}`).replace(/Embedding worker: (?:ready|degraded)/, `Embedding worker: ${workerReady ? "ready" : "degraded"}`);
+	}
+	rebuild() {
+		try {
+			const ph = this.projectHash;
+			const totalObs = this.db.prepare("SELECT COUNT(*) as cnt FROM observations WHERE project_hash = ? AND deleted_at IS NULL").get(ph).cnt;
+			const embeddedObs = this.db.prepare("SELECT COUNT(*) as cnt FROM observations WHERE project_hash = ? AND deleted_at IS NULL AND embedding_model IS NOT NULL").get(ph).cnt;
+			const deletedObs = this.db.prepare("SELECT COUNT(*) as cnt FROM observations WHERE project_hash = ? AND deleted_at IS NOT NULL").get(ph).cnt;
+			const sessions = this.db.prepare("SELECT COUNT(DISTINCT session_id) as cnt FROM observations WHERE project_hash = ? AND session_id IS NOT NULL AND deleted_at IS NULL").get(ph).cnt;
+			let stashes = 0;
+			try {
+				stashes = this.db.prepare("SELECT COUNT(*) as cnt FROM context_stashes WHERE project_hash = ? AND status = 'stashed'").get(ph).cnt;
+			} catch {}
+			const totalChars = this.db.prepare("SELECT COALESCE(SUM(LENGTH(content)), 0) as chars FROM observations WHERE project_hash = ? AND deleted_at IS NULL").get(ph).chars;
+			let graphNodes = 0;
+			let graphEdges = 0;
+			try {
+				graphNodes = this.db.prepare("SELECT COUNT(*) as cnt FROM graph_nodes").get().cnt;
+				graphEdges = this.db.prepare("SELECT COUNT(*) as cnt FROM graph_edges").get().cnt;
+			} catch {}
+			const uptimeNow = Math.floor(process.uptime());
+			const tokenEstimate = estimateTokens(String("x").repeat(totalChars));
+			const workerReady = this.isWorkerReady();
+			const lines = [];
+			lines.push("## Laminark Status");
+			lines.push("");
+			lines.push("### Connection");
+			lines.push(`Project: ${this.projectPath}`);
+			lines.push(`Project hash: ${ph}`);
+			lines.push(`Database: ${getDbPath()}`);
+			lines.push(`Uptime: ${formatUptime(uptimeNow)}`);
+			lines.push("");
+			lines.push("### Capabilities");
+			lines.push(`Vector search: ${this.hasVectorSupport ? "active" : "unavailable (keyword-only)"}`);
+			lines.push(`Embedding worker: ${workerReady ? "ready" : "degraded"}`);
+			lines.push("");
+			lines.push("### Memories");
+			lines.push(`Observations: ${totalObs} (${embeddedObs} embedded, ${deletedObs} deleted)`);
+			lines.push(`Sessions: ${sessions}`);
+			lines.push(`Stashed threads: ${stashes}`);
+			lines.push("");
+			lines.push("### Tokens");
+			lines.push(`Estimated total: ~${tokenEstimate.toLocaleString()} tokens across all memories`);
+			lines.push("");
+			lines.push("### Knowledge Graph");
+			lines.push(`Nodes: ${graphNodes} | Edges: ${graphEdges}`);
+			this.cachedBody = lines.join("\n");
+			this.builtAtUptime = uptimeNow;
+			debug("mcp", "status-cache: rebuilt", {
+				memories: totalObs,
+				tokens: tokenEstimate
+			});
+		} catch (err) {
+			debug("mcp", "status-cache: rebuild error", { error: err instanceof Error ? err.message : String(err) });
+		}
+	}
+};
 
 //#endregion
 //#region src/mcp/tools/discover-tools.ts
@@ -2314,6 +2340,13 @@ var TopicShiftHandler = class {
 				sessionId,
 				limit: 20
 			}).filter((obs) => obs.createdAt < observation.createdAt);
+			if (previousObservations.length === 0) {
+				debug("hook", "TopicShiftHandler: no previous observations to stash, skipping");
+				return {
+					stashed: false,
+					notification: null
+				};
+			}
 			const topicLabel = this.generateTopicLabel(previousObservations);
 			const summary = this.generateSummary(previousObservations);
 			const snapshots = previousObservations.map((obs) => ({
@@ -2377,12 +2410,19 @@ var TopicShiftHandler = class {
 		};
 	}
 	/**
-	* Generate a topic label from the first observation's content.
-	* Uses first 50 characters, trimmed and cleaned.
+	* Generate a semantic topic label from the observations.
+	*
+	* Priority: use observation titles (most semantic), then fall back
+	* to content. Scans all observations for the best available label
+	* rather than just using the first one.
 	*/
 	generateTopicLabel(observations) {
 		if (observations.length === 0) return "Unknown topic";
-		return observations[observations.length - 1].content.replace(/\n/g, " ").trim().slice(0, 50) || "Unknown topic";
+		for (const obs of observations) if (obs.title) {
+			const cleaned = obs.title.replace(/\n/g, " ").trim();
+			if (cleaned.length > 0) return cleaned.slice(0, 80);
+		}
+		return observations[observations.length - 1].content.replace(/\n/g, " ").trim().slice(0, 80) || "Unknown topic";
 	}
 	/**
 	* Generate a brief summary by concatenating the first 3 observation contents,
@@ -2685,7 +2725,7 @@ function sensitivityPresetToMultiplier(preset) {
 	}
 }
 /** Default configuration values */
-const DEFAULTS = {
+const DEFAULTS$2 = {
 	sensitivityPreset: "balanced",
 	sensitivityMultiplier: 1.5,
 	manualThreshold: null,
@@ -2712,25 +2752,25 @@ function loadTopicDetectionConfig() {
 		debug("config", "Loaded topic detection config", { path: configPath });
 	} catch {
 		debug("config", "No topic detection config found, using defaults");
-		return { ...DEFAULTS };
+		return { ...DEFAULTS$2 };
 	}
 	const preset = [
 		"sensitive",
 		"balanced",
 		"relaxed"
-	].includes(raw.sensitivityPreset) ? raw.sensitivityPreset : DEFAULTS.sensitivityPreset;
+	].includes(raw.sensitivityPreset) ? raw.sensitivityPreset : DEFAULTS$2.sensitivityPreset;
 	const multiplier = typeof raw.sensitivityMultiplier === "number" && raw.sensitivityMultiplier > 0 ? raw.sensitivityMultiplier : sensitivityPresetToMultiplier(preset);
 	const manualThreshold = typeof raw.manualThreshold === "number" ? raw.manualThreshold : null;
-	const ewmaAlpha = typeof raw.ewmaAlpha === "number" && raw.ewmaAlpha > 0 && raw.ewmaAlpha <= 1 ? raw.ewmaAlpha : DEFAULTS.ewmaAlpha;
-	let boundsMin = typeof raw.thresholdBounds?.min === "number" ? raw.thresholdBounds.min : DEFAULTS.thresholdBounds.min;
-	let boundsMax = typeof raw.thresholdBounds?.max === "number" ? raw.thresholdBounds.max : DEFAULTS.thresholdBounds.max;
+	const ewmaAlpha = typeof raw.ewmaAlpha === "number" && raw.ewmaAlpha > 0 && raw.ewmaAlpha <= 1 ? raw.ewmaAlpha : DEFAULTS$2.ewmaAlpha;
+	let boundsMin = typeof raw.thresholdBounds?.min === "number" ? raw.thresholdBounds.min : DEFAULTS$2.thresholdBounds.min;
+	let boundsMax = typeof raw.thresholdBounds?.max === "number" ? raw.thresholdBounds.max : DEFAULTS$2.thresholdBounds.max;
 	if (boundsMin < .05) boundsMin = .05;
 	if (boundsMax > .95) boundsMax = .95;
 	if (boundsMin >= boundsMax) {
-		boundsMin = DEFAULTS.thresholdBounds.min;
-		boundsMax = DEFAULTS.thresholdBounds.max;
+		boundsMin = DEFAULTS$2.thresholdBounds.min;
+		boundsMax = DEFAULTS$2.thresholdBounds.max;
 	}
-	const enabled = typeof raw.enabled === "boolean" ? raw.enabled : DEFAULTS.enabled;
+	const enabled = typeof raw.enabled === "boolean" ? raw.enabled : DEFAULTS$2.enabled;
 	return {
 		sensitivityPreset: preset,
 		sensitivityMultiplier: multiplier,
@@ -2768,6 +2808,219 @@ function applyConfig(config, detector, adaptiveManager) {
 		multiplier: config.sensitivityMultiplier,
 		threshold: adaptiveThreshold
 	});
+}
+
+//#endregion
+//#region src/config/graph-extraction-config.ts
+/**
+* Graph Extraction Configuration
+*
+* User-configurable settings for knowledge graph extraction behavior.
+* Follows the same pattern as topic-detection-config.ts.
+*
+* Configuration is loaded from .laminark/graph-extraction.json with
+* safe defaults when the file does not exist.
+*/
+const DEFAULTS$1 = {
+	enabled: true,
+	signalClassifier: {
+		highSignalSources: [
+			"manual",
+			"hook:Write",
+			"hook:Edit",
+			"hook:WebFetch",
+			"hook:WebSearch"
+		],
+		mediumSignalSources: ["hook:Bash", "curation:merge"],
+		skipSources: [
+			"hook:TaskUpdate",
+			"hook:TaskCreate",
+			"hook:EnterPlanMode",
+			"hook:ExitPlanMode",
+			"hook:Read",
+			"hook:Glob",
+			"hook:Grep"
+		],
+		minContentLength: 30
+	},
+	qualityGate: {
+		minNameLength: 3,
+		maxNameLength: 200,
+		maxFilesPerObservation: 5,
+		typeConfidenceThresholds: {
+			File: .95,
+			Project: .8,
+			Reference: .85,
+			Decision: .65,
+			Problem: .6,
+			Solution: .6
+		},
+		fileNonChangeMultiplier: .74
+	},
+	relationshipDetector: { minEdgeConfidence: .45 },
+	temporalDecay: {
+		halfLifeDays: 30,
+		minFloor: .05,
+		deletionThreshold: .08,
+		maxAgeDays: 180
+	},
+	fuzzyDedup: {
+		maxLevenshteinDistance: 2,
+		jaccardThreshold: .7
+	}
+};
+/**
+* Loads graph extraction configuration from disk.
+*
+* Reads .laminark/graph-extraction.json (relative to the Laminark data
+* directory). Falls back to defaults if the file does not exist or
+* cannot be parsed. Validates threshold constraints.
+*/
+function loadGraphExtractionConfig() {
+	const configPath = join(getConfigDir(), "graph-extraction.json");
+	let raw = {};
+	try {
+		const content = readFileSync(configPath, "utf-8");
+		raw = JSON.parse(content);
+		debug("config", "Loaded graph extraction config", { path: configPath });
+	} catch {
+		debug("config", "No graph extraction config found, using defaults");
+		return { ...DEFAULTS$1 };
+	}
+	const enabled = typeof raw.enabled === "boolean" ? raw.enabled : DEFAULTS$1.enabled;
+	const signalClassifier = {
+		highSignalSources: Array.isArray(raw.signalClassifier?.highSignalSources) ? raw.signalClassifier.highSignalSources : DEFAULTS$1.signalClassifier.highSignalSources,
+		mediumSignalSources: Array.isArray(raw.signalClassifier?.mediumSignalSources) ? raw.signalClassifier.mediumSignalSources : DEFAULTS$1.signalClassifier.mediumSignalSources,
+		skipSources: Array.isArray(raw.signalClassifier?.skipSources) ? raw.signalClassifier.skipSources : DEFAULTS$1.signalClassifier.skipSources,
+		minContentLength: typeof raw.signalClassifier?.minContentLength === "number" && raw.signalClassifier.minContentLength >= 0 ? raw.signalClassifier.minContentLength : DEFAULTS$1.signalClassifier.minContentLength
+	};
+	const rawQG = raw.qualityGate;
+	const typeConf = { ...DEFAULTS$1.qualityGate.typeConfidenceThresholds };
+	if (rawQG?.typeConfidenceThresholds) {
+		for (const [key, val] of Object.entries(rawQG.typeConfidenceThresholds)) if (typeof val === "number" && val >= 0 && val <= 1) typeConf[key] = val;
+	}
+	let fileMultiplier = typeof rawQG?.fileNonChangeMultiplier === "number" ? rawQG.fileNonChangeMultiplier : DEFAULTS$1.qualityGate.fileNonChangeMultiplier;
+	if (fileMultiplier < 0 || fileMultiplier > 1) fileMultiplier = DEFAULTS$1.qualityGate.fileNonChangeMultiplier;
+	const qualityGate = {
+		minNameLength: typeof rawQG?.minNameLength === "number" && rawQG.minNameLength >= 1 ? rawQG.minNameLength : DEFAULTS$1.qualityGate.minNameLength,
+		maxNameLength: typeof rawQG?.maxNameLength === "number" && rawQG.maxNameLength >= 10 ? rawQG.maxNameLength : DEFAULTS$1.qualityGate.maxNameLength,
+		maxFilesPerObservation: typeof rawQG?.maxFilesPerObservation === "number" && rawQG.maxFilesPerObservation >= 1 ? rawQG.maxFilesPerObservation : DEFAULTS$1.qualityGate.maxFilesPerObservation,
+		typeConfidenceThresholds: typeConf,
+		fileNonChangeMultiplier: fileMultiplier
+	};
+	let minEdge = typeof raw.relationshipDetector?.minEdgeConfidence === "number" ? raw.relationshipDetector.minEdgeConfidence : DEFAULTS$1.relationshipDetector.minEdgeConfidence;
+	if (minEdge < 0 || minEdge > 1) minEdge = DEFAULTS$1.relationshipDetector.minEdgeConfidence;
+	const relationshipDetector = { minEdgeConfidence: minEdge };
+	const rawTD = raw.temporalDecay;
+	const temporalDecay = {
+		halfLifeDays: typeof rawTD?.halfLifeDays === "number" && rawTD.halfLifeDays > 0 ? rawTD.halfLifeDays : DEFAULTS$1.temporalDecay.halfLifeDays,
+		minFloor: typeof rawTD?.minFloor === "number" && rawTD.minFloor >= 0 && rawTD.minFloor < 1 ? rawTD.minFloor : DEFAULTS$1.temporalDecay.minFloor,
+		deletionThreshold: typeof rawTD?.deletionThreshold === "number" && rawTD.deletionThreshold >= 0 && rawTD.deletionThreshold < 1 ? rawTD.deletionThreshold : DEFAULTS$1.temporalDecay.deletionThreshold,
+		maxAgeDays: typeof rawTD?.maxAgeDays === "number" && rawTD.maxAgeDays > 0 ? rawTD.maxAgeDays : DEFAULTS$1.temporalDecay.maxAgeDays
+	};
+	const rawFD = raw.fuzzyDedup;
+	return {
+		enabled,
+		signalClassifier,
+		qualityGate,
+		relationshipDetector,
+		temporalDecay,
+		fuzzyDedup: {
+			maxLevenshteinDistance: typeof rawFD?.maxLevenshteinDistance === "number" && rawFD.maxLevenshteinDistance >= 1 ? rawFD.maxLevenshteinDistance : DEFAULTS$1.fuzzyDedup.maxLevenshteinDistance,
+			jaccardThreshold: typeof rawFD?.jaccardThreshold === "number" && rawFD.jaccardThreshold > 0 && rawFD.jaccardThreshold <= 1 ? rawFD.jaccardThreshold : DEFAULTS$1.fuzzyDedup.jaccardThreshold
+		}
+	};
+}
+
+//#endregion
+//#region src/graph/signal-classifier.ts
+const DEFAULT_HIGH_SIGNAL_SOURCES = new Set([
+	"manual",
+	"hook:Write",
+	"hook:Edit",
+	"hook:WebFetch",
+	"hook:WebSearch"
+]);
+const DEFAULT_MEDIUM_SIGNAL_SOURCES = new Set(["hook:Bash", "curation:merge"]);
+const DEFAULT_SKIP_SOURCES = new Set([
+	"hook:TaskUpdate",
+	"hook:TaskCreate",
+	"hook:EnterPlanMode",
+	"hook:ExitPlanMode",
+	"hook:Read",
+	"hook:Glob",
+	"hook:Grep"
+]);
+/**
+* Patterns that indicate high-value content regardless of source.
+* Observations containing decision/problem/solution language get
+* promoted to high signal.
+*/
+const CONTENT_BOOST_PATTERNS = [
+	/\b(?:decided\s+to|chose\s+to|went\s+with|selected|opted\s+for|decision:)\b/i,
+	/\b(?:bug\s+in|issue\s+with|problem:|error:|broken|doesn't\s+work|can't)\b/i,
+	/\b(?:fixed\s+by|solved\s+by|solution:|resolved\s+by|workaround:)\b/i
+];
+/**
+* Checks if observation content contains high-value language
+* (decisions, problems, solutions) that warrants full extraction.
+*/
+function hasContentBoost(text) {
+	return CONTENT_BOOST_PATTERNS.some((pattern) => pattern.test(text));
+}
+const DEFAULT_MIN_CONTENT_LENGTH = 30;
+/**
+* Classifies an observation's signal level for graph extraction.
+*
+* Classification logic:
+*   1. If content is below minimum length, SKIP
+*   2. If source is in skip list, check for content boost -> HIGH or SKIP
+*   3. If source is in high list, HIGH
+*   4. If source is in medium list, check for content boost -> HIGH or MEDIUM
+*   5. Unknown sources default to MEDIUM (with content boost -> HIGH)
+*/
+function classifySignal(source, content, config) {
+	const minLength = config?.signalClassifier?.minContentLength ?? DEFAULT_MIN_CONTENT_LENGTH;
+	const highSources = config?.signalClassifier?.highSignalSources ? new Set(config.signalClassifier.highSignalSources) : DEFAULT_HIGH_SIGNAL_SOURCES;
+	const mediumSources = config?.signalClassifier?.mediumSignalSources ? new Set(config.signalClassifier.mediumSignalSources) : DEFAULT_MEDIUM_SIGNAL_SOURCES;
+	const skipSources = config?.signalClassifier?.skipSources ? new Set(config.signalClassifier.skipSources) : DEFAULT_SKIP_SOURCES;
+	if (content.length < minLength) return {
+		level: "skip",
+		reason: `Content too short (${content.length} < ${minLength})`
+	};
+	const boosted = hasContentBoost(content);
+	if (skipSources.has(source)) {
+		if (boosted) return {
+			level: "high",
+			reason: `Skip source "${source}" boosted by decision/problem/solution content`
+		};
+		return {
+			level: "skip",
+			reason: `Low-signal source: ${source}`
+		};
+	}
+	if (highSources.has(source)) return {
+		level: "high",
+		reason: `High-signal source: ${source}`
+	};
+	if (mediumSources.has(source)) {
+		if (boosted) return {
+			level: "high",
+			reason: `Medium source "${source}" boosted by decision/problem/solution content`
+		};
+		return {
+			level: "medium",
+			reason: `Medium-signal source: ${source}`
+		};
+	}
+	if (boosted) return {
+		level: "high",
+		reason: `Unknown source "${source}" boosted by decision/problem/solution content`
+	};
+	return {
+		level: "medium",
+		reason: `Unknown source "${source}" defaults to medium`
+	};
 }
 
 //#endregion
@@ -3005,6 +3258,136 @@ const ALL_RULES = [
 ];
 
 //#endregion
+//#region src/graph/write-quality-gate.ts
+const DEFAULT_MIN_NAME_LENGTH = 3;
+const DEFAULT_MAX_NAME_LENGTH = 200;
+const DEFAULT_MAX_FILES_PER_OBSERVATION = 5;
+/**
+* Vague name prefixes that indicate low-quality entity names.
+* Case-insensitive match against the start of the entity name.
+*/
+const VAGUE_PREFIXES = [
+	"the ",
+	"this ",
+	"that ",
+	"it ",
+	"some ",
+	"a ",
+	"an ",
+	"here ",
+	"there ",
+	"now ",
+	"just ",
+	"ok ",
+	"yes ",
+	"no ",
+	"maybe ",
+	"done ",
+	"tmp "
+];
+/**
+* Per-type minimum confidence thresholds.
+* High-signal types (Decision, Problem, Solution) have lower thresholds
+* to capture more of the valuable knowledge. File has the highest
+* threshold to reduce noise.
+*/
+const DEFAULT_TYPE_CONFIDENCE = {
+	File: .95,
+	Project: .8,
+	Reference: .85,
+	Decision: .65,
+	Problem: .6,
+	Solution: .6
+};
+/**
+* Context-aware confidence multiplier for File paths from non-change
+* observations. Reduces 0.95 -> ~0.70, below the 0.95 File threshold.
+*/
+const DEFAULT_FILE_NON_CHANGE_MULTIPLIER = .74;
+/**
+* Applies quality gate filters to a list of extracted entities.
+*
+* Steps:
+*   1. Apply context-aware confidence adjustment (File paths in non-change obs)
+*   2. Reject entities with names outside length bounds
+*   3. Reject entities with vague/filler name prefixes
+*   4. Apply per-type confidence thresholds
+*   5. Cap File nodes to max per observation (keep highest confidence)
+*
+* @param entities - Extracted entities to filter
+* @param isChangeObservation - Whether the source observation is a change/write
+* @param config - Optional configuration overrides
+* @returns Entities that passed the gate, plus rejected entities with reasons
+*/
+function applyQualityGate(entities, isChangeObservation, config) {
+	const minNameLen = config?.qualityGate?.minNameLength ?? DEFAULT_MIN_NAME_LENGTH;
+	const maxNameLen = config?.qualityGate?.maxNameLength ?? DEFAULT_MAX_NAME_LENGTH;
+	const maxFiles = config?.qualityGate?.maxFilesPerObservation ?? DEFAULT_MAX_FILES_PER_OBSERVATION;
+	const typeConfidence = config?.qualityGate?.typeConfidenceThresholds ?? DEFAULT_TYPE_CONFIDENCE;
+	const fileMultiplier = config?.qualityGate?.fileNonChangeMultiplier ?? DEFAULT_FILE_NON_CHANGE_MULTIPLIER;
+	const passed = [];
+	const rejected = [];
+	for (const entity of entities) {
+		let adjustedConfidence = entity.confidence;
+		if (entity.type === "File" && !isChangeObservation) adjustedConfidence = entity.confidence * fileMultiplier;
+		const adjusted = {
+			...entity,
+			confidence: adjustedConfidence
+		};
+		if (adjusted.name.length < minNameLen) {
+			rejected.push({
+				entity: adjusted,
+				reason: `Name too short (${adjusted.name.length} < ${minNameLen})`
+			});
+			continue;
+		}
+		if (adjusted.name.length > maxNameLen) {
+			rejected.push({
+				entity: adjusted,
+				reason: `Name too long (${adjusted.name.length} > ${maxNameLen})`
+			});
+			continue;
+		}
+		const lowerName = adjusted.name.toLowerCase();
+		if (VAGUE_PREFIXES.some((prefix) => lowerName.startsWith(prefix))) {
+			rejected.push({
+				entity: adjusted,
+				reason: `Vague name prefix: "${adjusted.name}"`
+			});
+			continue;
+		}
+		const threshold = typeConfidence[adjusted.type] ?? DEFAULT_TYPE_CONFIDENCE[adjusted.type] ?? .5;
+		if (adjusted.confidence < threshold) {
+			rejected.push({
+				entity: adjusted,
+				reason: `Below ${adjusted.type} confidence threshold (${adjusted.confidence.toFixed(2)} < ${threshold})`
+			});
+			continue;
+		}
+		passed.push(adjusted);
+	}
+	const fileEntities = passed.filter((e) => e.type === "File");
+	if (fileEntities.length > maxFiles) {
+		fileEntities.sort((a, b) => b.confidence - a.confidence);
+		const toRemove = new Set(fileEntities.slice(maxFiles).map((e) => e.name));
+		const finalPassed = [];
+		for (const e of passed) if (e.type === "File" && toRemove.has(e.name)) rejected.push({
+			entity: e,
+			reason: `File cap exceeded (max ${maxFiles} per observation)`
+		});
+		else finalPassed.push(e);
+		return {
+			passed: finalPassed,
+			rejected
+		};
+	}
+	return {
+		passed,
+		rejected
+	};
+}
+
+//#endregion
 //#region src/graph/entity-extractor.ts
 const DEFAULT_MIN_CONFIDENCE = .5;
 /**
@@ -3052,8 +3435,10 @@ function extractEntities(text, observationId, opts) {
 function extractAndPersist(db, text, observationId, opts) {
 	const result = extractEntities(text, observationId, opts);
 	const persisted = [];
+	const isChange = opts?.isChangeObservation ?? false;
+	const gateResult = applyQualityGate(result.entities, isChange, opts?.graphConfig);
 	db.transaction(() => {
-		for (const entity of result.entities) try {
+		for (const entity of gateResult.passed) try {
 			const node = upsertNode(db, {
 				type: entity.type,
 				name: entity.name,
@@ -3098,6 +3483,133 @@ function deduplicateByName(matches) {
 		if (!existing || match.confidence > existing.confidence) byKey.set(key, match);
 	}
 	return [...byKey.values()];
+}
+
+//#endregion
+//#region src/graph/fuzzy-dedup.ts
+const DEFAULT_MAX_LEVENSHTEIN = 2;
+const DEFAULT_JACCARD_THRESHOLD = .7;
+/**
+* Computes Levenshtein edit distance between two strings.
+* Uses the iterative matrix approach with O(min(m,n)) space.
+*/
+function levenshteinDistance(a, b) {
+	if (a === b) return 0;
+	if (a.length === 0) return b.length;
+	if (b.length === 0) return a.length;
+	if (a.length > b.length) [a, b] = [b, a];
+	const aLen = a.length;
+	const bLen = b.length;
+	let prev = new Array(aLen + 1);
+	let curr = new Array(aLen + 1);
+	for (let i = 0; i <= aLen; i++) prev[i] = i;
+	for (let j = 1; j <= bLen; j++) {
+		curr[0] = j;
+		for (let i = 1; i <= aLen; i++) {
+			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+			curr[i] = Math.min(prev[i] + 1, curr[i - 1] + 1, prev[i - 1] + cost);
+		}
+		[prev, curr] = [curr, prev];
+	}
+	return prev[aLen];
+}
+/**
+* Tokenizes a name by splitting on common delimiters: / . _ -
+* and lowercasing all tokens.
+*/
+function tokenizeName(name) {
+	const tokens = name.toLowerCase().split(/[/._\-\s]+/).filter((t) => t.length > 0);
+	return new Set(tokens);
+}
+/**
+* Computes Jaccard similarity between two token sets.
+* J(A,B) = |A ∩ B| / |A ∪ B|
+* Returns 0 if both sets are empty.
+*/
+function jaccardSimilarity(a, b) {
+	if (a.size === 0 && b.size === 0) return 0;
+	let intersection = 0;
+	for (const token of a) if (b.has(token)) intersection++;
+	const union = a.size + b.size - intersection;
+	return union === 0 ? 0 : intersection / union;
+}
+/**
+* Checks if two File paths refer to the same file via suffix matching.
+* For example: "src/graph/types.ts" and "graph/types.ts" match because
+* one is a suffix of the other.
+*/
+function isPathSuffixMatch(path1, path2) {
+	const norm1 = path1.replace(/^\.\//, "").replace(/\\/g, "/").toLowerCase();
+	const norm2 = path2.replace(/^\.\//, "").replace(/\\/g, "/").toLowerCase();
+	if (norm1 === norm2) return false;
+	return norm1.endsWith("/" + norm2) || norm2.endsWith("/" + norm1);
+}
+/**
+* Finds fuzzy duplicates among a list of same-type nodes.
+*
+* Strategies applied:
+*   1. Levenshtein distance ≤ max (default 2) for typo tolerance
+*   2. Jaccard word similarity ≥ threshold (default 0.7)
+*   3. Path suffix matching for File type
+*
+* Only compares nodes of the same type. Returns grouped duplicate
+* candidates with reasons.
+*
+* @param nodes - Nodes to check (should be same type for best results)
+* @param config - Optional configuration overrides
+* @returns Array of duplicate groups with entities and reason
+*/
+function findFuzzyDuplicates(nodes, config) {
+	const maxLev = config?.fuzzyDedup?.maxLevenshteinDistance ?? DEFAULT_MAX_LEVENSHTEIN;
+	const jaccardThresh = config?.fuzzyDedup?.jaccardThreshold ?? DEFAULT_JACCARD_THRESHOLD;
+	const duplicates = [];
+	const seen = /* @__PURE__ */ new Set();
+	for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
+		const a = nodes[i];
+		const b = nodes[j];
+		if (a.type !== b.type) continue;
+		const pairKey = [a.id, b.id].sort().join(",");
+		if (seen.has(pairKey)) continue;
+		const aLower = a.name.toLowerCase();
+		const bLower = b.name.toLowerCase();
+		if (aLower === bLower) continue;
+		if (aLower.length <= 50 && bLower.length <= 50) {
+			if (Math.abs(aLower.length - bLower.length) <= maxLev) {
+				const dist = levenshteinDistance(aLower, bLower);
+				if (dist > 0 && dist <= maxLev) {
+					seen.add(pairKey);
+					duplicates.push({
+						entities: [a, b],
+						reason: `Fuzzy match (Levenshtein distance ${dist}): "${a.name}" ↔ "${b.name}"`
+					});
+					continue;
+				}
+			}
+		}
+		const tokensA = tokenizeName(a.name);
+		const tokensB = tokenizeName(b.name);
+		if (tokensA.size >= 2 && tokensB.size >= 2) {
+			const similarity = jaccardSimilarity(tokensA, tokensB);
+			if (similarity >= jaccardThresh) {
+				seen.add(pairKey);
+				duplicates.push({
+					entities: [a, b],
+					reason: `Fuzzy match (Jaccard similarity ${similarity.toFixed(2)}): "${a.name}" ↔ "${b.name}"`
+				});
+				continue;
+			}
+		}
+		if (a.type === "File") {
+			if (isPathSuffixMatch(a.name, b.name)) {
+				seen.add(pairKey);
+				duplicates.push({
+					entities: [a, b],
+					reason: `Path suffix match: "${a.name}" ↔ "${b.name}"`
+				});
+			}
+		}
+	}
+	return duplicates;
 }
 
 //#endregion
@@ -3287,6 +3799,22 @@ function findDuplicateEntities(db, opts) {
 			}
 		}
 	}
+	const byType = /* @__PURE__ */ new Map();
+	for (const node of nodes) {
+		const group = byType.get(node.type) ?? [];
+		group.push(node);
+		byType.set(node.type, group);
+	}
+	for (const [, typeNodes] of byType) {
+		const fuzzyResults = findFuzzyDuplicates(typeNodes, opts?.graphConfig);
+		for (const result of fuzzyResults) {
+			const ids = result.entities.map((n) => n.id).sort().join(",");
+			if (!seen.has(ids)) {
+				seen.add(ids);
+				duplicates.push(result);
+			}
+		}
+	}
 	return duplicates;
 }
 
@@ -3326,17 +3854,16 @@ const CONTEXT_SIGNALS = [
 * or verified each other.
 */
 const TYPE_PAIR_DEFAULTS = {
-	"File->File": "informed_by",
 	"File->Reference": "references",
 	"Reference->File": "references",
 	"Problem->Solution": "solved_by",
 	"Solution->Problem": "solved_by",
-	"Problem->File": "related_to",
-	"File->Problem": "related_to",
-	"Decision->File": "related_to",
-	"File->Decision": "related_to",
-	"Project->File": "related_to",
-	"File->Project": "related_to"
+	"Problem->File": "modifies",
+	"File->Problem": "modifies",
+	"Decision->File": "modifies",
+	"File->Decision": "modifies",
+	"Project->File": "references",
+	"File->Project": "references"
 };
 /**
 * Detects typed relationships between co-occurring entities in observation text.
@@ -3367,18 +3894,16 @@ function detectRelationships(text, entities) {
 		const contextStart = Math.max(0, minPos - 50);
 		const contextEnd = Math.min(text.length, maxPos + 50);
 		const contextText = text.slice(contextStart, contextEnd);
-		const pairKey = `${source.type}->${target.type}`;
-		let relationshipType = TYPE_PAIR_DEFAULTS[pairKey] ?? "related_to";
+		let relationshipType = TYPE_PAIR_DEFAULTS[`${source.type}->${target.type}`] ?? null;
 		for (const signal of CONTEXT_SIGNALS) if (signal.pattern.test(contextText)) {
 			relationshipType = signal.type;
 			break;
 		}
 		if (source.type === "File" && target.type === "File") {
-			if (/\b(?:imports?|requires?|from)\b/i.test(contextText)) relationshipType = "informed_by";
+			if (/\b(?:imports?|requires?|from)\b/i.test(contextText)) relationshipType = "references";
 		}
-		let confidence;
-		if (relationshipType === "related_to" && !TYPE_PAIR_DEFAULTS[pairKey]) confidence = .3;
-		else confidence = .5;
+		if (relationshipType === null) continue;
+		let confidence = .5;
 		if (Math.abs(sourcePos - targetPos) <= 50) confidence += .1;
 		if (areInSameSentence(text, sourcePos, targetPos)) confidence += .15;
 		confidence = Math.min(confidence, 1);
@@ -3412,9 +3937,10 @@ function detectAndPersist(db, text, entities, opts) {
 	const candidates = detectRelationships(text, entities);
 	const persisted = [];
 	const affectedNodeIds = /* @__PURE__ */ new Set();
+	const minConfidence = opts?.minConfidence ?? .45;
 	db.transaction(() => {
 		for (const candidate of candidates) {
-			if (candidate.confidence <= .3) continue;
+			if (candidate.confidence <= minConfidence) continue;
 			const sourceNode = getNodeByNameAndType(db, candidate.sourceEntity.name, candidate.sourceEntity.type);
 			const targetNode = getNodeByNameAndType(db, candidate.targetEntity.name, candidate.targetEntity.type);
 			if (!sourceNode || !targetNode) continue;
@@ -3591,7 +4117,7 @@ function computeSimilarity(a, b, embeddingThreshold, textThreshold) {
 		const sim = cosineSimilarity(a.embedding, b.embedding);
 		return sim >= embeddingThreshold ? sim : null;
 	}
-	const sim = jaccardSimilarity(a.text, b.text);
+	const sim = jaccardSimilarity$1(a.text, b.text);
 	return sim >= textThreshold ? sim : null;
 }
 /**
@@ -3696,6 +4222,90 @@ function pruneLowValue(db, opts) {
 }
 
 //#endregion
+//#region src/graph/temporal-decay.ts
+const DEFAULTS = {
+	halfLifeDays: 30,
+	minFloor: .05,
+	deletionThreshold: .08,
+	maxAgeDays: 180
+};
+/**
+* Calculates the decayed weight for an edge based on its age.
+*
+* Uses exponential decay: weight * e^(-ln(2)/halfLife * ageDays)
+* Result is clamped to the minimum floor.
+*
+* @param originalWeight - The edge's current stored weight
+* @param ageDays - Age of the edge in days
+* @param config - Decay parameters
+* @returns The decayed weight value
+*/
+function calculateDecayedWeight(originalWeight, ageDays, config) {
+	const halfLife = config?.halfLifeDays ?? DEFAULTS.halfLifeDays;
+	const minFloor = config?.minFloor ?? DEFAULTS.minFloor;
+	if (ageDays <= 0) return originalWeight;
+	const decayRate = Math.LN2 / halfLife;
+	const decayed = originalWeight * Math.exp(-decayRate * ageDays);
+	return Math.max(decayed, minFloor);
+}
+/**
+* Applies temporal decay to all edges in the graph.
+*
+* For each edge:
+*   1. Calculate age from created_at timestamp
+*   2. Apply exponential decay formula
+*   3. Delete edges below deletion threshold or older than max age
+*   4. Update remaining edges with new decayed weights
+*
+* Runs in a transaction for atomicity.
+*
+* @param db - Database handle
+* @param graphConfig - Optional configuration from graph-extraction-config
+* @returns Count of updated and deleted edges
+*/
+function applyTemporalDecay(db, graphConfig) {
+	const halfLife = graphConfig?.temporalDecay?.halfLifeDays ?? DEFAULTS.halfLifeDays;
+	const minFloor = graphConfig?.temporalDecay?.minFloor ?? DEFAULTS.minFloor;
+	const deletionThreshold = graphConfig?.temporalDecay?.deletionThreshold ?? DEFAULTS.deletionThreshold;
+	const maxAgeDays = graphConfig?.temporalDecay?.maxAgeDays ?? DEFAULTS.maxAgeDays;
+	let updated = 0;
+	let deleted = 0;
+	db.transaction(() => {
+		const edges = db.prepare(`
+      SELECT id, weight,
+        julianday('now') - julianday(created_at) as age_days
+      FROM graph_edges
+    `).all();
+		const deleteStmt = db.prepare("DELETE FROM graph_edges WHERE id = ?");
+		const updateStmt = db.prepare("UPDATE graph_edges SET weight = ? WHERE id = ?");
+		for (const edge of edges) {
+			if (edge.age_days > maxAgeDays) {
+				deleteStmt.run(edge.id);
+				deleted++;
+				continue;
+			}
+			const decayed = calculateDecayedWeight(edge.weight, edge.age_days, {
+				halfLifeDays: halfLife,
+				minFloor
+			});
+			if (decayed < deletionThreshold) {
+				deleteStmt.run(edge.id);
+				deleted++;
+				continue;
+			}
+			if (Math.abs(decayed - edge.weight) > .001) {
+				updateStmt.run(decayed, edge.id);
+				updated++;
+			}
+		}
+	})();
+	return {
+		updated,
+		deleted
+	};
+}
+
+//#endregion
 //#region src/graph/curation-agent.ts
 /**
 * Runs a single curation cycle on the knowledge graph.
@@ -3717,13 +4327,15 @@ function pruneLowValue(db, opts) {
 * @param db - better-sqlite3 Database handle
 * @returns CurationReport with counts and any errors
 */
-async function runCuration(db) {
+async function runCuration(db, graphConfig) {
 	const startedAt = (/* @__PURE__ */ new Date()).toISOString();
 	const errors = [];
 	let observationsMerged = 0;
 	let entitiesDeduplicated = 0;
 	let stalenessFlagsAdded = 0;
 	let lowValuePruned = 0;
+	let temporalDecayUpdated = 0;
+	let temporalDecayDeleted = 0;
 	try {
 		initStalenessSchema(db);
 	} catch (err) {
@@ -3792,6 +4404,13 @@ async function runCuration(db) {
 	} catch (err) {
 		errors.push(`Step 5 (prune): ${err instanceof Error ? err.message : String(err)}`);
 	}
+	try {
+		const decayResult = applyTemporalDecay(db, graphConfig);
+		temporalDecayUpdated = decayResult.updated;
+		temporalDecayDeleted = decayResult.deleted;
+	} catch (err) {
+		errors.push(`Step 6 (temporal decay): ${err instanceof Error ? err.message : String(err)}`);
+	}
 	const report = {
 		startedAt,
 		completedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -3799,9 +4418,11 @@ async function runCuration(db) {
 		entitiesDeduplicated,
 		stalenessFlagsAdded,
 		lowValuePruned,
+		temporalDecayUpdated,
+		temporalDecayDeleted,
 		errors
 	};
-	process.stderr.write(`[laminark:curation] Cycle complete: ${observationsMerged} merged, ${entitiesDeduplicated} deduped, ${stalenessFlagsAdded} flagged stale, ${lowValuePruned} pruned\n`);
+	process.stderr.write(`[laminark:curation] Cycle complete: ${observationsMerged} merged, ${entitiesDeduplicated} deduped, ${stalenessFlagsAdded} flagged stale, ${lowValuePruned} pruned, ${temporalDecayUpdated} decayed, ${temporalDecayDeleted} decay-deleted\n`);
 	return report;
 }
 /**
@@ -3814,6 +4435,7 @@ var CurationAgent = class {
 	db;
 	intervalMs;
 	onComplete;
+	graphConfig;
 	running = false;
 	lastRun = null;
 	timer = null;
@@ -3821,6 +4443,7 @@ var CurationAgent = class {
 		this.db = db;
 		this.intervalMs = opts?.intervalMs ?? 3e5;
 		this.onComplete = opts?.onComplete;
+		this.graphConfig = opts?.graphConfig;
 	}
 	/**
 	* Start periodic curation on setInterval.
@@ -3848,7 +4471,7 @@ var CurationAgent = class {
 	* Execute one curation cycle. This is the main entry point.
 	*/
 	async runOnce() {
-		const report = await runCuration(this.db);
+		const report = await runCuration(this.db, this.graphConfig);
 		this.lastRun = report.completedAt;
 		if (this.onComplete) this.onComplete(report);
 		return report;
@@ -4222,6 +4845,7 @@ apiRoutes.get("/projects", (c) => {
 	try {
 		projects = db.prepare("SELECT project_hash, project_path, display_name, last_seen_at FROM project_metadata ORDER BY last_seen_at DESC").all();
 	} catch {}
+	const resolvedDefault = (projects.length > 0 ? projects[0].project_hash : null) || defaultProject;
 	return c.json({
 		projects: projects.map((p) => ({
 			hash: p.project_hash,
@@ -4229,7 +4853,7 @@ apiRoutes.get("/projects", (c) => {
 			displayName: p.display_name || p.project_path.split("/").pop() || p.project_hash.substring(0, 8),
 			lastSeenAt: p.last_seen_at
 		})),
-		defaultProject
+		defaultProject: resolvedDefault
 	});
 });
 /**
@@ -5203,6 +5827,7 @@ function startWebServer(app, port = 37820) {
 
 //#endregion
 //#region src/index.ts
+const noGui = process.argv.includes("--no_gui");
 const db = openDatabase(getDatabaseConfig());
 initGraphSchema(db.db);
 const projectHash = getProjectHash(process.cwd());
@@ -5218,6 +5843,7 @@ worker.start().catch(() => {
 	debug("mcp", "Worker failed to start, keyword-only mode");
 });
 const topicConfig = loadTopicDetectionConfig();
+const graphConfig = loadGraphExtractionConfig();
 const detector = new TopicShiftDetector();
 const adaptiveManager = new AdaptiveThresholdManager({
 	sensitivityMultiplier: topicConfig.sensitivityMultiplier,
@@ -5251,6 +5877,7 @@ async function processUnembedded() {
 	const ids = embeddingStore.findUnembedded(10);
 	if (ids.length === 0) return;
 	const obsRepo = new ObservationRepository(db.db, projectHash);
+	let shiftDetectedThisCycle = false;
 	for (const id of ids) {
 		const obs = obsRepo.getById(id);
 		if (!obs) continue;
@@ -5268,13 +5895,14 @@ async function processUnembedded() {
 				sessionId: obs.sessionId ?? null,
 				createdAt: obs.createdAt
 			});
-			if (topicConfig.enabled && TOPIC_SHIFT_SOURCES.has(obs.source)) try {
+			if (topicConfig.enabled && !shiftDetectedThisCycle && TOPIC_SHIFT_SOURCES.has(obs.source)) try {
 				const obsWithEmbedding = {
 					...obs,
 					embedding
 				};
 				const result = await topicShiftHandler.handleObservation(obsWithEmbedding, obs.sessionId ?? "unknown", projectHash);
 				if (result.stashed && result.notification) {
+					shiftDetectedThisCycle = true;
 					notificationStore.add(projectHash, result.notification);
 					debug("embed", "Topic shift detected, notification queued", { id });
 					broadcast("topic_shift", {
@@ -5288,14 +5916,26 @@ async function processUnembedded() {
 			} catch (topicErr) {
 				debug("embed", "Topic shift detection error (non-fatal)", { error: topicErr instanceof Error ? topicErr.message : String(topicErr) });
 			}
-			try {
-				const nodes = extractAndPersist(db.db, text, String(id), { projectHash });
+			const signal = graphConfig.enabled ? classifySignal(obs.source, text, graphConfig) : {
+				level: "skip",
+				reason: "Graph extraction disabled"
+			};
+			if (signal.level !== "skip") try {
+				const isChangeObs = obs.kind === "change" || obs.source === "hook:Write" || obs.source === "hook:Edit";
+				const nodes = extractAndPersist(db.db, text, String(id), {
+					projectHash,
+					isChangeObservation: isChangeObs,
+					graphConfig
+				});
 				if (nodes.length > 0) {
 					const entityPairs = nodes.map((n) => ({
 						name: n.name,
 						type: n.type
 					}));
-					detectAndPersist(db.db, text, entityPairs, { projectHash });
+					if (signal.level === "high") detectAndPersist(db.db, text, entityPairs, {
+						projectHash,
+						minConfidence: graphConfig.relationshipDetector.minEdgeConfidence
+					});
 					if (obs.kind === "change" && obs.content.includes("Research context:")) try {
 						const researchSection = obs.content.split("Research context:\n")[1];
 						if (researchSection) {
@@ -5358,6 +5998,7 @@ async function processUnembedded() {
 						id,
 						entities: nodes.length
 					});
+					statusCache.markDirty();
 					for (const node of nodes) broadcast("entity_updated", {
 						id: node.name,
 						label: node.name,
@@ -5399,14 +6040,16 @@ const embedTimer = setInterval(() => {
 	try {
 		researchBufferForFlush?.flush(30);
 	} catch {}
+	statusCache.refreshIfDirty();
 }, 5e3);
+const statusCache = new StatusCache(db.db, projectHash, process.cwd(), db.hasVectorSupport, () => worker.isReady());
 const server = createServer();
-registerSaveMemory(server, db.db, projectHash, notificationStore, worker, embeddingStore);
-registerRecall(server, db.db, projectHash, worker, embeddingStore, notificationStore);
+registerSaveMemory(server, db.db, projectHash, notificationStore, worker, embeddingStore, statusCache);
+registerRecall(server, db.db, projectHash, worker, embeddingStore, notificationStore, statusCache);
 registerTopicContext(server, db.db, projectHash, notificationStore);
 registerQueryGraph(server, db.db, projectHash, notificationStore);
 registerGraphStats(server, db.db, projectHash, notificationStore);
-registerStatus(server, db.db, projectHash, process.cwd(), db.hasVectorSupport, () => worker.isReady(), notificationStore);
+registerStatus(server, statusCache, projectHash, notificationStore);
 if (toolRegistry) {
 	registerDiscoverTools(server, toolRegistry, worker, db.hasVectorSupport, notificationStore, projectHash);
 	registerReportTools(server, toolRegistry, projectHash);
@@ -5424,20 +6067,26 @@ startServer(server).then(() => {
 	db.close();
 	process.exit(1);
 });
-const webPort = parseInt(process.env.LAMINARK_WEB_PORT || "37820", 10);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const uiRoot = path.resolve(__dirname, "..", "ui");
-startWebServer(createWebServer(db.db, uiRoot, projectHash), webPort);
+if (!noGui) {
+	const webPort = parseInt(process.env.LAMINARK_WEB_PORT || "37820", 10);
+	const __filename = fileURLToPath(import.meta.url);
+	const __dirname = path.dirname(__filename);
+	const uiRoot = path.resolve(__dirname, "..", "ui");
+	startWebServer(createWebServer(db.db, uiRoot, projectHash), webPort);
+} else debug("mcp", "Web UI disabled (--no_gui)");
 const curationAgent = new CurationAgent(db.db, {
 	intervalMs: 300 * 1e3,
+	graphConfig,
 	onComplete: (report) => {
 		debug("db", "Curation complete", {
 			merged: report.observationsMerged,
 			deduped: report.entitiesDeduplicated,
 			stale: report.stalenessFlagsAdded,
-			pruned: report.lowValuePruned
+			pruned: report.lowValuePruned,
+			decayed: report.temporalDecayUpdated,
+			decayDeleted: report.temporalDecayDeleted
 		});
+		statusCache.markDirty();
 	}
 });
 curationAgent.start();

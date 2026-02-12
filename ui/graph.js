@@ -118,6 +118,11 @@ var batchQueue = [];
 var batchFlushTimer = null;
 var BATCH_DELAY_MS = 200;
 
+// Context menu state
+var contextMenuEl = null;
+var contextMenuVisible = false;
+var contextMenuTargetNode = null;
+
 // ---------------------------------------------------------------------------
 // initGraph
 // ---------------------------------------------------------------------------
@@ -195,6 +200,72 @@ function initGraph(containerId) {
     cullOffscreen(); // Re-cull after layout settles
   });
 
+  // Right-click on node: context menu with filter/focus/linked options
+  cy.on('cxttap', 'node', function (evt) {
+    evt.originalEvent.preventDefault();
+    var node = evt.target;
+    var nodeType = node.data('type');
+    var nodeLabel = node.data('label');
+
+    // Store target for action handlers
+    contextMenuTargetNode = { id: node.data('id'), label: nodeLabel, type: nodeType };
+
+    var items = [
+      { type: 'header', label: 'Filter' },
+      { type: 'item', label: 'This type only (' + nodeType + ')',
+        action: 'filter-type:' + nodeType,
+        color: ENTITY_STYLES[nodeType] ? ENTITY_STYLES[nodeType].color : null },
+      { type: 'item', label: 'Focus on this node', action: 'focus' },
+      { type: 'divider' },
+      { type: 'header', label: 'Show Linked' },
+    ];
+
+    // Add one "Show linked <Type>" item per type, excluding the node's own type
+    Object.keys(ENTITY_STYLES).forEach(function (t) {
+      if (t !== nodeType) {
+        items.push({
+          type: 'item',
+          label: t,
+          action: 'show-linked:' + t,
+          color: ENTITY_STYLES[t].color,
+        });
+      }
+    });
+
+    items.push({ type: 'divider' });
+    items.push({ type: 'header', label: 'Arrange' });
+    items.push({ type: 'item', label: 'Re-layout graph', action: 'relayout' });
+    items.push({ type: 'item', label: 'Fit to view', action: 'fit' });
+
+    // Position at cursor using page coordinates
+    var containerRect = cy.container().getBoundingClientRect();
+    var px = evt.renderedPosition.x + containerRect.left;
+    var py = evt.renderedPosition.y + containerRect.top;
+    showContextMenu(px, py, items);
+  });
+
+  // Right-click on background: canvas context menu
+  cy.on('cxttap', function (evt) {
+    if (evt.target !== cy) return; // Only background clicks
+    evt.originalEvent.preventDefault();
+
+    contextMenuTargetNode = null;
+
+    var items = [
+      { type: 'header', label: 'Filter' },
+      { type: 'item', label: 'Reset filters (show all)', action: 'reset-filters' },
+      { type: 'divider' },
+      { type: 'header', label: 'Arrange' },
+      { type: 'item', label: 'Re-layout graph', action: 'relayout' },
+      { type: 'item', label: 'Fit to view', action: 'fit' },
+    ];
+
+    var containerRect = cy.container().getBoundingClientRect();
+    var px = evt.renderedPosition.x + containerRect.left;
+    var py = evt.renderedPosition.y + containerRect.top;
+    showContextMenu(px, py, items);
+  });
+
   // Performance stats keyboard shortcut: Ctrl+Shift+P
   document.addEventListener('keydown', function (e) {
     if (e.ctrlKey && e.shiftKey && e.key === 'P') {
@@ -202,6 +273,8 @@ function initGraph(containerId) {
       togglePerfOverlay();
     }
   });
+
+  initContextMenu();
 
   console.log('[laminark:graph] Cytoscape initialized with viewport culling and LOD');
   return cy;
@@ -367,6 +440,8 @@ async function loadGraphData(filters) {
 
   // Handle empty data
   if (!data.nodes.length && !data.edges.length) {
+    cy.elements().remove();
+    updateGraphStats(0, 0);
     showEmptyState();
     return { nodeCount: 0, edgeCount: 0 };
   }
@@ -1548,6 +1623,263 @@ if (document.readyState === 'loading') {
 }
 
 // ---------------------------------------------------------------------------
+// Context menu
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates the context menu DOM element and attaches dismiss listeners.
+ * Called once at the end of initGraph().
+ */
+function initContextMenu() {
+  if (!cy) return;
+  var container = cy.container();
+  if (!container) return;
+
+  contextMenuEl = document.createElement('div');
+  contextMenuEl.className = 'graph-context-menu hidden';
+  container.appendChild(contextMenuEl);
+
+  // Click-away to close
+  document.addEventListener('mousedown', function (e) {
+    if (contextMenuVisible && contextMenuEl && !contextMenuEl.contains(e.target)) {
+      hideContextMenu();
+    }
+  });
+
+  // Escape to close
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && contextMenuVisible) {
+      hideContextMenu();
+    }
+  });
+
+  // Suppress browser context menu on the graph container
+  container.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
+  });
+}
+
+/**
+ * Populates and positions the context menu.
+ * @param {number} x - Page X coordinate
+ * @param {number} y - Page Y coordinate
+ * @param {Array} items - Menu items: { type: 'header'|'item'|'divider', label?, action?, color? }
+ */
+function showContextMenu(x, y, items) {
+  if (!contextMenuEl) return;
+
+  var html = '';
+  items.forEach(function (item) {
+    if (item.type === 'header') {
+      html += '<div class="context-menu-header">' + escapeHtml(item.label) + '</div>';
+    } else if (item.type === 'divider') {
+      html += '<div class="context-menu-divider"></div>';
+    } else if (item.type === 'item') {
+      var dot = item.color
+        ? '<span class="type-dot" style="background:' + item.color + '"></span>'
+        : '';
+      html += '<div class="context-menu-item" data-action="' + escapeHtml(item.action) + '">'
+        + dot + escapeHtml(item.label) + '</div>';
+    }
+  });
+  contextMenuEl.innerHTML = html;
+
+  // Attach click handler via delegation
+  contextMenuEl.onclick = function (e) {
+    var target = e.target.closest('.context-menu-item');
+    if (target) {
+      var action = target.getAttribute('data-action');
+      var savedTarget = contextMenuTargetNode;
+      hideContextMenu();
+      contextMenuTargetNode = savedTarget;
+      handleContextMenuAction(action);
+      contextMenuTargetNode = null;
+    }
+  };
+
+  // Position, then adjust if overflowing viewport
+  contextMenuEl.classList.remove('hidden');
+  contextMenuVisible = true;
+
+  var rect = contextMenuEl.getBoundingClientRect();
+  var vw = window.innerWidth;
+  var vh = window.innerHeight;
+
+  if (x + rect.width > vw) x = vw - rect.width - 8;
+  if (y + rect.height > vh) y = vh - rect.height - 8;
+  if (x < 0) x = 8;
+  if (y < 0) y = 8;
+
+  contextMenuEl.style.left = x + 'px';
+  contextMenuEl.style.top = y + 'px';
+}
+
+function escapeHtml(str) {
+  var div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+/**
+ * Hides the context menu and clears target state.
+ */
+function hideContextMenu() {
+  if (contextMenuEl) contextMenuEl.classList.add('hidden');
+  contextMenuVisible = false;
+  contextMenuTargetNode = null;
+}
+
+/**
+ * Routes a context menu action string to the appropriate graph function.
+ * @param {string} action - Action identifier (e.g. 'filter-type:File', 'focus', 'relayout')
+ */
+function handleContextMenuAction(action) {
+  if (!action) return;
+
+  if (action.startsWith('filter-type:')) {
+    var type = action.split(':')[1];
+    setActiveTypes([type]);
+    syncFilterPills();
+  } else if (action.startsWith('show-linked:')) {
+    var filterType = action.split(':')[1];
+    if (contextMenuTargetNode) {
+      showLinkedNodesOfType(contextMenuTargetNode.id, contextMenuTargetNode.label, filterType);
+    }
+  } else if (action === 'focus') {
+    if (contextMenuTargetNode) {
+      enterFocusMode(contextMenuTargetNode.id, contextMenuTargetNode.label);
+    }
+  } else if (action === 'relayout') {
+    if (cy && cy.nodes().length > 0) {
+      var layoutConfig = LAYOUT_CONFIGS[currentLayout] || LAYOUT_CONFIGS.clustered;
+      cy.layout(Object.assign({}, layoutConfig)).run();
+      cy.one('layoutstop', function () { cy.fit(undefined, 50); });
+    }
+  } else if (action === 'reset-filters') {
+    resetFilters();
+    syncFilterPills();
+  } else if (action === 'fit') {
+    fitToView();
+  }
+}
+
+/**
+ * Fetches the neighborhood of a node, filters to only the given entity type,
+ * and enters focus mode with the filtered subgraph.
+ * @param {string} nodeId - Center node ID
+ * @param {string} nodeLabel - Center node label
+ * @param {string} filterType - Entity type to keep (e.g. 'Decision')
+ */
+async function showLinkedNodesOfType(nodeId, nodeLabel, filterType) {
+  if (!cy) return;
+
+  // Stash full graph elements on first focus entry
+  if (!isFocusMode) {
+    cachedFullElements = cy.elements().jsons();
+  }
+
+  var data;
+  try {
+    var res = await fetch('/api/node/' + encodeURIComponent(nodeId) + '/neighborhood?depth=1');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    data = await res.json();
+  } catch (err) {
+    console.error('[laminark:graph] Failed to fetch neighborhood:', err);
+    return;
+  }
+
+  if (!data.nodes || data.nodes.length === 0) return;
+
+  // Keep center node + nodes matching filterType
+  var keepIds = new Set();
+  keepIds.add(nodeId);
+  data.nodes.forEach(function (n) {
+    if (n.id === nodeId || n.type === filterType) keepIds.add(n.id);
+  });
+
+  var filteredNodes = data.nodes.filter(function (n) { return keepIds.has(n.id); });
+  if (filteredNodes.length <= 1) {
+    console.log('[laminark:graph] No linked ' + filterType + ' nodes found');
+    return;
+  }
+
+  isFocusMode = true;
+  focusStack.push({ nodeId: nodeId, label: nodeLabel + ' → ' + filterType });
+
+  var elements = [];
+  filteredNodes.forEach(function (node) {
+    elements.push({
+      group: 'nodes',
+      data: {
+        id: node.id,
+        label: node.label,
+        type: node.type,
+        observationCount: node.observationCount || 0,
+        createdAt: node.createdAt,
+      },
+      classes: node.id === nodeId ? 'focus-root' : '',
+    });
+  });
+
+  data.edges.forEach(function (edge) {
+    if (keepIds.has(edge.source) && keepIds.has(edge.target)) {
+      elements.push({
+        group: 'edges',
+        data: {
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          type: edge.type,
+          label: edge.type,
+        },
+        classes: 'focus-edge',
+      });
+    }
+  });
+
+  cy.elements().remove();
+  cy.add(elements);
+
+  cy.layout({
+    name: 'breadthfirst',
+    animate: true,
+    animationDuration: 400,
+    directed: true,
+    roots: '#' + CSS.escape(nodeId),
+    spacingFactor: 1.5,
+    nodeDimensionsIncludeLabels: true,
+  }).run();
+
+  cy.one('layoutstop', function () { cy.fit(undefined, 50); });
+
+  updateBreadcrumbs();
+  updateGraphStatsFromCy();
+
+  console.log('[laminark:graph] Show linked: ' + filterType + ' from', nodeLabel,
+    '(' + filteredNodes.length + ' nodes)');
+}
+
+/**
+ * Syncs filter pill .active classes to match the current activeEntityTypes set.
+ */
+function syncFilterPills() {
+  var allTypes = Object.keys(ENTITY_STYLES);
+  var allActive = activeEntityTypes.size === allTypes.length;
+
+  allTypes.forEach(function (type) {
+    var pill = document.querySelector('.filter-pill[data-type="' + type + '"]');
+    if (pill) {
+      pill.classList.toggle('active', activeEntityTypes.has(type));
+    }
+  });
+
+  var allPill = document.querySelector('.filter-pill[data-type="all"]');
+  if (allPill) {
+    allPill.classList.toggle('active', allActive);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -1581,4 +1913,6 @@ window.laminarkGraph = {
   highlightCluster: highlightCluster,
   applyCommunityColors: applyCommunityColors,
   clearCommunityColors: clearCommunityColors,
+  showLinkedNodesOfType: showLinkedNodesOfType,
+  hideContextMenu: hideContextMenu,
 };

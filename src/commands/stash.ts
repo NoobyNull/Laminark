@@ -99,15 +99,24 @@ export async function handleStashCommand(
 }
 
 /**
- * Extract a topic label from the oldest observation in the list.
+ * Extract a semantic topic label from observations.
+ * Prefers titled observations; falls back to oldest content.
  * List is DESC-ordered, so oldest is at the end.
- * Uses first 50 characters of content.
  */
-function generateLabel(observations: { content: string }[]): string {
+function generateLabel(observations: { content: string; title?: string | null }[]): string {
   if (observations.length === 0) return 'Unknown topic';
+
+  // Prefer titled observations
+  for (const obs of observations) {
+    if (obs.title) {
+      const cleaned = obs.title.replace(/\n/g, ' ').trim();
+      if (cleaned.length > 0) return cleaned.slice(0, 80);
+    }
+  }
+
   const oldest = observations[observations.length - 1];
   const raw = oldest.content.replace(/\n/g, ' ').trim();
-  return raw.slice(0, 50) || 'Unknown topic';
+  return raw.slice(0, 80) || 'Unknown topic';
 }
 
 /**

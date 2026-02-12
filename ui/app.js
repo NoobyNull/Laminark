@@ -349,14 +349,25 @@ function initFilters() {
       const type = pill.getAttribute('data-type');
 
       if (type === 'all') {
-        // "All" is exclusive -- activate all type pills
-        pills.forEach(function (p) {
-          p.classList.add('active');
-        });
+        var typePills = document.querySelectorAll('.filter-pill:not([data-type="all"])');
+        var allCurrentlyActive = Array.from(typePills).every(function (p) { return p.classList.contains('active'); });
 
-        // Reset graph filters
-        if (window.laminarkGraph && window.laminarkGraph.resetFilters) {
-          window.laminarkGraph.resetFilters();
+        if (allCurrentlyActive) {
+          // Toggle off -- deactivate all pills
+          pills.forEach(function (p) {
+            p.classList.remove('active');
+          });
+          if (window.laminarkGraph && window.laminarkGraph.setActiveTypes) {
+            window.laminarkGraph.setActiveTypes([]);
+          }
+        } else {
+          // Toggle on -- activate all type pills
+          pills.forEach(function (p) {
+            p.classList.add('active');
+          });
+          if (window.laminarkGraph && window.laminarkGraph.resetFilters) {
+            window.laminarkGraph.resetFilters();
+          }
         }
       } else {
         // Toggle this filter pill

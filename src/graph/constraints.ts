@@ -25,6 +25,8 @@ import {
   countEdgesForNode,
   getNodesByType,
 } from './schema.js';
+import { findFuzzyDuplicates } from './fuzzy-dedup.js';
+import type { GraphExtractionConfig } from '../config/graph-extraction-config.js';
 
 // =============================================================================
 // Type Validation
@@ -243,7 +245,7 @@ const ABBREVIATION_MAP: Record<string, string> = {
  */
 export function findDuplicateEntities(
   db: BetterSqlite3.Database,
-  opts?: { type?: EntityType },
+  opts?: { type?: EntityType; graphConfig?: GraphExtractionConfig },
 ): Array<{ entities: GraphNode[]; reason: string }> {
   // Get all nodes, optionally filtered by type
   let nodes: GraphNode[];
@@ -342,6 +344,26 @@ export function findDuplicateEntities(
             reason: `Path normalization match: "${group[0].name}" and "${group[1].name}"`,
           });
         }
+      }
+    }
+  }
+
+  // Strategy D: Fuzzy deduplication (Levenshtein, Jaccard, path suffix)
+  // Group nodes by type for efficient comparison
+  const byType = new Map<string, GraphNode[]>();
+  for (const node of nodes) {
+    const group = byType.get(node.type) ?? [];
+    group.push(node);
+    byType.set(node.type, group);
+  }
+
+  for (const [, typeNodes] of byType) {
+    const fuzzyResults = findFuzzyDuplicates(typeNodes, opts?.graphConfig);
+    for (const result of fuzzyResults) {
+      const ids = result.entities.map((n) => n.id).sort().join(',');
+      if (!seen.has(ids)) {
+        seen.add(ids);
+        duplicates.push(result);
       }
     }
   }

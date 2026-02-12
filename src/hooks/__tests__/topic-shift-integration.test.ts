@@ -116,6 +116,10 @@ describe('Topic Shift Integration Tests', () => {
       const [embA, embB] = orthogonalPair(384);
 
       const obs1 = makeObservation(obsRepo, 'Working on authentication module with JWT tokens', 'sess-001');
+      // Backdate obs1 so its created_at is strictly before obs2's
+      ldb.db.prepare("UPDATE observations SET created_at = datetime('now', '-2 seconds') WHERE id = ?").run(obs1.id);
+      obs1.createdAt = (ldb.db.prepare('SELECT created_at FROM observations WHERE id = ?').get(obs1.id) as { created_at: string }).created_at;
+
       const obs2 = makeObservation(obsRepo, 'Switching to database migration system design', 'sess-001');
 
       // Feed first observation (no shift -- first observation)
@@ -270,6 +274,10 @@ describe('Topic Shift Integration Tests', () => {
 
       // Create observations
       const obs1 = makeObservation(obsRepo, 'Building REST API endpoints for user management', 'sess-full');
+      // Backdate obs1 so its created_at is strictly before obs2's
+      ldb.db.prepare("UPDATE observations SET created_at = datetime('now', '-2 seconds') WHERE id = ?").run(obs1.id);
+      obs1.createdAt = (ldb.db.prepare('SELECT created_at FROM observations WHERE id = ?').get(obs1.id) as { created_at: string }).created_at;
+
       const obs2 = makeObservation(obsRepo, 'Completely different: designing the CI/CD pipeline', 'sess-full');
 
       const [embA, embB] = orthogonalPair(384);

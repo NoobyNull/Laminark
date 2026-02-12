@@ -123,6 +123,7 @@ async function fetchTimelineFromAPI(range, offset) {
   if (range && range.to) params.set('to', range.to);
   params.set('limit', String(PAGE_SIZE * 10)); // observations limit
   if (offset > 0) params.set('offset', String(offset));
+  if (window.laminarkState && window.laminarkState.currentProject) params.set('project', window.laminarkState.currentProject);
 
   var url = '/api/timeline?' + params.toString();
 

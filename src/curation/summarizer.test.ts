@@ -21,6 +21,7 @@ function makeObservation(overrides: Partial<Observation> = {}): Observation {
     content: 'Default observation content',
     title: null,
     source: 'hook:Bash',
+    kind: 'finding',
     sessionId: 'session-1',
     embedding: null,
     embeddingModel: null,
@@ -45,15 +46,18 @@ describe('compressObservations', () => {
     const observations: Observation[] = [
       makeObservation({
         content: 'Edited src/storage/database.ts to add WAL mode',
+        kind: 'change',
         createdAt: '2026-02-09T10:00:00Z',
       }),
       makeObservation({
         content:
           'Decided to use better-sqlite3 instead of sql.js for performance',
+        kind: 'decision',
         createdAt: '2026-02-09T10:05:00Z',
       }),
       makeObservation({
         content: 'Fixed error in migration script for FTS5 table creation',
+        kind: 'finding',
         createdAt: '2026-02-09T10:10:00Z',
       }),
     ];
@@ -64,7 +68,7 @@ describe('compressObservations', () => {
     expect(result).toContain('## Session Summary');
     expect(result).toContain('**Duration:**');
     expect(result).toContain('**Observations:** 3');
-    expect(result).toContain('### Key Activities');
+    expect(result).toContain('### Changes');
   });
 
   it('stays under 2000 characters with 50+ observations', () => {
@@ -84,61 +88,68 @@ describe('compressObservations', () => {
     expect(result).toContain('**Observations:** 60');
   });
 
-  it('extracts file paths from observation content', () => {
+  it('includes file paths in change observations', () => {
     const observations: Observation[] = [
       makeObservation({
         content:
           'Modified src/storage/database.ts and src/shared/types.ts for new schema',
+        kind: 'change',
       }),
       makeObservation({
         content: 'Updated package.json with new dependency',
+        kind: 'change',
       }),
     ];
 
     const result = compressObservations(observations);
 
-    expect(result).toContain('### Files Touched');
+    expect(result).toContain('### Changes');
     expect(result).toContain('src/storage/database.ts');
     expect(result).toContain('src/shared/types.ts');
     expect(result).toContain('package.json');
   });
 
-  it('detects decision keywords in observations', () => {
+  it('groups decision observations in Decisions section', () => {
     const observations: Observation[] = [
       makeObservation({
         content: 'Decided to use WAL mode for concurrent access safety',
+        kind: 'decision',
       }),
       makeObservation({
         content: 'Going with Zod v4 for runtime validation',
+        kind: 'decision',
       }),
       makeObservation({
         content: 'Normal tool output without any decisions',
+        kind: 'finding',
       }),
     ];
 
     const result = compressObservations(observations);
 
-    expect(result).toContain('### Decisions & Insights');
+    expect(result).toContain('### Decisions');
     // At least the decision observations should appear
     expect(result).toContain('WAL mode');
     expect(result).toContain('Zod v4');
   });
 
-  it('includes problem and solution indicators in activities', () => {
+  it('includes problems and solutions in findings section', () => {
     const observations: Observation[] = [
       makeObservation({
         content: 'Error: SQLITE_BUSY when running concurrent writes',
+        kind: 'finding',
       }),
       makeObservation({
         content: 'Fixed the busy timeout by increasing to 5000ms',
+        kind: 'finding',
       }),
     ];
 
     const result = compressObservations(observations);
 
-    expect(result).toContain('### Key Activities');
-    expect(result).toContain('[Issue]');
-    expect(result).toContain('[Resolved]');
+    expect(result).toContain('### Findings');
+    expect(result).toContain('SQLITE_BUSY');
+    expect(result).toContain('busy timeout');
   });
 
   it('uses timestamps from first and last observation for duration', () => {

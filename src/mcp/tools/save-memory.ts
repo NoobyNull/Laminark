@@ -8,6 +8,7 @@ import type { NotificationStore } from '../../storage/notifications.js';
 import type { AnalysisWorker } from '../../analysis/worker-bridge.js';
 import type { EmbeddingStore } from '../../storage/embeddings.js';
 import { SaveGuard } from '../../hooks/save-guard.js';
+import type { StatusCache } from '../status-cache.js';
 
 /**
  * Generates a title from observation content.
@@ -35,6 +36,7 @@ export function registerSaveMemory(
   notificationStore: NotificationStore | null = null,
   worker: AnalysisWorker | null = null,
   embeddingStore: EmbeddingStore | null = null,
+  statusCache: StatusCache | null = null,
 ): void {
   server.registerTool(
     'save_memory',
@@ -98,6 +100,8 @@ export function registerSaveMemory(
           id: obs.id,
           title: resolvedTitle,
         });
+
+        statusCache?.markDirty();
 
         // Prepend any pending notifications to the response
         let responseText = `Saved memory "${resolvedTitle}" (id: ${obs.id})`;

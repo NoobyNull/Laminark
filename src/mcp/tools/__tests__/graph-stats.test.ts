@@ -75,14 +75,14 @@ describe('graph_stats MCP tool', () => {
     });
 
     const toolNode1 = upsertNode(ldb.db, {
-      type: 'Tool',
+      type: 'Reference',
       name: 'typescript',
       metadata: {},
       observation_ids: [],
     });
 
     const toolNode2 = upsertNode(ldb.db, {
-      type: 'Tool',
+      type: 'Reference',
       name: 'vitest',
       metadata: {},
       observation_ids: [],
@@ -98,7 +98,7 @@ describe('graph_stats MCP tool', () => {
     insertEdge(ldb.db, {
       source_id: fileNode.id,
       target_id: toolNode1.id,
-      type: 'uses',
+      type: 'references',
       weight: 0.9,
       metadata: {},
     });
@@ -106,7 +106,7 @@ describe('graph_stats MCP tool', () => {
     insertEdge(ldb.db, {
       source_id: fileNode.id,
       target_id: toolNode2.id,
-      type: 'uses',
+      type: 'references',
       weight: 0.8,
       metadata: {},
     });
@@ -141,7 +141,7 @@ describe('graph_stats MCP tool', () => {
 
     const typeMap = new Map(entityCounts.map((r) => [r.type, r.cnt]));
     expect(typeMap.get('File')).toBe(1);
-    expect(typeMap.get('Tool')).toBe(2);
+    expect(typeMap.get('Reference')).toBe(2);
     expect(typeMap.get('Decision')).toBe(1);
 
     // Verify relationship distribution
@@ -150,14 +150,14 @@ describe('graph_stats MCP tool', () => {
       .all() as Array<{ type: string; cnt: number }>;
 
     const relMap = new Map(relCounts.map((r) => [r.type, r.cnt]));
-    expect(relMap.get('uses')).toBe(2);
+    expect(relMap.get('references')).toBe(2);
     expect(relMap.get('related_to')).toBe(1);
   });
 
   it('detects duplicate candidates (same name, different type)', () => {
     // Create two nodes with the same name but different types
     upsertNode(ldb.db, {
-      type: 'Tool',
+      type: 'Reference',
       name: 'react',
       metadata: {},
       observation_ids: [],
@@ -195,7 +195,7 @@ describe('graph_stats MCP tool', () => {
 
     for (let i = 0; i < 5; i++) {
       const target = upsertNode(ldb.db, {
-        type: 'Tool',
+        type: 'Reference',
         name: `tool-${i}`,
         metadata: {},
         observation_ids: [],
@@ -203,7 +203,7 @@ describe('graph_stats MCP tool', () => {
       insertEdge(ldb.db, {
         source_id: hub.id,
         target_id: target.id,
-        type: 'uses',
+        type: 'references',
         weight: 0.8,
         metadata: {},
       });

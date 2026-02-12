@@ -144,10 +144,12 @@ export class TopicShiftHandler {
 
     // 6. Handle shift: gather observations and create stash
     if (result.shifted) {
-      // Gather previous topic observations
+      // Gather previous topic observations (include unclassified -- observations
+      // may not yet be classified by the background classifier when shift runs)
       const recentObservations = this.observationStore.list({
         sessionId,
         limit: 20,
+        includeUnclassified: true,
       });
 
       // Filter to observations before the current one (by timestamp)
@@ -155,7 +157,13 @@ export class TopicShiftHandler {
         (obs) => obs.createdAt < observation.createdAt,
       );
 
-      // Generate topic label from first previous observation
+      // Nothing to stash (clean context / session start) -- skip
+      if (previousObservations.length === 0) {
+        debug('hook', 'TopicShiftHandler: no previous observations to stash, skipping');
+        return { stashed: false, notification: null };
+      }
+
+      // Generate topic label from previous observations
       const topicLabel = this.generateTopicLabel(previousObservations);
 
       // Generate summary
@@ -228,17 +236,31 @@ export class TopicShiftHandler {
   }
 
   /**
-   * Generate a topic label from the first observation's content.
-   * Uses first 50 characters, trimmed and cleaned.
+   * Generate a semantic topic label from the observations.
+   *
+   * Priority: use observation titles (most semantic), then fall back
+   * to content. Scans all observations for the best available label
+   * rather than just using the first one.
    */
   private generateTopicLabel(observations: Observation[]): string {
     if (observations.length === 0) {
       return 'Unknown topic';
     }
 
-    const first = observations[observations.length - 1]; // oldest (list is DESC)
-    const raw = first.content.replace(/\n/g, ' ').trim();
-    return raw.slice(0, 50) || 'Unknown topic';
+    // Prefer titled observations -- titles are explicitly authored and semantic
+    for (const obs of observations) {
+      if (obs.title) {
+        const cleaned = obs.title.replace(/\n/g, ' ').trim();
+        if (cleaned.length > 0) {
+          return cleaned.slice(0, 80);
+        }
+      }
+    }
+
+    // Fallback: use the oldest observation's content (list is DESC)
+    const oldest = observations[observations.length - 1];
+    const raw = oldest.content.replace(/\n/g, ' ').trim();
+    return raw.slice(0, 80) || 'Unknown topic';
   }
 
   /**

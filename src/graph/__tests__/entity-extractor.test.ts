@@ -10,8 +10,7 @@ import { initGraphSchema, getNodesByType, getNodeByNameAndType } from '../schema
 import {
   filePathRule,
   decisionRule,
-  toolRule,
-  personRule,
+  referenceRule,
   problemRule,
   solutionRule,
   projectRule,
@@ -103,56 +102,27 @@ describe('Extraction Rules', () => {
     });
   });
 
-  describe('toolRule', () => {
-    it('extracts known tool names case-insensitively', () => {
-      const matches = toolRule('Configured ESLint with the recommended TypeScript rules');
-      expect(matches.length).toBeGreaterThanOrEqual(2);
-      const names = matches.map((m) => m.name);
-      expect(names).toContain('eslint');
-      expect(names).toContain('typescript');
-    });
-
-    it('deduplicates same tool appearing multiple times', () => {
-      const matches = toolRule('Used eslint to lint, then ran eslint --fix');
-      const eslintMatches = matches.filter((m) => m.name === 'eslint');
-      expect(eslintMatches).toHaveLength(1);
-    });
-
-    it('extracts database tools', () => {
-      const matches = toolRule('Migrated from MySQL to PostgreSQL');
-      const names = matches.map((m) => m.name);
-      expect(names).toContain('mysql');
-      expect(names).toContain('postgresql');
-    });
-
-    it('returns empty for text without tool names', () => {
-      const matches = toolRule('A general observation about code quality');
-      expect(matches).toHaveLength(0);
-    });
-  });
-
-  describe('personRule', () => {
-    it('extracts @-mentions', () => {
-      const matches = personRule('Review from @john-doe on the PR');
+  describe('referenceRule', () => {
+    it('extracts URL from observation text', () => {
+      const matches = referenceRule('See https://docs.example.com/api for details');
       expect(matches).toHaveLength(1);
-      expect(matches[0].name).toBe('@john-doe');
-      expect(matches[0].type).toBe('Person');
+      expect(matches[0].name).toBe('https://docs.example.com/api');
+      expect(matches[0].type).toBe('Reference');
+      expect(matches[0].confidence).toBe(0.9);
     });
 
-    it('extracts "by [Name]" pattern', () => {
-      const matches = personRule('Code reviewed by Jane Smith');
+    it('extracts multiple URLs', () => {
+      const matches = referenceRule('Check https://foo.com and https://bar.com for info');
+      expect(matches).toHaveLength(2);
+    });
+
+    it('deduplicates same URL appearing multiple times', () => {
+      const matches = referenceRule('See https://foo.com and also https://foo.com again');
       expect(matches).toHaveLength(1);
-      expect(matches[0].name).toBe('Jane Smith');
     });
 
-    it('extracts "worked with [Name]" pattern', () => {
-      const matches = personRule('Paired with Alice Johnson on the feature');
-      expect(matches).toHaveLength(1);
-      expect(matches[0].name).toBe('Alice Johnson');
-    });
-
-    it('returns empty for text without names', () => {
-      const matches = personRule('Implemented the feature independently');
+    it('returns empty for text without URLs', () => {
+      const matches = referenceRule('Just a regular comment about coding');
       expect(matches).toHaveLength(0);
     });
   });
@@ -246,28 +216,27 @@ describe('extractEntities', () => {
     expect(decisions[0].confidence).toBeGreaterThanOrEqual(0.6);
   });
 
-  it('extracts Tool entity from known tool name', () => {
+  it('extracts Reference entity from URL in text', () => {
     const result = extractEntities(
-      'Configured eslint with the recommended TypeScript rules',
+      'See https://docs.example.com/api for the specification',
       'obs-003',
     );
-    const tools = result.entities.filter((e) => e.type === 'Tool');
-    expect(tools.length).toBeGreaterThanOrEqual(2);
-    const names = tools.map((t) => t.name);
-    expect(names).toContain('eslint');
-    expect(names).toContain('typescript');
+    const refs = result.entities.filter((e) => e.type === 'Reference');
+    expect(refs).toHaveLength(1);
+    expect(refs[0].name).toBe('https://docs.example.com/api');
+    expect(refs[0].confidence).toBeGreaterThanOrEqual(0.9);
   });
 
   it('extracts multiple entity types from complex observation', () => {
     const result = extractEntities(
-      'Fixed the authentication bug in src/auth/middleware.ts by switching from jsonwebtoken to jose library',
+      'Found a bug in the auth layer in src/auth/middleware.ts. See https://docs.example.com/fix for details',
       'obs-004',
     );
 
     const types = new Set(result.entities.map((e) => e.type));
-    // Should find File (src/auth/middleware.ts) and Tool entities at minimum
+    // Should find File (src/auth/middleware.ts), Problem, and Reference entities at minimum
     expect(types.has('File')).toBe(true);
-    expect(types.has('Tool')).toBe(true);
+    expect(types.has('Problem')).toBe(true);
     expect(result.entities.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -281,41 +250,44 @@ describe('extractEntities', () => {
 
   it('deduplicates same entity appearing multiple times', () => {
     const result = extractEntities(
-      'Used eslint to lint the code, then ran eslint --fix',
+      'Modified src/auth/login.ts and updated src/auth/login.ts with new validation',
       'obs-006',
     );
-    const eslintEntities = result.entities.filter(
-      (e) => e.name === 'eslint' && e.type === 'Tool',
+    const fileEntities = result.entities.filter(
+      (e) => e.name === 'src/auth/login.ts' && e.type === 'File',
     );
-    expect(eslintEntities).toHaveLength(1);
+    expect(fileEntities).toHaveLength(1);
   });
 
   it('respects minimum confidence threshold', () => {
-    // At default threshold (0.5), person entities (0.6) should appear
+    // At low threshold (0.5), Decision entities (0.7) and Problem entities (0.65) should appear
     const resultLow = extractEntities(
-      'Review from @alice on the PR',
+      'Decided to refactor the module. Found a bug in the cache layer',
       'obs-007',
       { minConfidence: 0.5 },
     );
-    const personLow = resultLow.entities.filter((e) => e.type === 'Person');
-    expect(personLow.length).toBeGreaterThanOrEqual(1);
+    const decisionsLow = resultLow.entities.filter((e) => e.type === 'Decision');
+    expect(decisionsLow.length).toBeGreaterThanOrEqual(1);
 
-    // At high threshold (0.8), person entities (0.6) should be filtered out
+    // At high threshold (0.9), Decision (0.7) and Problem (0.65) should be filtered out
     const resultHigh = extractEntities(
-      'Review from @alice on the PR',
+      'Decided to refactor the module. Found a bug in the cache layer',
       'obs-008',
-      { minConfidence: 0.8 },
+      { minConfidence: 0.9 },
     );
-    const personHigh = resultHigh.entities.filter((e) => e.type === 'Person');
-    expect(personHigh).toHaveLength(0);
+    const decisionsHigh = resultHigh.entities.filter((e) => e.type === 'Decision');
+    const problemsHigh = resultHigh.entities.filter((e) => e.type === 'Problem');
+    expect(decisionsHigh).toHaveLength(0);
+    expect(problemsHigh).toHaveLength(0);
   });
 
   it('returns entities sorted by confidence descending', () => {
     const result = extractEntities(
-      'Modified src/auth/login.ts and decided to use bcrypt. Review from @alice',
+      'Modified src/auth/login.ts and decided to use bcrypt. Found a bug in the hash logic',
       'obs-009',
     );
-    // Entities should be sorted: File(0.95) > Decision(0.7) > Person(0.6)
+    // Entities should be sorted: File(0.95) > Decision(0.7) > Problem(0.65)
+    expect(result.entities.length).toBeGreaterThanOrEqual(2);
     for (let i = 1; i < result.entities.length; i++) {
       expect(result.entities[i - 1].confidence).toBeGreaterThanOrEqual(
         result.entities[i].confidence,
@@ -355,6 +327,7 @@ describe('extractAndPersist', () => {
       db,
       'Modified src/auth/login.ts to add JWT support',
       'obs-100',
+      { isChangeObservation: true },
     );
 
     expect(nodes.length).toBeGreaterThanOrEqual(1);
@@ -370,11 +343,13 @@ describe('extractAndPersist', () => {
       db,
       'Modified src/auth/login.ts to fix a bug',
       'obs-200',
+      { isChangeObservation: true },
     );
     extractAndPersist(
       db,
       'Updated src/auth/login.ts with new validation',
       'obs-201',
+      { isChangeObservation: true },
     );
 
     const fileNode = getNodeByNameAndType(db, 'src/auth/login.ts', 'File');
@@ -386,14 +361,15 @@ describe('extractAndPersist', () => {
   it('persists multiple entity types from one observation', () => {
     const nodes = extractAndPersist(
       db,
-      'Configured eslint with the recommended TypeScript rules in src/config/lint.ts',
+      'Decided to restructure src/config/lint.ts for better maintainability',
       'obs-300',
+      { isChangeObservation: true },
     );
 
     expect(nodes.length).toBeGreaterThanOrEqual(2);
 
-    const toolNodes = getNodesByType(db, 'Tool');
-    expect(toolNodes.length).toBeGreaterThanOrEqual(1);
+    const decisionNodes = getNodesByType(db, 'Decision');
+    expect(decisionNodes.length).toBeGreaterThanOrEqual(1);
 
     const fileNodes = getNodesByType(db, 'File');
     expect(fileNodes.length).toBeGreaterThanOrEqual(1);
@@ -404,6 +380,7 @@ describe('extractAndPersist', () => {
       db,
       'This is just a general comment',
       'obs-400',
+      { isChangeObservation: true },
     );
 
     expect(nodes).toHaveLength(0);
@@ -414,6 +391,7 @@ describe('extractAndPersist', () => {
       db,
       'Modified src/auth/login.ts',
       'obs-500',
+      { isChangeObservation: true },
     );
 
     const node = getNodeByNameAndType(db, 'src/auth/login.ts', 'File');
