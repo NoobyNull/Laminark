@@ -51,7 +51,7 @@ describe('processPostToolUseFiltered', () => {
     expect(observations[0].content).toContain('const x = 1;');
   });
 
-  it('rejects PostToolUse with noise Bash output (npm WARN)', () => {
+  it('admits Bash with noise content (noise classified post-storage by Haiku)', () => {
     processPostToolUseFiltered(
       {
         session_id: 'sess-2',
@@ -64,8 +64,9 @@ describe('processPostToolUseFiltered', () => {
       obsRepo,
     );
 
+    // Noise is now admitted and classified post-storage by HaikuProcessor
     const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
-    expect(observations).toHaveLength(0);
+    expect(observations).toHaveLength(1);
   });
 
   it('stores observation with API key redacted', () => {
@@ -191,7 +192,7 @@ describe('processPostToolUseFiltered', () => {
     expect(observations).toHaveLength(0);
   });
 
-  it('rejects Bash package install output', () => {
+  it('admits Bash package install output (noise classified post-storage by Haiku)', () => {
     processPostToolUseFiltered(
       {
         session_id: 'sess-8',
@@ -204,8 +205,9 @@ describe('processPostToolUseFiltered', () => {
       obsRepo,
     );
 
+    // Noise is now admitted and classified post-storage by HaikuProcessor
     const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
-    expect(observations).toHaveLength(0);
+    expect(observations).toHaveLength(1);
   });
 
   it('admits Bash with meaningful output', () => {

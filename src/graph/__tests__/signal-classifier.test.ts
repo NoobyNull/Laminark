@@ -1,8 +1,17 @@
+/**
+ * Tests for deprecated signal classifier.
+ *
+ * These verify the legacy regex-based classification which is no longer used
+ * in the live pipeline (replaced by HaikuProcessor and haiku-classifier-agent).
+ * Retained because the deprecated code is still functional and may serve as
+ * a non-Haiku fallback reference.
+ */
+
 import { describe, it, expect } from 'vitest';
 
 import { classifySignal, hasContentBoost } from '../signal-classifier.js';
 
-describe('classifySignal', () => {
+describe('classifySignal (deprecated -- replaced by Haiku classifier)', () => {
   // ---------------------------------------------------------------------------
   // High signal sources
   // ---------------------------------------------------------------------------

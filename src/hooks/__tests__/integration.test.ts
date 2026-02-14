@@ -120,7 +120,7 @@ describe('hook handler end-to-end integration', () => {
   // E2E: PostToolUse Bash with noise -> no observation
   // -------------------------------------------------------------------------
 
-  it('PostToolUse Bash with npm install noise stores no observation', () => {
+  it('PostToolUse Bash with npm install noise stores observation (classified post-storage by Haiku)', () => {
     const payload = {
       hook_event_name: 'PostToolUse',
       session_id: 'e2e-sess-2',
@@ -135,12 +135,13 @@ describe('hook handler end-to-end integration', () => {
     const { exitCode } = runHandler(payload);
     expect(exitCode).toBe(0);
 
+    // Noise content is now admitted and classified post-storage by HaikuProcessor
     const db = openTestDb();
     try {
       const obsRepo = new ObservationRepository(db.db, projectHash);
       const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
 
-      expect(observations).toHaveLength(0);
+      expect(observations).toHaveLength(1);
     } finally {
       db.close();
     }

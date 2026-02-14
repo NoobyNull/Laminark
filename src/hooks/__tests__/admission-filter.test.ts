@@ -1,139 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { shouldAdmit } from '../admission-filter.js';
-import { isNoise, NOISE_PATTERNS } from '../noise-patterns.js';
-
-// =============================================================================
-// Noise Patterns Unit Tests
-// =============================================================================
-
-describe('noise-patterns', () => {
-  describe('NOISE_PATTERNS', () => {
-    it('exports pattern categories', () => {
-      expect(NOISE_PATTERNS).toBeDefined();
-      expect(NOISE_PATTERNS.BUILD_OUTPUT).toBeDefined();
-      expect(NOISE_PATTERNS.PACKAGE_INSTALL).toBeDefined();
-      expect(NOISE_PATTERNS.LINTER_WARNING).toBeDefined();
-      expect(NOISE_PATTERNS.EMPTY_OUTPUT).toBeDefined();
-    });
-
-    it('each category contains RegExp arrays', () => {
-      for (const [, patterns] of Object.entries(NOISE_PATTERNS)) {
-        expect(Array.isArray(patterns)).toBe(true);
-        for (const p of patterns) {
-          expect(p).toBeInstanceOf(RegExp);
-        }
-      }
-    });
-  });
-
-  describe('isNoise', () => {
-    it('detects BUILD_OUTPUT noise', () => {
-      const result = isNoise('npm WARN deprecated glob@7.2.3');
-      expect(result.isNoise).toBe(true);
-      expect(result.category).toBe('BUILD_OUTPUT');
-    });
-
-    it('detects npm ERR as BUILD_OUTPUT', () => {
-      const result = isNoise('npm ERR! code ENOENT');
-      expect(result.isNoise).toBe(true);
-      expect(result.category).toBe('BUILD_OUTPUT');
-    });
-
-    it('detects webpack compiled as BUILD_OUTPUT', () => {
-      const result = isNoise('webpack compiled successfully in 2.3s');
-      expect(result.isNoise).toBe(true);
-      expect(result.category).toBe('BUILD_OUTPUT');
-    });
-
-    it('detects tsc error as BUILD_OUTPUT', () => {
-      const result = isNoise('src/index.ts(5,3): error TS2304: Cannot find name');
-      expect(result.isNoise).toBe(true);
-      expect(result.category).toBe('BUILD_OUTPUT');
-    });
-
-    it('detects PACKAGE_INSTALL noise', () => {
-      const result = isNoise('added 42 packages in 3.2s');
-      expect(result.isNoise).toBe(true);
-      expect(result.category).toBe('PACKAGE_INSTALL');
-    });
-
-    it('detects "up to date" as PACKAGE_INSTALL', () => {
-      const result = isNoise('up to date, audited 150 packages in 1s');
-      expect(result.isNoise).toBe(true);
-      expect(result.category).toBe('PACKAGE_INSTALL');
-    });
-
-    it('detects audited packages as PACKAGE_INSTALL', () => {
-      const result = isNoise('audited 523 packages in 2.5s');
-      expect(result.isNoise).toBe(true);
-      expect(result.category).toBe('PACKAGE_INSTALL');
-    });
-
-    it('detects removed packages as PACKAGE_INSTALL', () => {
-      const result = isNoise('removed 3 packages in 0.5s');
-      expect(result.isNoise).toBe(true);
-      expect(result.category).toBe('PACKAGE_INSTALL');
-    });
-
-    it('detects LINTER_WARNING noise', () => {
-      const result = isNoise('42 problems (10 errors, 32 warnings)');
-      expect(result.isNoise).toBe(true);
-      expect(result.category).toBe('LINTER_WARNING');
-    });
-
-    it('detects eslint output as LINTER_WARNING', () => {
-      const result = isNoise('/src/foo.ts\n  1:1  warning  ...\n  2:5  warning  ...\n  3:3  warning  ...');
-      expect(result.isNoise).toBe(true);
-      expect(result.category).toBe('LINTER_WARNING');
-    });
-
-    it('detects EMPTY_OUTPUT noise', () => {
-      expect(isNoise('').isNoise).toBe(true);
-      expect(isNoise('').category).toBe('EMPTY_OUTPUT');
-    });
-
-    it('detects whitespace-only as EMPTY_OUTPUT', () => {
-      expect(isNoise('   \n  \t  ').isNoise).toBe(true);
-      expect(isNoise('   \n  \t  ').category).toBe('EMPTY_OUTPUT');
-    });
-
-    it('detects "OK" as EMPTY_OUTPUT', () => {
-      expect(isNoise('OK').isNoise).toBe(true);
-      expect(isNoise('OK').category).toBe('EMPTY_OUTPUT');
-    });
-
-    it('detects "Success" as EMPTY_OUTPUT', () => {
-      expect(isNoise('Success').isNoise).toBe(true);
-      expect(isNoise('Success').category).toBe('EMPTY_OUTPUT');
-    });
-
-    it('detects "Done" as EMPTY_OUTPUT', () => {
-      expect(isNoise('Done').isNoise).toBe(true);
-      expect(isNoise('Done').category).toBe('EMPTY_OUTPUT');
-    });
-
-    it('detects "undefined" as EMPTY_OUTPUT', () => {
-      expect(isNoise('undefined').isNoise).toBe(true);
-      expect(isNoise('undefined').category).toBe('EMPTY_OUTPUT');
-    });
-
-    it('detects "null" as EMPTY_OUTPUT', () => {
-      expect(isNoise('null').isNoise).toBe(true);
-      expect(isNoise('null').category).toBe('EMPTY_OUTPUT');
-    });
-
-    it('returns not noise for meaningful content', () => {
-      const result = isNoise('git commit -m "feat: add auth"');
-      expect(result.isNoise).toBe(false);
-      expect(result.category).toBeUndefined();
-    });
-
-    it('returns not noise for error messages with context', () => {
-      const result = isNoise('Error: Cannot read property "id" of undefined\n  at UserService.getUser (src/user.ts:42)');
-      expect(result.isNoise).toBe(false);
-    });
-  });
-});
 
 // =============================================================================
 // Admission Filter Tests
@@ -191,16 +57,20 @@ describe('admission-filter', () => {
         expect(shouldAdmit('Bash', '[Bash] $ npm test\nFAILED src/auth.test.ts\nExpected: 200\nReceived: 401')).toBe(true);
       });
 
-      it('rejects Bash BUILD_OUTPUT noise', () => {
-        expect(shouldAdmit('Bash', '[Bash] $ npm test\nnpm WARN deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported')).toBe(false);
+      // Noise pattern filtering has moved to HaikuProcessor (post-storage classification).
+      // Content that was previously rejected by regex noise patterns is now admitted
+      // and classified by Haiku after storage.
+
+      it('admits Bash BUILD_OUTPUT (noise classified post-storage by Haiku)', () => {
+        expect(shouldAdmit('Bash', '[Bash] $ npm test\nnpm WARN deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported')).toBe(true);
       });
 
-      it('rejects Bash PACKAGE_INSTALL noise', () => {
-        expect(shouldAdmit('Bash', '[Bash] $ npm install\nadded 42 packages in 3.2s')).toBe(false);
+      it('admits Bash PACKAGE_INSTALL (noise classified post-storage by Haiku)', () => {
+        expect(shouldAdmit('Bash', '[Bash] $ npm install\nadded 42 packages in 3.2s')).toBe(true);
       });
 
-      it('rejects Bash LINTER_WARNING noise', () => {
-        expect(shouldAdmit('Bash', '[Bash] $ eslint .\n42 problems (10 errors, 32 warnings)\n  warning: no-unused-vars\n  warning: no-console\n  warning: prefer-const')).toBe(false);
+      it('admits Bash LINTER_WARNING (noise classified post-storage by Haiku)', () => {
+        expect(shouldAdmit('Bash', '[Bash] $ eslint .\n42 problems (10 errors, 32 warnings)\n  warning: no-unused-vars\n  warning: no-console\n  warning: prefer-const')).toBe(true);
       });
 
       it('rejects empty Bash output', () => {
@@ -211,12 +81,12 @@ describe('admission-filter', () => {
         expect(shouldAdmit('Bash', '   \n  ')).toBe(false);
       });
 
-      it('rejects "OK" Bash output', () => {
-        expect(shouldAdmit('Bash', 'OK')).toBe(false);
+      it('admits "OK" Bash output (noise classified post-storage by Haiku)', () => {
+        expect(shouldAdmit('Bash', 'OK')).toBe(true);
       });
 
-      it('rejects "Success" Bash output', () => {
-        expect(shouldAdmit('Bash', 'Success')).toBe(false);
+      it('admits "Success" Bash output (noise classified post-storage by Haiku)', () => {
+        expect(shouldAdmit('Bash', 'Success')).toBe(true);
       });
 
       it('rejects very long content without decision/error indicators', () => {
