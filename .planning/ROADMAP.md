@@ -48,6 +48,14 @@
 - [x] Phase 19: Path Detection & Storage (3/3 plans) — completed 2026-02-14
 
 ### Phase 20: Intelligence & MCP Tools
+**Goal**: Resolved paths produce actionable KISS summaries, past paths surface proactively during new debugging, and users have explicit MCP control over path lifecycle
+**Plans:** 3 plans
+
+Plans:
+- [ ] 20-01-PLAN.md — KISS summary agent and PathTracker integration
+- [ ] 20-02-PLAN.md — MCP tools for debug path lifecycle (start, resolve, show, list)
+- [ ] 20-03-PLAN.md — Proactive path recall and cross-session linking
+
 ### Phase 21: Graph Visualization
 
 ## Progress
@@ -73,5 +81,5 @@
 | 17. Haiku Intelligence | v2.1 | 3/3 | Complete | 2026-02-14 |
 | 18. Agent SDK Migration | v2.1 | 2/2 | Complete | 2026-02-14 |
 | 19. Path Detection & Storage | v2.2 | 3/3 | Complete | 2026-02-14 |
-| 20. Intelligence & MCP Tools | v2.2 | 0/TBD | Not started | - |
+| 20. Intelligence & MCP Tools | v2.2 | 0/3 | Planned | - |
 | 21. Graph Visualization | v2.2 | 0/TBD | Not started | - |
