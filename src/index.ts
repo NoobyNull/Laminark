@@ -20,6 +20,7 @@ import { registerStatus } from './mcp/tools/status.js';
 import { StatusCache } from './mcp/status-cache.js';
 import { registerDiscoverTools } from './mcp/tools/discover-tools.js';
 import { registerReportTools } from './mcp/tools/report-tools.js';
+import { registerDebugPathTools } from './mcp/tools/debug-paths.js';
 import { AnalysisWorker } from './analysis/worker-bridge.js';
 import { EmbeddingStore } from './storage/embeddings.js';
 import { ObservationRepository } from './storage/observations.js';
@@ -270,6 +271,7 @@ if (toolRegistry) {
 
 const pathRepo = new PathRepository(db.db, projectHash);
 const pathTracker = new PathTracker(pathRepo);
+registerDebugPathTools(server, pathRepo, pathTracker, notificationStore, projectHash);
 
 const haikuProcessor = new HaikuProcessor(db.db, projectHash, {
   intervalMs: 30_000,
