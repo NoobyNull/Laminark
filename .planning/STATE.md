@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-10)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
-**Current focus:** Phase 17 -- Replace regex-based analysis with Haiku agents
+**Current focus:** Phase 18 -- Replace @anthropic-ai/sdk with Claude Agent SDK
 
 ## Current Position
 
-Phase: 17 of 17 (Replace Regex Analysis with Haiku Agents)
-Plan: 3 of 3 complete
-Status: Phase 17 COMPLETE -- All Haiku agents tested, existing tests updated
-Last activity: 2026-02-14 - Completed 17-03: Test coverage for Haiku migration
+Phase: 18 of 18 (Replace @anthropic-ai/sdk with Claude Agent SDK)
+Plan: 1 of 2 complete
+Status: Executing Phase 18 -- SDK swap and client rewrite done
+Last activity: 2026-02-14 - Completed 18-01: SDK dependency swap and client rewrite
 
-Progress (Phase 17): [██████████] 100% (Plan 3/3 complete)
+Progress (Phase 18): [█████░░░░░] 50% (Plan 1/2 complete)
 
 ## Performance Metrics
 
@@ -49,6 +49,7 @@ Progress (Phase 17): [██████████] 100% (Plan 3/3 complete)
 | 15-tool-search | 2/2 | 4min | 2min |
 | 16-staleness-management | 2/2 | 4min | 2min |
 | 17-haiku-intelligence | 3/3 | 14min | 5min |
+| 18-agent-sdk-migration | 1/2 | 2min | 2min |
 
 ## Accumulated Context
 
@@ -116,6 +117,11 @@ Recent decisions affecting current work:
 - [17-02]: Provenance/temporal edges removed from embedding loop along with regex extraction block
 - [17-03]: Used vi.mock for all Haiku agents in processor tests -- real SQLite but mocked API calls
 - [17-03]: Noise rejection tests converted to admission tests -- documents behavioral shift to post-storage classification
+- [18-01]: Used V2 session API (unstable_v2_createSession) over V1 query() to avoid 12s cold-start per call
+- [18-01]: Embedded system prompts in user messages rather than creating separate sessions per agent type
+- [18-01]: SDKSessionOptions model takes full model ID string, not short name
+- [18-01]: permissionMode bypassPermissions with allowedTools:[] for pure text completion
+- [18-01]: isHaikuEnabled() always returns true -- errors propagate naturally
 
 ### Pending Todos
 
@@ -136,6 +142,7 @@ Recent decisions affecting current work:
 ### Roadmap Evolution
 
 - Phase 17 added: replace decisionmaking regexes and broken haiku with agent-sdk haiku
+- Phase 18 added: Replace @anthropic-ai/sdk with Claude Agent SDK for subscription-based Haiku calls
 
 ### Blockers/Concerns
 
@@ -147,5 +154,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 17-03-PLAN.md -- Test coverage for Haiku migration (Phase 17 COMPLETE)
+Stopped at: Completed 18-01-PLAN.md -- SDK dependency swap and client rewrite
 Resume file: None
