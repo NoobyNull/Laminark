@@ -287,6 +287,7 @@ export class CurationAgent {
   private onComplete?: (report: CurationReport) => void;
   private graphConfig?: GraphExtractionConfig;
   private running: boolean = false;
+  private cycling: boolean = false;
   private lastRun: string | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
 
@@ -337,14 +338,20 @@ export class CurationAgent {
    * Execute one curation cycle. This is the main entry point.
    */
   async runOnce(): Promise<CurationReport> {
-    const report = await runCuration(this.db, this.graphConfig);
-    this.lastRun = report.completedAt;
+    if (this.cycling) return { startedAt: '', completedAt: '', observationsMerged: 0, entitiesDeduplicated: 0, stalenessFlagsAdded: 0, lowValuePruned: 0, temporalDecayUpdated: 0, temporalDecayDeleted: 0, errors: ['skipped: previous cycle still running'] };
+    this.cycling = true;
+    try {
+      const report = await runCuration(this.db, this.graphConfig);
+      this.lastRun = report.completedAt;
 
-    if (this.onComplete) {
-      this.onComplete(report);
+      if (this.onComplete) {
+        this.onComplete(report);
+      }
+
+      return report;
+    } finally {
+      this.cycling = false;
     }
-
-    return report;
   }
 
   /**

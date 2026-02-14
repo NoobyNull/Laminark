@@ -266,16 +266,17 @@ describe('ObservationClassifier', () => {
       expect(listed.some(o => o.id === obs.id)).toBe(true);
     });
 
-    it('unclassified observations are not visible in normal list', () => {
+    it('unclassified observations are visible within 60s grace window', () => {
       const obs = obsRepo.create({
         content: '[Grep] searching for something',
         source: 'hook:Grep',
       });
 
+      // Freshly created unclassified observations are visible (60s grace window)
       const listed = obsRepo.list({ limit: 10 });
-      expect(listed.some(o => o.id === obs.id)).toBe(false);
+      expect(listed.some(o => o.id === obs.id)).toBe(true);
 
-      // But visible with includeUnclassified
+      // Also visible with includeUnclassified
       const allListed = obsRepo.list({ limit: 10, includeUnclassified: true });
       expect(allListed.some(o => o.id === obs.id)).toBe(true);
     });

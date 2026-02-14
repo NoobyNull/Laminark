@@ -453,28 +453,18 @@ curationAgent.start();
 // Shutdown handlers
 // ---------------------------------------------------------------------------
 
-process.on('SIGINT', () => {
+function shutdown(code: number): void {
   clearInterval(embedTimer);
   classifier.stop();
   curationAgent.stop();
   worker.shutdown().catch(() => {});
   db.close();
-  process.exit(0);
-});
-process.on('SIGTERM', () => {
-  clearInterval(embedTimer);
-  classifier.stop();
-  curationAgent.stop();
-  worker.shutdown().catch(() => {});
-  db.close();
-  process.exit(0);
-});
+  process.exit(code);
+}
+
+process.on('SIGINT', () => shutdown(0));
+process.on('SIGTERM', () => shutdown(0));
 process.on('uncaughtException', (err) => {
   debug('mcp', 'Uncaught exception', { error: err.message });
-  clearInterval(embedTimer);
-  classifier.stop();
-  curationAgent.stop();
-  worker.shutdown().catch(() => {});
-  db.close();
-  process.exit(1);
+  shutdown(1);
 });

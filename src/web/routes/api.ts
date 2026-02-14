@@ -790,99 +790,17 @@ apiRoutes.get('/graph/analysis', (c) => {
     topEntities = db.prepare(sql).all(...params) as Array<{ id: string; label: string; type: string; degree: number }>;
   } catch { /* table may not exist */ }
 
-  // Connected components via in-memory BFS
-  interface ComponentResult {
-    id: number;
-    label: string;
-    nodeIds: string[];
-    nodeCount: number;
-    edgeCount: number;
-  }
-
-  let components: ComponentResult[] = [];
+  // Connected components via shared BFS helper
+  let components: Array<{ id: number; label: string; nodeIds: string[]; nodeCount: number; edgeCount: number }> = [];
   try {
-    // Fetch all node IDs
-    let nodesSql = 'SELECT id, name FROM graph_nodes';
-    const nodesParams: unknown[] = [];
-    if (projectFilter) {
-      nodesSql += ' WHERE project_hash = ?';
-      nodesParams.push(projectFilter);
-    }
-    const allNodes = db.prepare(nodesSql).all(...nodesParams) as Array<{ id: string; name: string }>;
-    const nodeNameMap = new Map(allNodes.map(n => [n.id, n.name]));
-
-    // Fetch all edges
-    let edgesSql = 'SELECT source_id, target_id FROM graph_edges';
-    const edgesParams: unknown[] = [];
-    if (projectFilter) {
-      edgesSql += ' WHERE project_hash = ?';
-      edgesParams.push(projectFilter);
-    }
-    const allEdges = db.prepare(edgesSql).all(...edgesParams) as Array<{ source_id: string; target_id: string }>;
-
-    // Build adjacency list
-    const adj = new Map<string, Set<string>>();
-    for (const node of allNodes) {
-      adj.set(node.id, new Set());
-    }
-    for (const edge of allEdges) {
-      if (adj.has(edge.source_id)) adj.get(edge.source_id)!.add(edge.target_id);
-      if (adj.has(edge.target_id)) adj.get(edge.target_id)!.add(edge.source_id);
-    }
-
-    // BFS to find connected components
-    const visited = new Set<string>();
-    let componentId = 0;
-
-    for (const nodeId of adj.keys()) {
-      if (visited.has(nodeId)) continue;
-
-      const queue = [nodeId];
-      visited.add(nodeId);
-      const compNodes: string[] = [];
-
-      while (queue.length > 0) {
-        const current = queue.shift()!;
-        compNodes.push(current);
-        for (const neighbor of adj.get(current) || []) {
-          if (!visited.has(neighbor)) {
-            visited.add(neighbor);
-            queue.push(neighbor);
-          }
-        }
-      }
-
-      // Count edges within this component
-      const compSet = new Set(compNodes);
-      let edgeCount = 0;
-      for (const edge of allEdges) {
-        if (compSet.has(edge.source_id) && compSet.has(edge.target_id)) {
-          edgeCount++;
-        }
-      }
-
-      // Label by highest-degree node in component
-      let maxDeg = -1;
-      let labelNodeId = compNodes[0];
-      for (const nid of compNodes) {
-        const deg = (adj.get(nid) || new Set()).size;
-        if (deg > maxDeg) {
-          maxDeg = deg;
-          labelNodeId = nid;
-        }
-      }
-
-      components.push({
-        id: componentId++,
-        label: nodeNameMap.get(labelNodeId) || labelNodeId,
-        nodeIds: compNodes,
-        nodeCount: compNodes.length,
-        edgeCount,
-      });
-    }
-
-    // Sort by size descending
-    components.sort((a, b) => b.nodeCount - a.nodeCount);
+    const bfs = findConnectedComponents(db, projectFilter);
+    components = bfs.components.map((comp, i) => ({
+      id: i,
+      label: comp.label,
+      nodeIds: comp.nodeIds,
+      nodeCount: comp.nodeIds.length,
+      edgeCount: comp.edgeCount,
+    }));
   } catch { /* tables may not exist */ }
 
   // Recent activity stats
@@ -948,87 +866,20 @@ apiRoutes.get('/graph/communities', (c) => {
   }
 
   const communities: Community[] = [];
-  const isolatedNodes: string[] = [];
+  let isolatedNodes: string[] = [];
 
   try {
-    // Fetch all nodes
-    let nodesSql = 'SELECT id, name FROM graph_nodes';
-    const nodesParams: unknown[] = [];
-    if (projectFilter) {
-      nodesSql += ' WHERE project_hash = ?';
-      nodesParams.push(projectFilter);
-    }
-    const allNodes = db.prepare(nodesSql).all(...nodesParams) as Array<{ id: string; name: string }>;
-    const nodeNameMap = new Map(allNodes.map(n => [n.id, n.name]));
-
-    // Fetch all edges
-    let edgesSql = 'SELECT source_id, target_id FROM graph_edges';
-    const edgesParams: unknown[] = [];
-    if (projectFilter) {
-      edgesSql += ' WHERE project_hash = ?';
-      edgesParams.push(projectFilter);
-    }
-    const allEdges = db.prepare(edgesSql).all(...edgesParams) as Array<{ source_id: string; target_id: string }>;
-
-    // Build adjacency list
-    const adj = new Map<string, Set<string>>();
-    for (const node of allNodes) {
-      adj.set(node.id, new Set());
-    }
-    for (const edge of allEdges) {
-      if (adj.has(edge.source_id)) adj.get(edge.source_id)!.add(edge.target_id);
-      if (adj.has(edge.target_id)) adj.get(edge.target_id)!.add(edge.source_id);
-    }
-
-    // BFS to find connected components
-    const visited = new Set<string>();
-    let communityId = 0;
-
-    for (const nodeId of adj.keys()) {
-      if (visited.has(nodeId)) continue;
-
-      const queue = [nodeId];
-      visited.add(nodeId);
-      const compNodes: string[] = [];
-
-      while (queue.length > 0) {
-        const current = queue.shift()!;
-        compNodes.push(current);
-        for (const neighbor of adj.get(current) || []) {
-          if (!visited.has(neighbor)) {
-            visited.add(neighbor);
-            queue.push(neighbor);
-          }
-        }
-      }
-
-      if (compNodes.length === 1 && (adj.get(compNodes[0])?.size ?? 0) === 0) {
-        isolatedNodes.push(compNodes[0]);
-        continue;
-      }
-
-      // Label by highest-degree node
-      let maxDeg = -1;
-      let labelNodeId = compNodes[0];
-      for (const nid of compNodes) {
-        const deg = (adj.get(nid) || new Set()).size;
-        if (deg > maxDeg) {
-          maxDeg = deg;
-          labelNodeId = nid;
-        }
-      }
-
+    const bfs = findConnectedComponents(db, projectFilter);
+    isolatedNodes = bfs.isolatedNodes;
+    for (let i = 0; i < bfs.components.length; i++) {
+      const comp = bfs.components[i];
       communities.push({
-        id: communityId,
-        label: nodeNameMap.get(labelNodeId) || labelNodeId,
-        color: COMMUNITY_COLORS[communityId % COMMUNITY_COLORS.length],
-        nodeIds: compNodes,
+        id: i,
+        label: comp.label,
+        color: COMMUNITY_COLORS[i % COMMUNITY_COLORS.length],
+        nodeIds: comp.nodeIds,
       });
-      communityId++;
     }
-
-    // Sort by size descending
-    communities.sort((a, b) => b.nodeIds.length - a.nodeIds.length);
   } catch { /* tables may not exist */ }
 
   return c.json({ communities, isolatedNodes });
@@ -1037,6 +888,111 @@ apiRoutes.get('/graph/communities', (c) => {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+interface BfsComponent {
+  nodeIds: string[];
+  label: string;
+  edgeCount: number;
+}
+
+/**
+ * Finds connected components in the graph via BFS.
+ * Shared by /api/graph/analysis and /api/graph/communities.
+ */
+function findConnectedComponents(
+  db: BetterSqlite3.Database,
+  projectFilter: string | null,
+): { components: BfsComponent[]; isolatedNodes: string[]; adj: Map<string, Set<string>> } {
+  // Fetch all nodes
+  let nodesSql = 'SELECT id, name FROM graph_nodes';
+  const nodesParams: unknown[] = [];
+  if (projectFilter) {
+    nodesSql += ' WHERE project_hash = ?';
+    nodesParams.push(projectFilter);
+  }
+  const allNodes = db.prepare(nodesSql).all(...nodesParams) as Array<{ id: string; name: string }>;
+  const nodeNameMap = new Map(allNodes.map(n => [n.id, n.name]));
+
+  // Fetch all edges
+  let edgesSql = 'SELECT source_id, target_id FROM graph_edges';
+  const edgesParams: unknown[] = [];
+  if (projectFilter) {
+    edgesSql += ' WHERE project_hash = ?';
+    edgesParams.push(projectFilter);
+  }
+  const allEdges = db.prepare(edgesSql).all(...edgesParams) as Array<{ source_id: string; target_id: string }>;
+
+  // Build adjacency list
+  const adj = new Map<string, Set<string>>();
+  for (const node of allNodes) {
+    adj.set(node.id, new Set());
+  }
+  for (const edge of allEdges) {
+    if (adj.has(edge.source_id)) adj.get(edge.source_id)!.add(edge.target_id);
+    if (adj.has(edge.target_id)) adj.get(edge.target_id)!.add(edge.source_id);
+  }
+
+  // BFS to find connected components
+  const visited = new Set<string>();
+  const components: BfsComponent[] = [];
+  const isolatedNodes: string[] = [];
+
+  for (const nodeId of adj.keys()) {
+    if (visited.has(nodeId)) continue;
+
+    const queue = [nodeId];
+    visited.add(nodeId);
+    const compNodes: string[] = [];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      compNodes.push(current);
+      for (const neighbor of adj.get(current) || []) {
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor);
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    // Detect isolated nodes (single node, no edges)
+    if (compNodes.length === 1 && (adj.get(compNodes[0])?.size ?? 0) === 0) {
+      isolatedNodes.push(compNodes[0]);
+      continue;
+    }
+
+    // Count edges within this component
+    const compSet = new Set(compNodes);
+    let edgeCount = 0;
+    for (const edge of allEdges) {
+      if (compSet.has(edge.source_id) && compSet.has(edge.target_id)) {
+        edgeCount++;
+      }
+    }
+
+    // Label by highest-degree node
+    let maxDeg = -1;
+    let labelNodeId = compNodes[0];
+    for (const nid of compNodes) {
+      const deg = (adj.get(nid) || new Set()).size;
+      if (deg > maxDeg) {
+        maxDeg = deg;
+        labelNodeId = nid;
+      }
+    }
+
+    components.push({
+      nodeIds: compNodes,
+      label: nodeNameMap.get(labelNodeId) || labelNodeId,
+      edgeCount,
+    });
+  }
+
+  // Sort by size descending
+  components.sort((a, b) => b.nodeIds.length - a.nodeIds.length);
+
+  return { components, isolatedNodes, adj };
+}
 
 function safeParseJsonArray(json: string): string[] {
   try {

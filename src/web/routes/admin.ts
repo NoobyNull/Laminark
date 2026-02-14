@@ -4,8 +4,15 @@
  * @module web/routes/admin
  */
 
+import { existsSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { Hono } from 'hono';
 import type BetterSqlite3 from 'better-sqlite3';
+
+import { getConfigDir } from '../../shared/config.js';
+import { loadTopicDetectionConfig } from '../../config/topic-detection-config.js';
+import { loadGraphExtractionConfig } from '../../config/graph-extraction-config.js';
 
 type AppEnv = {
   Variables: {
@@ -22,7 +29,15 @@ function getProjectHash(c: { get: (key: 'defaultProject') => string; req: { quer
   return c.req.query('project') || c.get('defaultProject') || null;
 }
 
+const ALLOWED_TABLES = new Set([
+  'observations', 'observations_fts', 'observation_embeddings', 'staleness_flags',
+  'graph_nodes', 'graph_edges', 'sessions', 'context_stashes', 'threshold_history',
+  'shift_decisions', 'pending_notifications', 'project_metadata', '_migrations',
+  'tool_registry', 'tool_usage_events', 'research_buffer',
+]);
+
 function tableCount(db: BetterSqlite3.Database, table: string, where?: string, params?: unknown[]): number {
+  if (!ALLOWED_TABLES.has(table)) return 0;
   try {
     const sql = where
       ? `SELECT COUNT(*) AS cnt FROM ${table} WHERE ${where}`
@@ -193,4 +208,58 @@ adminRoutes.post('/reset', async (c) => {
   })();
 
   return c.json({ ok: true, deleted, scope: scoped ? 'project' : 'all' });
+});
+
+// =========================================================================
+// Configuration endpoints
+// =========================================================================
+
+adminRoutes.get('/config/topic-detection', (c) => {
+  return c.json(loadTopicDetectionConfig());
+});
+
+adminRoutes.put('/config/topic-detection', async (c) => {
+  const body = await c.req.json();
+  const configPath = join(getConfigDir(), 'topic-detection.json');
+
+  if (body && body.__reset === true) {
+    try { if (existsSync(configPath)) unlinkSync(configPath); } catch { /* ignore */ }
+    return c.json(loadTopicDetectionConfig());
+  }
+
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return c.json({ error: 'Request body must be a JSON object' }, 400);
+  }
+
+  const { __reset: _, ...data } = body;
+  // Write raw input, then re-load (validates all fields), then overwrite with validated config
+  writeFileSync(configPath, JSON.stringify(data, null, 2), 'utf-8');
+  const validated = loadTopicDetectionConfig();
+  writeFileSync(configPath, JSON.stringify(validated, null, 2), 'utf-8');
+  return c.json(validated);
+});
+
+adminRoutes.get('/config/graph-extraction', (c) => {
+  return c.json(loadGraphExtractionConfig());
+});
+
+adminRoutes.put('/config/graph-extraction', async (c) => {
+  const body = await c.req.json();
+  const configPath = join(getConfigDir(), 'graph-extraction.json');
+
+  if (body && body.__reset === true) {
+    try { if (existsSync(configPath)) unlinkSync(configPath); } catch { /* ignore */ }
+    return c.json(loadGraphExtractionConfig());
+  }
+
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return c.json({ error: 'Request body must be a JSON object' }, 400);
+  }
+
+  const { __reset: _, ...data } = body;
+  // Write raw input, then re-load (validates all fields), then overwrite with validated config
+  writeFileSync(configPath, JSON.stringify(data, null, 2), 'utf-8');
+  const validated = loadGraphExtractionConfig();
+  writeFileSync(configPath, JSON.stringify(validated, null, 2), 'utf-8');
+  return c.json(validated);
 });

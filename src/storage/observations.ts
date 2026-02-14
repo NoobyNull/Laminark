@@ -151,7 +151,7 @@ export class ObservationRepository {
     const params: unknown[] = [this.projectHash];
 
     if (!includeUnclassified) {
-      sql += " AND classification IS NOT NULL AND classification != 'noise'";
+      sql += " AND ((classification IS NOT NULL AND classification != 'noise') OR created_at >= datetime('now', '-60 seconds'))";
     }
 
     if (options?.kind) {
