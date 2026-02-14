@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-02-14)
 ## Current Position
 
 Phase: 20 of 21 (Intelligence & MCP Tools)
-Plan: —
-Status: Ready to plan
-Last activity: 2026-02-14 — Phase 19 complete (Path Detection & Storage, 3/3 plans, verified)
+Plan: 1 of 3
+Status: Executing
+Last activity: 2026-02-14 — Plan 20-01 complete (KISS Summary Agent)
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Last activity: 2026-02-14 — Phase 19 complete (Path Detection & Storage, 3/3 p
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 19-path-detection-and-storage | 3/3 | 5min | 2min |
+| 20-intelligence-and-mcp-tools | 1/3 | 2min | 2min |
 
 ## Accumulated Context
 
@@ -72,6 +73,9 @@ Recent decisions affecting current work:
 - [V2.2]: debug_signal evaluated for noise and signal observations — build failures are noise but debug-relevant
 - [V2.2]: PathTracker as optional dependency in HaikuProcessor — backward compatible, null if not provided
 - [V2.2]: Waypoint summaries use first 200 chars (Phase 20 adds Haiku-generated summaries)
+- [V2.2]: KISS generation is fire-and-forget (non-blocking) to avoid slowing path resolution
+- [V2.2]: Full KissSummary stored as JSON string in kiss_summary TEXT column
+- [V2.2]: Waypoints pre-filtered to key types and capped at 10 for Haiku prompt efficiency
 
 ### Pending Todos
 
@@ -85,5 +89,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Phase 19 verified and complete, ready to plan Phase 20
+Stopped at: Completed 20-01-PLAN.md (KISS Summary Agent)
 Resume file: None
