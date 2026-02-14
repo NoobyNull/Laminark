@@ -25,6 +25,7 @@ import { enforceMaxDegree } from '../graph/constraints.js';
 import { broadcast } from '../web/routes/sse.js';
 import { debug } from '../shared/debug.js';
 import type { EntityType } from '../graph/types.js';
+import type { PathTracker } from '../paths/path-tracker.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,6 +35,7 @@ interface HaikuProcessorOptions {
   intervalMs?: number;
   batchSize?: number;
   concurrency?: number;
+  pathTracker?: PathTracker;
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +48,7 @@ export class HaikuProcessor {
   private readonly intervalMs: number;
   private readonly batchSize: number;
   private readonly concurrency: number;
+  private readonly pathTracker: PathTracker | null;
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
@@ -58,6 +61,7 @@ export class HaikuProcessor {
     this.intervalMs = opts?.intervalMs ?? 30_000;
     this.batchSize = opts?.batchSize ?? 10;
     this.concurrency = opts?.concurrency ?? 3;
+    this.pathTracker = opts?.pathTracker ?? null;
   }
 
   start(): void {
@@ -112,6 +116,17 @@ export class HaikuProcessor {
       let classification: string;
       try {
         const result = await classifyWithHaiku(obs.content, obs.source);
+
+        // Step 1.5: Feed debug signal to path tracker (between classify and extract)
+        // Runs BEFORE noise early-return — even noise can contain debug-relevant errors
+        if (this.pathTracker && result.debug_signal) {
+          try {
+            this.pathTracker.processSignal(result.debug_signal, obs.id, obs.content);
+          } catch (pathErr) {
+            const msg = pathErr instanceof Error ? pathErr.message : String(pathErr);
+            debug('haiku', 'Path tracking failed (non-fatal)', { id: obs.id, error: msg });
+          }
+        }
 
         if (result.signal === 'noise') {
           // Mark as noise and soft-delete

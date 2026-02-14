@@ -36,6 +36,9 @@ import { NotificationStore } from './storage/notifications.js';
 import { initGraphSchema } from './graph/schema.js';
 import { CurationAgent } from './graph/curation-agent.js';
 import { HaikuProcessor } from './intelligence/haiku-processor.js';
+import { initPathSchema } from './paths/schema.js';
+import { PathRepository } from './paths/path-repository.js';
+import { PathTracker } from './paths/path-tracker.js';
 import { broadcast } from './web/routes/sse.js';
 import { createWebServer, startWebServer } from './web/server.js';
 import { ToolRegistryRepository } from './storage/tool-registry.js';
@@ -44,6 +47,7 @@ const noGui = process.argv.includes('--no_gui');
 
 const db = openDatabase(getDatabaseConfig());
 initGraphSchema(db.db);
+initPathSchema(db.db);
 const projectHash = getProjectHash(process.cwd());
 
 // NOTE: project_metadata is populated by the SessionStart hook handler,
@@ -264,10 +268,14 @@ if (toolRegistry) {
 // Background Haiku processor (classification + entity extraction + relationships)
 // ---------------------------------------------------------------------------
 
+const pathRepo = new PathRepository(db.db, projectHash);
+const pathTracker = new PathTracker(pathRepo);
+
 const haikuProcessor = new HaikuProcessor(db.db, projectHash, {
   intervalMs: 30_000,
   batchSize: 10,
   concurrency: 3,
+  pathTracker,
 });
 
 startServer(server).then(() => {
