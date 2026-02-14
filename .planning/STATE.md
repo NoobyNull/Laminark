@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-02-14)
 ## Current Position
 
 Phase: 20 of 21 (Intelligence & MCP Tools)
-Plan: 2 of 3
-Status: Executing
-Last activity: 2026-02-14 — Plan 20-02 complete (Debug Path MCP Tools)
+Plan: 3 of 3
+Status: Phase Complete
+Last activity: 2026-02-14 — Plan 20-03 complete (Path Recall & Cross-Session Linking)
 
 ## Performance Metrics
 
@@ -54,7 +54,7 @@ Last activity: 2026-02-14 — Plan 20-02 complete (Debug Path MCP Tools)
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 19-path-detection-and-storage | 3/3 | 5min | 2min |
-| 20-intelligence-and-mcp-tools | 2/3 | 4min | 2min |
+| 20-intelligence-and-mcp-tools | 3/3 | 7min | 2min |
 
 ## Accumulated Context
 
@@ -73,6 +73,9 @@ Recent decisions affecting current work:
 - [V2.2]: debug_signal evaluated for noise and signal observations — build failures are noise but debug-relevant
 - [V2.2]: PathTracker as optional dependency in HaikuProcessor — backward compatible, null if not provided
 - [V2.2]: Waypoint summaries use first 200 chars (Phase 20 adds Haiku-generated summaries)
+- [V2.2]: Jaccard similarity threshold 0.25 for path recall — balances recall vs noise on short text
+- [V2.2]: Path recall capped at 2 results in PreToolUse to stay within context budget
+- [V2.2]: findRecentActivePath uses 24h window query for cross-session staleness boundary
 - [V2.2]: KISS generation is fire-and-forget (non-blocking) to avoid slowing path resolution
 - [V2.2]: Full KissSummary stored as JSON string in kiss_summary TEXT column
 - [V2.2]: Waypoints pre-filtered to key types and capped at 10 for Haiku prompt efficiency
@@ -89,5 +92,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 20-02-PLAN.md (Debug Path MCP Tools)
+Stopped at: Completed 20-03-PLAN.md (Path Recall & Cross-Session Linking) -- Phase 20 complete
 Resume file: None
