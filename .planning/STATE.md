@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-10)
 ## Current Position
 
 Phase: 17 of 17 (Replace Regex Analysis with Haiku Agents)
-Plan: 1 of 3 complete
-Status: Plan 01 complete -- Haiku intelligence foundation (SDK, config, client, 3 agents)
-Last activity: 2026-02-14 - Completed 17-01: Haiku intelligence foundation
+Plan: 2 of 3 complete
+Status: Plan 02 complete -- Pipeline integration (HaikuProcessor, admission filter, regex deletion)
+Last activity: 2026-02-14 - Completed 17-02: Pipeline integration
 
-Progress (Phase 17): [███-------] 33% (Plan 1/3 complete)
+Progress (Phase 17): [██████----] 67% (Plan 2/3 complete)
 
 ## Performance Metrics
 
@@ -110,6 +110,9 @@ Recent decisions affecting current work:
 - [17-01]: Used @anthropic-ai/sdk (not claude-agent-sdk) for simple Messages API calls -- agent SDK is overkill for structured extraction
 - [17-01]: Combined noise/signal + observation classification into one Haiku call (one concern, cheaper)
 - [17-01]: Defensive JSON extractor strips markdown fences and finds JSON arrays/objects in response text
+- [17-02]: Deleted regex extraction rules entirely -- HaikuProcessor is sole extraction path, no fallback
+- [17-02]: Store-then-classify pattern: observations stored unconditionally, classified by Haiku, noise soft-deleted
+- [17-02]: Provenance/temporal edges removed from embedding loop along with regex extraction block
 
 ### Pending Todos
 
@@ -141,5 +144,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 17-01-PLAN.md -- Haiku intelligence foundation (SDK, config, client, 3 agents)
+Stopped at: Completed 17-02-PLAN.md -- Pipeline integration (HaikuProcessor, admission filter, regex deletion)
 Resume file: None
