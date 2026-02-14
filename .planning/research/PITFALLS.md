@@ -1,8 +1,8 @@
 # Domain Pitfalls
 
-**Domain:** Adding global tool discovery, scope-aware registry, and conversation-driven routing to an existing Claude Code MCP plugin (Laminark V2)
-**Researched:** 2026-02-10
-**Confidence:** HIGH (grounded in official Claude Code docs, Laminark source analysis, and documented ecosystem bugs)
+**Domain:** Adding automatic debug path tracking and resolution path features to an existing memory/knowledge graph system (Laminark v2.2)
+**Researched:** 2026-02-14
+**Confidence:** HIGH (grounded in Laminark source analysis, existing pipeline architecture, and concrete integration points)
 
 ---
 
@@ -12,508 +12,304 @@ Mistakes that cause rewrites, data corruption, or fundamentally broken user expe
 
 ---
 
-### Pitfall 1: Ghost Tool Suggestions (Recommending Unavailable Tools)
+### Pitfall 1: False Positive Debug Detection (Normal Errors Classified as Debug Sessions)
 
-**What goes wrong:** The routing system suggests a tool that is not actually available in the current session's resolved scope. Claude attempts to call it and gets a "No such tool available" error, wasting a turn and confusing the user.
+**What goes wrong:** The debug detection classifier treats every error, failure, or problem-related observation as the start of a debug session. Normal development activities -- a failing test during TDD, a build error from a typo, a lint warning -- get misclassified as "debug sessions." The system creates debug path entities for routine development friction, flooding the graph with meaningless paths.
 
-**Why it happens:** Tool availability is session-specific and depends on an intersection of scopes: built-in tools are always present, user-scope MCP servers from `~/.claude.json` apply across projects, project-scope servers from `.mcp.json` apply only in that project, and team settings from `.claude/settings.json` add more. If Laminark's registry caches a tool discovered in Project A and then suggests it in Project B where that tool's MCP server is not configured, it becomes a ghost tool.
+**Why it happens:** The existing piggyback-extractor.ts already has negative sentiment detection (lines 96-100: `NEGATIVE_WORDS` includes 'error', 'failed', 'broken', 'bug', 'issue', 'problem'). If debug detection uses similar keyword-based signals, it will fire constantly. The Haiku classifier agent (haiku-classifier-agent.ts) classifies observations into noise/signal and discovery/problem/solution -- but "problem" classification does not equal "debug session." A developer writes a test that fails intentionally (TDD), encounters a build error they fix in 10 seconds, or gets a linter warning they ignore. None of these are debug sessions.
 
-**Laminark-specific risk:** Laminark currently stores all data in a single SQLite database with `project_hash` scoping. The knowledge graph and observations are already scoped. But a tool registry that stores "tool X exists" without also storing "tool X is available in scope Y" will leak tools across projects. The current `getProjectHash(process.cwd())` pattern (line 43 of `src/index.ts`) correctly scopes observations, but tool availability is more nuanced -- a user-scope MCP server is available in ALL projects, while a project-scope one is not.
+**Laminark-specific risk:** The current PostToolUse pipeline already processes every tool call through handler.ts (line 62-238). Adding debug detection at this granularity means every single error-containing observation triggers analysis. The HaikuProcessor already runs on a 30-second timer with batch processing (haiku-processor.ts lines 58-76). If debug detection happens inline in the hook handler (synchronous path) rather than in the background processor, it adds latency to every hook invocation. If it happens in the background processor, it adds another Haiku call per observation on top of the existing classify/extract-entities/infer-relationships pipeline.
 
 **Consequences:**
-- Claude wastes API turns on failed tool calls
-- User loses trust in Laminark's recommendations quickly (one ghost suggestion is enough)
-- The routing memory learns from failed calls, polluting its pattern data
+- Graph fills with hundreds of trivial "debug path" entities and "debug_step" edges per day
+- Real debug sessions (multi-hour investigation, multiple failed approaches) get lost in noise
+- Users see a timeline of "debug sessions" that are actually just normal development -- trust evaporates
+- Haiku API costs increase proportionally to false positive rate
 
 **Prevention:**
-- Tool registry must store scope metadata: `{ tool_name, server_name, scope: 'built_in' | 'user' | 'project' | 'local', project_hash?: string }`
-- At suggestion time, compute the available tool set: `built_in UNION user_scope UNION project_scope(current_hash) UNION local_scope(current_hash)`
-- NEVER suggest a tool unless it passes the availability check
-- Add a "staleness" flag: re-validate tool availability on SessionStart, mark stale tools as unavailable until re-confirmed
+- Debug sessions require **temporal duration and repeated failure patterns**, not single error events. A minimum of 3+ related error observations within a time window (e.g., 5 minutes) before opening a debug path
+- Use a **state machine** approach: IDLE -> POTENTIAL_DEBUG (first error signal) -> ACTIVE_DEBUG (confirmation: same error topic recurring, or explicit retry patterns) -> RESOLVED (success observation after active debug)
+- The POTENTIAL_DEBUG -> IDLE transition should have a short timeout (2-3 minutes). If no further related errors appear, it was not a debug session
+- Never classify a single PostToolUse failure as debug session start. Require corroboration from subsequent observations
+- Use the existing `kind` field on observations: only observations classified as `problem` by Haiku should contribute to debug detection. `verification` kind (test runs) should NOT auto-trigger debug unless the same test fails repeatedly
 
-**Detection (warning signs):**
-- Any tool suggestion that does not pass through an availability filter
-- Registry queries that do not include `project_hash` or scope filtering
-- Tests that verify tool suggestions without mocking a specific project context
+**Detection (warning signs you hit this):**
+- More than 5 active debug paths created per hour of development
+- Average debug path duration under 2 minutes
+- Users reporting "I see debug sessions everywhere"
+- Debug path entities outnumber Problem/Solution entities in the graph
 
-**Phase guidance:** Must be addressed in the registry design phase, before routing is built. Routing depends on a correct, scope-filtered tool set.
+**Phase impact:** This is THE critical design decision. Get the detection heuristics wrong and the entire feature is negative-value. Address in Phase 1 with extensive unit tests covering normal development scenarios (TDD cycles, build-fix-build cycles, intentional test failures).
 
 ---
 
-### Pitfall 2: Config File Format Confusion (MCP Servers vs Settings vs Hooks)
+### Pitfall 2: Haiku Call Volume Explosion (Performance Death by Detection)
 
-**What goes wrong:** Laminark parses Claude Code config files assuming a single format, but Claude Code uses different formats and locations for different purposes. MCP servers, hooks, settings, and plugins each live in different files with different schemas.
+**What goes wrong:** Adding debug detection as another Haiku call per observation pushes the system past sustainable API usage. The existing HaikuProcessor already makes up to 3 Haiku calls per signal observation (classify, extract entities, infer relationships). Adding a 4th call for "is this part of a debug session?" per observation, plus a 5th for "generate a KISS summary" when a path closes, creates unsustainable API load.
 
-**Why it happens:** The Claude Code config landscape is genuinely confusing:
+**Why it happens:** The current pipeline processes observations in batches of 10 with concurrency of 3 (haiku-processor.ts lines 57-60). Each observation can generate 3 sequential Haiku calls. With 10 observations per 30-second cycle, that is up to 30 Haiku calls per cycle. Adding debug detection at the same granularity pushes it to 40 calls per cycle. During active development sessions that generate 20+ observations per minute, the backlog grows faster than processing capacity.
 
-| File | Location | Contains | Format |
-|------|----------|----------|--------|
-| `~/.claude.json` | Home dir | User-scope MCP servers + local-scope MCP servers (per-project paths) | `{ "mcpServers": {...}, "projects": { "/path": { "mcpServers": {...} } } }` |
-| `~/.claude/settings.json` | Home .claude dir | Global hooks, preferences, enabledPlugins | `{ "hooks": {...}, "env": {...}, "enabledPlugins": [...] }` |
-| `~/.claude/settings.local.json` | Home .claude dir | Personal global overrides | Same as settings.json |
-| `.mcp.json` | Project root | Project-scope MCP servers | `{ "mcpServers": {...} }` |
-| `.claude/settings.json` | Project .claude dir | Team hooks, project preferences | `{ "hooks": {...} }` |
-| `.claude/settings.local.json` | Project .claude dir | Personal project overrides | Same as settings.json |
-
-The critical trap: `~/.claude.json` (MCP servers) vs `~/.claude/settings.json` (hooks/settings) look almost the same but serve completely different purposes. A documented bug (GitHub issue #4976) confirms even the official docs got this wrong.
-
-**Laminark-specific risk:** Laminark's current config reading is minimal -- `src/shared/config.ts` only reads `~/.laminark/config.json` for debug settings. Expanding to read Claude Code's config files means parsing 5-6 different files with 3 different schemas. If the parser treats `~/.claude.json` as having the same structure as `.mcp.json`, it will miss per-project server blocks inside the `"projects"` key.
+**Laminark-specific risk:** The Haiku client uses a singleton Agent SDK V2 session (haiku-client.ts lines 25-40). Sequential calls through a single session are serialized. The `callHaiku()` function is already the bottleneck. Adding more calls per observation directly extends the per-observation processing time. The 30-second timer interval (line 58) means if one cycle takes longer than 30 seconds, cycles stack up.
 
 **Consequences:**
-- Missing tools (most config files parsed correctly, but one format misunderstood)
-- Runtime crashes from unexpected JSON structure
-- Silent data loss: tools exist in config but are not discovered
+- Background processing falls behind, creating growing backlog of unprocessed observations
+- Memory growth from buffered observations
+- Debug path state becomes stale (events from 5 minutes ago finally get processed)
+- Session resets in the Agent SDK cause cold-start overhead (~12 seconds per session creation)
+- Increased API costs with no proportional value
 
 **Prevention:**
-- Define explicit TypeScript interfaces for each config file format:
-  - `ClaudeJsonConfig` (for `~/.claude.json`): `{ mcpServers?: McpServers, projects?: Record<string, { mcpServers?: McpServers }> }`
-  - `SettingsConfig` (for `settings.json`): `{ hooks?: HooksConfig, enabledPlugins?: string[], env?: Record<string, string> }`
-  - `McpJsonConfig` (for `.mcp.json`): `{ mcpServers: McpServers }`
-- Validate with Zod schemas (already a dependency) -- fail loud on unexpected structure
-- Write a dedicated parser per file type, not a generic "read JSON and extract tools" function
-- Handle `${VAR}` and `${VAR:-default}` environment variable expansion in `.mcp.json` (Claude Code does this natively; Laminark must too)
+- Do NOT add a separate Haiku call for debug detection. Instead, extend the existing classifier prompt (haiku-classifier-agent.ts) to include a `debug_signal` field alongside the existing `signal`/`classification` fields. Single call, richer output
+- The classifier system prompt (lines 41-55) already asks "Is this noise or signal?" and "What kind?" -- add "Does this indicate debugging activity?" as a third question in the same prompt. This adds ~20 tokens to the response but zero additional API calls
+- KISS summary generation should happen ONLY at path closure, not per-observation. A path closing is a rare event (maybe 2-5 per day), so one Haiku call for summary is acceptable
+- Consider a rule-based pre-filter for debug detection that runs BEFORE Haiku, similar to how the admission filter (admission-filter.ts) pre-screens observations. Only observations matching debug-like patterns (error keywords + tool retry patterns) should have their Haiku classification include the debug signal
 
-**Detection (warning signs):**
-- A single `parseConfig()` function that handles all file types
-- No Zod/schema validation on parsed config objects
-- Tests that use a simplified config format instead of real-world examples
+**Detection (warning signs you hit this):**
+- `processOnce()` cycle time exceeds 30 seconds
+- Observation backlog grows during active development
+- `haiku-client.ts` session resets increase (indicating timeouts)
+- Total Haiku calls per hour exceeds 200 during normal development
 
-**Phase guidance:** Must be the first thing built in the discovery phase. Everything downstream depends on correct parsing.
+**Phase impact:** Address in Phase 1 by modifying the existing classifier prompt rather than adding new agent modules. The KISS summary agent is Phase 2 (path closure is a distinct concern).
 
 ---
 
-### Pitfall 3: Silent Config Override (Last-Wins JSON Merging)
+### Pitfall 3: Graph Pollution from Path Entities (Debug Paths Overwhelming Core Knowledge)
 
-**What goes wrong:** When `~/.claude.json` contains multiple `mcpServers` sections (e.g., from merging JSON incorrectly), only the last section takes effect. This is a documented Claude Code bug (GitHub issue #4938). Laminark's parser must handle this the same way Claude Code does, or tool discovery will disagree with what Claude Code actually loads.
+**What goes wrong:** Each debug path creates new entities (DebugPath, DebugStep nodes) and edges (debug_step, resolved_by, caused_by). A busy developer might trigger 10-20 debug paths per day. Each path has 3-15 waypoints. Over a week, that is 200+ new nodes and 500+ new edges from debug tracking alone -- potentially exceeding the entire existing graph size for a project.
 
-**Why it happens:** JSON does not support duplicate keys. When a JSON parser encounters duplicate keys at the same level, behavior is implementation-defined. Most JavaScript parsers (including `JSON.parse`) silently take the last value. If Laminark reads `~/.claude.json` and handles duplicate keys differently than Claude Code does, Laminark thinks tools exist that Claude Code has not loaded.
+**Why it happens:** The existing entity type taxonomy is fixed at 6 types: Project, File, Decision, Problem, Solution, Reference (types.ts lines 13-20). The relationship type taxonomy has 8 types (lines 28-37). Adding DebugPath as a new entity type and debug-specific relationship types changes the fundamental graph shape. The MAX_NODE_DEGREE constraint (50 edges per node, types.ts line 118) was calibrated for the current entity mix. File nodes that participate in many debug paths will hit degree caps quickly, causing the enforceMaxDegree() function (constraints.ts lines 69-103) to prune potentially valuable non-debug edges.
 
-**Laminark-specific risk:** Laminark uses `JSON.parse` (via Node.js built-in), which has last-wins behavior, matching Claude Code. However, if Laminark ever switches to a streaming JSON parser, Zod `.transform()`, or a JSONC parser, the behavior could diverge. Additionally, if Laminark tries to be "smarter" by merging duplicate sections, it would create ghost tools.
+**Laminark-specific risk:** The D3 visualization already renders the full graph with type-based coloring and edge label toggles (per the recent feature/d3-graph-viz branch). Adding a new entity type requires updating the color scheme, filter system, and legend. More critically, debug paths are inherently temporal/sequential structures, but the graph is designed for semantic relationships. Forcing sequential data into a graph structure creates long chains that dominate the layout.
 
 **Consequences:**
-- Tool registry disagrees with Claude Code's actual loaded tools
-- Ghost tool suggestions (see Pitfall 1)
-- Extremely hard to debug -- the config file looks correct to humans
+- Graph visualization becomes unreadable -- long debug chains push semantic clusters apart
+- Degree enforcement prunes valuable edges in favor of debug path edges
+- Graph stats (graph-stats.ts) become misleading -- "200 entities" sounds impressive but 150 are debug steps
+- Temporal decay (temporal-decay.ts) needs different parameters for debug edges vs. semantic edges -- debug paths should decay faster but currently all edges share the same half-life (30 days)
+- SSE broadcast (haiku-processor.ts line 182-188) floods the UI with entity_updated events for debug steps
 
 **Prevention:**
-- Use standard `JSON.parse` for all Claude Code config files (matches Claude Code's own behavior)
-- Never attempt to merge duplicate keys or "fix" malformed configs
-- Add a consistency check: after discovery, compare Laminark's tool list against what Claude Code reports via `list_changed` or `/mcp` output
-- Document that Laminark follows Claude Code's resolution semantics exactly, not its own interpretation
+- Do NOT add DebugPath as a new entity type. Instead, model debug paths as metadata on existing Problem and Solution entities. A Problem node gains a `debug_path` metadata field containing the ordered waypoint references. A Solution node gains a `resolved_path_id` linking it to the Problem
+- If new entity types are unavoidable, use a **separate table** for debug paths rather than cramming them into graph_nodes/graph_edges. Debug paths are inherently sequential, not graph-structured. A `debug_paths` table with `(id, problem_entity_id, status, waypoints JSON, created_at, resolved_at, summary)` is simpler and does not pollute the knowledge graph
+- Implement a toggle in the UI to show/hide debug path overlays. The existing per-type edge label toggle pattern (from the recent commit 0200412) provides a template
+- Set a hard cap on debug path entities per project (e.g., 50 active paths, auto-archive oldest). This prevents unbounded growth
 
-**Detection (warning signs):**
-- Custom JSON parsing logic beyond `JSON.parse`
-- Any code that "merges" or "deep-merges" config objects from the same file
-- Missing integration tests with real-world (potentially malformed) config files
+**Detection (warning signs you hit this):**
+- Debug-related nodes exceed 50% of total graph nodes
+- Degree enforcement fires more frequently after debug tracking is enabled
+- Users complain about graph visualization being "cluttered" or "unreadable"
+- Graph traversal queries (schema.ts `traverseFrom()`) slow down due to increased node/edge count
 
-**Phase guidance:** Config parsing phase. Must match Claude Code's behavior exactly.
+**Phase impact:** This is an architecture decision that must be made in Phase 1 BEFORE any implementation. The separate-table approach is strongly recommended over extending the graph schema. Phase 3 (visualization) depends entirely on this decision.
 
 ---
 
-### Pitfall 4: Scope Precedence Inversion (Getting the Hierarchy Wrong)
+### Pitfall 4: Cross-Session State Management (Debug Paths Spanning Context Resets)
 
-**What goes wrong:** Laminark resolves tool scope priority differently than Claude Code does, causing tools to appear with wrong scope metadata or causing Laminark to think a tool is available when Claude Code has overridden it.
+**What goes wrong:** A developer starts debugging an issue in one Claude Code session, the session ends (Stop event) or context resets (hitting the token limit), and they continue in a new session. The debug path state is lost because the path was tracked in-memory during the session. The new session has no awareness that this is a continuation of an existing debug effort.
 
-**Why it happens:** Claude Code's scope precedence for MCP servers is: **local > project > user**. When servers with the same name exist at multiple scopes, local wins completely (no merging). But this is counterintuitive -- most systems use "specific overrides general" where project would beat global. In Claude Code, "local" means "per-project in `~/.claude.json`" (NOT `.claude/settings.local.json`), while "user" means "global in `~/.claude.json`". Both live in the same file but at different JSON paths.
+**Why it happens:** The current session lifecycle (session-lifecycle.ts) handles SessionStart and SessionEnd events. Sessions get summaries via compressObservations() (summarizer.ts). But debug path state (current path ID, active waypoints, detection state machine position) is inherently in-memory state during a session. The existing hook handler opens a fresh database connection per invocation (handler.ts line 257) -- there is no persistent in-memory state between hook calls.
 
-For hooks and settings, the precedence is different: managed policy > enterprise settings > user settings > project settings > local settings. The precedence is NOT the same as MCP server precedence.
-
-**Laminark-specific risk:** Laminark needs to track scope for tools AND hooks. If it applies MCP server precedence rules to hooks (or vice versa), routing decisions will be wrong. The system currently has a single `projectHash` concept, but scope resolution requires understanding the difference between "this tool is user-scope (available everywhere)" and "this tool is local-scope (available only here, overrides user-scope)".
+**Laminark-specific risk:** Laminark hooks run as separate Node.js processes per hook invocation (bin: `laminark-hook` in package.json). There is NO long-running process on the hook side. Each PostToolUse event spawns a new process, reads stdin, processes, and exits. The MCP server (laminark-server) IS long-running but does not receive PostToolUse events. This means the debug detection state machine cannot live in-memory at all -- it must be persisted to SQLite on every state transition.
 
 **Consequences:**
-- Tools shown with wrong scope labels
-- Routing suggests a tool that has been overridden at a more-specific scope
-- Scope-aware filtering removes tools that should be present, or keeps tools that should be hidden
+- Debug paths get "orphaned" when sessions end mid-debug -- no resolution is recorded
+- The new session creates a duplicate debug path for the same issue, inflating the graph
+- KISS summary generation never fires for orphaned paths (no closure event)
+- The graph shows the same bug being "debugged" 3 times when it was actually one continuous effort
+- Cross-session debug correlation is impossible without explicit linking
 
 **Prevention:**
-- Implement scope resolution as a dedicated module with explicit precedence rules
-- MCP server resolution: `local_scope(project) > project_scope(.mcp.json) > user_scope(~/.claude.json global)`
-- When same-name servers exist at multiple scopes, the higher-priority scope REPLACES (not merges) the lower one
-- Build a comprehensive test suite with multi-scope conflicts as the primary test scenario
-- Separate scope resolution for MCP servers from scope resolution for hooks/settings
+- All debug path state MUST be persisted to SQLite, not held in memory. The state machine (IDLE/POTENTIAL_DEBUG/ACTIVE_DEBUG/RESOLVED) must be stored per-project in a `debug_paths` table
+- On SessionStart, check for any ACTIVE_DEBUG paths for the current project. If found, inject a hint into the session context (the SessionStart hook already writes to stdout for context injection, handler.ts line 287-289)
+- On SessionEnd/Stop, do NOT auto-close active debug paths. Instead, mark them as `status: 'suspended'`. They resume when the next session picks up the same error pattern
+- Implement a timeout: paths in `suspended` status for more than 24 hours get auto-resolved with a "abandoned/unresolved" summary
+- The `.orphaned_at` file already visible in the git status hints at awareness of this problem pattern
 
-**Detection (warning signs):**
-- A single "resolve scope" function that handles both MCP servers and hooks
-- Tests that only exercise single-scope scenarios
-- No test cases for same-name servers at different scopes
+**Detection (warning signs you hit this):**
+- Multiple debug path entities for the same underlying problem
+- Debug paths with no resolution (perpetually "active")
+- SessionStart context injection not mentioning active debug paths
+- Users reporting "it forgot I was debugging this"
 
-**Phase guidance:** Registry design phase. The scope model must be correct before tools are stored.
-
----
-
-### Pitfall 5: Breaking the Hook Handler's Stdout Contract
-
-**What goes wrong:** After adding global tool discovery and routing logic to the hook handler (`src/hooks/handler.ts`), debug output or error messages accidentally leak to stdout, which Claude Code interprets as context injection content and injects into Claude's conversation.
-
-**Why it happens:** Laminark's hook handler has a critical constraint documented at line 21-25 of `handler.ts`: "Only SessionStart writes to stdout (synchronous hook -- stdout is injected into Claude's context window). All other hooks NEVER write to stdout." When adding new discovery logic (reading config files during SessionStart, computing available tools, etc.), any `console.log`, uncaught exception message, or library warning that writes to stdout becomes injected context.
-
-**Laminark-specific risk:** This is Laminark's most fragile architectural constraint. The current handler is careful -- it uses `debug()` (which writes to a log file, not stdout) and only `process.stdout.write(context)` in SessionStart. But new tool discovery code might:
-- Use `console.log` for debugging during development and forget to remove it
-- Import a library that writes warnings to stdout
-- Have a Zod validation error that `.toString()` includes `console.log` from a `refine()` handler
-- Throw an uncaught error whose message includes the string "[object Object]" or similar noise
-
-**Consequences:**
-- Claude receives garbled context injection (config file paths, JSON fragments, error messages)
-- Confusing and unpredictable Claude behavior
-- Extremely hard to debug because the noise appears as if it is part of Laminark's context
-
-**Prevention:**
-- Enforce the contract with a test that captures stdout during non-SessionStart events and asserts it is empty
-- All new modules imported into `handler.ts` must go through a review for stdout writes
-- Wrap SessionStart discovery logic in a try-catch that only returns null (not error messages) on failure
-- Use the existing `debug()` function for ALL logging; never `console.log` or `console.warn` in hook handler code paths
-- Consider redirecting `process.stdout` to `/dev/null` for non-SessionStart events as a safety net
-
-**Detection (warning signs):**
-- Any `console.log` or `console.warn` call in files imported by `handler.ts`
-- Missing stdout-assertion tests for hook events
-- New dependencies added to the hook handler's import chain
-
-**Phase guidance:** Every phase that touches the hook handler. Should be a CI check.
-
----
-
-### Pitfall 6: Database Schema Migration Conflicts Between V1 and V2
-
-**What goes wrong:** V2 adds new tables (tool_registry, routing_patterns, scope_metadata) to the same SQLite database that V1 uses. If users upgrade from V1 to V2, the migration must not break existing data. If it fails mid-migration, the database is left in an inconsistent state.
-
-**Why it happens:** Laminark uses a migration system (`src/storage/migrations.ts`) that runs on database open. V1 already has migrations 001-013+. V2 needs to add new tables without altering existing ones. SQLite does not support transactional DDL for all operations (ALTER TABLE has limitations). If a V2 migration adds a column to an existing table and fails, the table may be left with the column but without the data migration.
-
-**Laminark-specific risk:** The current database opens in `src/index.ts` line 41: `const db = openDatabase(getDatabaseConfig())`. Migrations run synchronously during `openDatabase`. The hook handler ALSO opens the database independently (line 199 of `handler.ts`). If the MCP server process and hook handler process both run migrations concurrently on first V2 startup, they could conflict despite WAL mode.
-
-**Consequences:**
-- Corrupted database on upgrade
-- V1 data lost
-- User must manually delete database and lose all memories
-
-**Prevention:**
-- V2 migrations should ONLY add new tables (CREATE TABLE IF NOT EXISTS), never alter existing V1 tables
-- Use a migration version guard: check current migration version before running, skip if already applied
-- Test the upgrade path explicitly: create a V1 database, run V2 migrations, verify all V1 data intact
-- The migration runner should use a SQLite transaction wrapping all DDL for each migration step
-- Consider a migration lock (exclusive SQLite lock during migration) to prevent concurrent migration from hook handler and MCP server
-
-**Detection (warning signs):**
-- Any migration that uses ALTER TABLE on existing V1 tables
-- Missing upgrade-path tests (V1 DB -> V2 migration -> verify data)
-- No concurrent migration protection
-
-**Phase guidance:** Must be addressed in the very first V2 implementation phase (registry tables). Test the upgrade path before any other work.
+**Phase impact:** Must be designed in Phase 1 (data model), implemented in Phase 2 (state machine persistence), and tested specifically for the session boundary case. The hook-as-subprocess architecture makes this non-trivial.
 
 ---
 
 ## Moderate Pitfalls
 
-Issues that cause degraded functionality but not data loss or rewrites.
+Mistakes that cause bugs, user confusion, or require significant rework but not full rewrites.
 
 ---
 
-### Pitfall 7: Config File Read Performance in Hook Handler
+### Pitfall 5: Path Noise (Too Many Waypoints, Meaningless Breadcrumbs)
 
-**What goes wrong:** The SessionStart hook reads 5-6 config files from disk to discover tools, adding enough latency that it exceeds the 2-second hook timeout, causing Claude Code to skip the context injection entirely.
+**What goes wrong:** Every tool call during a debug session gets recorded as a waypoint in the debug path. Reading files, running grep, checking git status -- all become waypoints. A 30-minute debug session produces 150 waypoints when only 5-10 were actually meaningful (the hypothesis, the key finding, the attempted fix, the test failure, the real fix, the passing test).
 
-**Why it happens:** The current `handleSessionStart` has a 500ms performance warning (line 43 of `session-lifecycle.ts`). Adding file reads for `~/.claude.json`, `~/.claude/settings.json`, `~/.claude/settings.local.json`, `.mcp.json`, `.claude/settings.json`, and `.claude/settings.local.json` means 6 synchronous `readFileSync` calls plus JSON parsing. On a cold filesystem (first access after boot, NFS mounts, encrypted home directories), each read could take 10-50ms. If any config file is large (a `~/.claude.json` with many projects could be several KB), parsing adds overhead.
+**Why it happens:** The PostToolUse hook fires for every tool call. The existing admission filter (admission-filter.ts) already filters navigation commands (ls, cd, pwd) and research tools (Read, Glob, Grep go to research buffer). But during debug, even non-navigation tools produce noise: reading error logs, re-running the same failing test, checking build output. These are valid observations but not meaningful debug waypoints.
 
-**Laminark-specific risk:** The hook handler opens a fresh database connection every invocation (line 199 of `handler.ts`), which already costs ~2ms. Adding 6 file reads pushes the total startup toward the danger zone. The hook handler imports NO heavy dependencies (explicitly documented in the handler: "Imports only storage modules -- NO @modelcontextprotocol/sdk (cold start overhead)"). Tool discovery code must follow this same constraint.
+**Laminark-specific risk:** The research buffer pattern (handler.ts lines 130-138) routes Read/Glob/Grep to a separate buffer instead of observations. This same pattern could inform debug waypoint filtering -- but the research buffer is session-scoped and flushed, while debug waypoints need persistence.
 
 **Prevention:**
-- Cache discovered tools in the SQLite database; do NOT re-parse config files on every SessionStart
-- Only re-scan config files when they have changed (check file mtime before reading)
-- Use `fs.statSync` (fast) before `fs.readFileSync` (slower) to detect changes
-- Keep tool discovery code import-light: no Zod validation in the hot path, validate offline
-- Set a performance budget: total SessionStart handler must complete in <200ms (current is ~100ms)
+- Define explicit "debug-significant" tool patterns: only Write, Edit, Bash (test/build commands), and explicit Haiku-classified "problem"/"solution" observations become waypoints
+- Use the existing `kind` field: only `change` (Write/Edit), `verification` (test/build), and `decision` kind observations are waypoint candidates
+- Implement waypoint deduplication: if the same file is edited 5 times in a row, collapse to a single "modified X (5 edits)" waypoint
+- Cap waypoints per path at 20-30. After the cap, only record waypoints that represent state transitions (new hypothesis, different file, test outcome change)
 
-**Detection (warning signs):**
-- `readFileSync` calls in the SessionStart code path without mtime caching
-- Importing Zod or other validation libraries in the hook handler's critical path
-- No performance benchmarks for the SessionStart handler
-
-**Phase guidance:** Discovery phase. Build caching from the start, not as an optimization later.
+**Detection:**
+- Average waypoints per debug path exceeds 20
+- More than 50% of waypoints are Read/Glob/Grep tools
+- KISS summaries are verbose and unfocused because they try to summarize 100+ waypoints
 
 ---
 
-### Pitfall 8: Tool Name Collisions Across MCP Servers
+### Pitfall 6: KISS Summary Quality (Haiku Generating Useless Summaries)
 
-**What goes wrong:** Two different MCP servers register tools with the same name (e.g., both have a `search` tool). Laminark's registry stores them as separate entries but cannot distinguish which one to route to.
+**What goes wrong:** When a debug path closes, Haiku generates a KISS (Keep It Simple, Stupid) summary. But the summary is either too vague ("Fixed a bug") or too verbose (regurgitates every waypoint). The summary fails to capture the actual insight: what was wrong, why it was hard to find, and what the fix was.
 
-**Why it happens:** Claude Code namespaces MCP tools as `mcp__<servername>__<toolname>`. But Laminark needs to understand tool capabilities to route effectively. If it strips the namespace for readability or matching ("the user needs search capabilities"), it loses the disambiguation. Conversely, if it keeps the full namespace, the routing model must understand that `mcp__github__search_repositories` and `mcp__jira__search_issues` are different tools for different purposes.
+**Why it happens:** The quality of the summary depends entirely on the quality of the input. If the debug path has 50 waypoints of mixed signal quality, Haiku cannot distinguish the key moments from the noise. The existing `compressObservations()` function (summarizer.ts) handles session summaries by grouping by kind -- but debug paths need a different compression strategy: problem statement, investigation highlights, root cause, fix, verification.
 
-**Laminark-specific risk:** The current self-referential filter uses `mcp__laminark__` prefix (line 70 of `handler.ts`). This shows the codebase already deals with MCP namespacing. But routing logic needs to go further: understand what each tool does, not just its name. Two tools named `search` from different servers are completely different capabilities.
+**Laminark-specific risk:** The existing summarizer (summarizer.ts) uses a purely rule-based approach with no LLM calls -- it extracts snippets and groups by kind. Debug path summaries will require an LLM call because the narrative structure (problem -> investigation -> root cause -> fix) requires understanding, not just grouping. This is the one place where a dedicated Haiku call is justified (per-path-closure, not per-observation). But the prompt must be carefully structured.
 
 **Prevention:**
-- Always store and reference tools by their full Claude Code namespace: `mcp__<server>__<tool>`
-- Store tool descriptions from the MCP server's tool listing alongside the name
-- Route based on descriptions, not names -- use embedding similarity between user intent and tool descriptions
-- Index tool descriptions in FTS5 for keyword matching, just as observations are indexed
+- Structure the KISS summary prompt to demand a specific format: `{problem: string, root_cause: string, fix: string, key_insight: string}`. Four fields, each 1-2 sentences. No freeform narrative
+- Pre-filter the waypoints before sending to Haiku for summary: include only the first error observation, any Write/Edit observations, the final successful verification, and any observations Haiku classified as "solution"
+- Set a strict token limit (256 tokens output). The existing `callHaiku()` takes `_maxTokens` parameter (haiku-client.ts line 66) even though it is currently unused with the Agent SDK
+- Include 2-3 few-shot examples in the system prompt showing good KISS summaries
+- Store the raw waypoint IDs alongside the summary so users can drill into details if the summary is insufficient
 
-**Detection (warning signs):**
-- Registry schema that stores `tool_name` without `server_name`
-- Routing logic that matches on short tool names rather than full namespaced names
-- No storage of tool descriptions
-
-**Phase guidance:** Registry design phase. The schema must include server name from the start.
+**Detection:**
+- KISS summaries averaging more than 500 characters (too verbose) or fewer than 50 characters (too vague)
+- Users never clicking on debug path summaries in the UI (suggests they are not useful)
+- Summaries containing phrases like "various changes were made" or "the issue was resolved" (vague filler)
 
 ---
 
-### Pitfall 9: Cold Start -- Empty Routing Memory
+### Pitfall 7: Visualization Clutter (Path Overlays Making Graph Unreadable)
 
-**What goes wrong:** When Laminark V2 first installs (or in a new project), the routing memory is empty. Without historical patterns, every routing decision is a guess. The system either suggests nothing (useless) or suggests everything (annoying).
+**What goes wrong:** Debug paths are rendered as connected sequences of nodes in the D3 graph visualization. Each path creates a chain of 5-15 connected nodes cutting across the existing semantic graph layout. Multiple overlapping paths create a visual mess that makes the underlying knowledge graph unusable.
 
-**Why it happens:** Conversation-driven routing learns from patterns: "when the user discusses X, they tend to use tool Y." On first run, there are zero patterns. The system must have a sensible default behavior that is useful from the very first session.
+**Why it happens:** D3 force-directed layouts position nodes based on edge connections. Long sequential chains (path waypoints) create strong linear forces that distort the layout. The existing graph has semantic clusters (related files, problems with solutions), and debug paths cut across these clusters because debugging involves touching many unrelated parts of the codebase.
 
-**Laminark-specific risk:** Laminark V1 already solved this for topic detection -- `AdaptiveThresholdManager` has `seedFromHistory()` (line 92 of `index.ts`). The same architectural pattern should apply to routing, but the cold-start problem is harder: topic detection has a mathematical default (use the static threshold), but routing has no mathematical default for "which tool should I suggest."
+**Laminark-specific risk:** The current D3 visualization (from the feature/d3-graph-viz branch) has per-type edge label toggles and entity type filters. Debug paths would need their own visual treatment: different edge style (dashed? colored?), collapsible path chains, and a toggle to show/hide all paths. The existing color scheme has 6 entity types. Adding debug-specific visual elements risks overwhelming the legend and filter controls.
 
 **Prevention:**
-- Define built-in routing heuristics that work without any learned data:
-  - "User mentions database" -> suggest database MCP tools if available
-  - "User mentions GitHub/PR/issue" -> suggest GitHub MCP tools if available
-  - "User mentions memory/context" -> suggest Laminark tools
-- Keyword-based routing first, pattern-learned routing second (progressive enhancement)
-- Set a minimum observation count before learned patterns override heuristics (e.g., need 10+ successful routing outcomes before the learned model takes over)
-- Display confidence levels with suggestions: "I think you might want [tool] (low confidence -- still learning your patterns)"
+- If using the separate-table approach (Pitfall 3 recommendation), debug paths are NOT graph entities at all -- they get their own dedicated view/panel rather than being overlaid on the semantic graph
+- If paths must appear in the graph, render them as a single compound node (collapsed by default) that expands on click, rather than as individual waypoint nodes
+- Provide a dedicated "Debug Timeline" view that shows paths as a timeline/waterfall chart rather than forcing them into the graph topology
+- Use the existing SSE system (sse.ts) to push path updates to a separate UI panel rather than the main graph
 
-**Detection (warning signs):**
-- Routing module that only uses learned patterns with no fallback
-- No heuristic/keyword-based routing as the default strategy
-- Missing "confidence" or "certainty" signal in routing output
-
-**Phase guidance:** Routing phase. Build the heuristic fallback FIRST, then add learning on top.
+**Detection:**
+- D3 graph layout computation time increases significantly after debug tracking is enabled
+- Users toggling debug-related filters off immediately after opening the graph
+- Graph node count exceeds 100 (the D3 force layout degrades above this threshold for readability)
 
 ---
 
-### Pitfall 10: Over-Suggestion Fatigue (The Clippy Problem)
+### Pitfall 8: Detection Latency vs. Path Accuracy (When to Open a Debug Path)
 
-**What goes wrong:** Laminark suggests tools too frequently, for conversations that do not need routing assistance. Users become annoyed and disable the feature or ignore all suggestions.
+**What goes wrong:** If debug detection happens in the background HaikuProcessor (30-second cycle), there is a significant delay between the first error signal and the debug path opening. By the time the system detects "this is a debug session," the developer has already made 10 more tool calls that were not captured as waypoints because the path was not yet active.
 
-**Why it happens:** Routing systems face an asymmetric feedback problem. Missing a useful suggestion is invisible (the user never knows), but an unwanted suggestion is immediately annoying. If the system optimizes for "never miss a routing opportunity," it will over-suggest. This is the same failure mode as Clippy, browser notification prompts, and autocomplete that fires on every keystroke.
+**Why it happens:** The current architecture has two processing paths: the synchronous hook handler (handler.ts, runs per tool call, ~10ms) and the asynchronous HaikuProcessor (haiku-processor.ts, runs every 30s in the MCP server). Debug detection accuracy requires Haiku classification (async), but path tracking requires real-time waypoint capture (sync). These are fundamentally at odds.
 
-**Laminark-specific risk:** Laminark's current SessionStart injection is already in Claude's context window. Adding tool suggestions to every SessionStart or every PostToolUse event compounds the context burden. Claude Code already has MCP Tool Search (announced January 2026) that handles tool discovery when tools would exceed 10% of context. If Laminark also suggests tools, the user gets double suggestions.
-
-**Prevention:**
-- Suggestion gating: only suggest when confidence exceeds a threshold (start high, tune down)
-- Rate limiting: maximum 1-2 tool suggestions per session, not per turn
-- Negative signal: if a user does not use a suggested tool within N turns, reduce confidence for that pattern
-- Opt-in escalation: start with zero active suggestions, only suggest when explicitly asked or when a high-confidence match occurs
-- Never duplicate what Claude Code's built-in Tool Search already does -- focus on cross-session intelligence (tools the user used yesterday in a similar context) rather than intra-session discovery
-
-**Detection (warning signs):**
-- Suggestions injected on every SessionStart
-- No rate limiting on suggestion frequency
-- No negative feedback mechanism (unused suggestions)
-- No comparison with Claude Code's native Tool Search feature
-
-**Phase guidance:** Routing phase. Define the suggestion policy (when to suggest, how often, how to back off) before implementing the suggestion mechanism.
-
----
-
-### Pitfall 11: Plugin Installation Path Resolution
-
-**What goes wrong:** When Laminark moves from project-scoped `.mcp.json` to global installation as a Claude Code plugin, the `command` path in the MCP server config stops resolving correctly. The `ensure-deps.sh` script (which currently uses relative paths from project root) breaks when the plugin is installed in a different location.
-
-**Why it happens:** Currently `.mcp.json` uses `"command": "bash", "args": ["./scripts/ensure-deps.sh", "node", "./dist/index.js"]` with paths relative to the project root. When installed as a global plugin, the plugin files are copied to a cache directory (Claude Code's plugin caching system). The relative paths `./scripts/` and `./dist/` would need to resolve from the cache location, not the original source.
-
-**Laminark-specific risk:** The `ensure-deps.sh` script detects the plugin root with `PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"` which works from the project directory but may fail in the cached plugin directory if `node_modules` needs to be installed there. Additionally, native modules like `better-sqlite3` and `sqlite-vec` require platform-specific compilation -- if the plugin is installed via npm and cached, the native modules need to match the target platform.
-
-**Consequences:**
-- Laminark MCP server fails to start after global installation
-- Plugin appears enabled but all tools are unavailable
-- Error only visible with `claude --debug`, invisible to normal users
+**Laminark-specific risk:** The hook handler is a separate process per invocation (no persistent state). The MCP server is long-running. If debug detection happens in the MCP server (via HaikuProcessor), waypoint capture must also happen there -- but the MCP server does not receive raw PostToolUse events, only observations stored by the hook.
 
 **Prevention:**
-- Use `${CLAUDE_PLUGIN_ROOT}` in all plugin configuration paths (this is Claude Code's official variable for plugin-relative paths)
-- Ensure `ensure-deps.sh` uses `${CLAUDE_PLUGIN_ROOT}` instead of `dirname $0` relative paths
-- Test the full install-from-npm -> cache -> start lifecycle, not just local development
-- Consider whether `npx @laminark/memory` is simpler than `bash ./scripts/ensure-deps.sh node ./dist/index.js` for the global case
-- Handle the native module compilation concern: bundle prebuilt binaries or use `npm rebuild` in the ensure-deps script
+- Use a two-tier detection strategy:
+  1. **Fast tier (hook handler, sync):** Rule-based pre-screening. Check if the current observation contains error patterns AND a recent observation (last 3) also contained error patterns for the same topic. If yes, create a `debug_path` row with status `potential`. This is cheap (one SQL query against recent observations)
+  2. **Slow tier (HaikuProcessor, async):** Confirm or deny the potential debug path using Haiku classification. Upgrade to `active` or downgrade to `false_positive`
+- Retroactively attach missed waypoints: when a path is confirmed as `active`, backfill the observations between the first error signal and the confirmation as waypoints. The observations are already in the database with timestamps -- just link them
+- Accept that the first 1-2 observations of a debug session may not be captured as waypoints in real-time. This is an acceptable tradeoff for avoiding Haiku calls on every tool use
 
-**Detection (warning signs):**
-- Hard-coded relative paths in `.mcp.json` or `plugin.json` MCP server configs
-- `ensure-deps.sh` not using `${CLAUDE_PLUGIN_ROOT}`
-- No integration test that installs the plugin from npm and starts it
-
-**Phase guidance:** Global installation phase (first V2 phase). Must work before anything else.
-
----
-
-### Pitfall 12: Stale Registry After Config Changes
-
-**What goes wrong:** The user adds or removes an MCP server in their config while a Claude Code session is active. Laminark's tool registry does not update, so it suggests tools that no longer exist or misses new tools.
-
-**Why it happens:** Claude Code supports `list_changed` notifications for dynamic tool updates within a running session. But config file changes (adding a new server to `~/.claude.json`) require restarting Claude Code. Laminark's registry would be populated at SessionStart and not refreshed. If the user restarts Claude Code (getting new MCP servers) but Laminark's cached registry is from a previous discovery run, the registry is stale.
-
-**Prevention:**
-- Re-run discovery on every SessionStart (but use mtime caching, see Pitfall 7)
-- Mark all registry entries with a `discovered_at` timestamp
-- On SessionStart, if any config file has changed since `discovered_at`, invalidate and re-scan
-- Consider subscribing to MCP `list_changed` notifications to update the registry mid-session
-- Add a manual refresh mechanism: a Laminark MCP tool like `refresh_registry` that forces re-scan
-
-**Detection (warning signs):**
-- Registry populated once and never refreshed
-- No `discovered_at` or `last_seen_at` timestamp on registry entries
-- No mechanism to detect config file changes
-
-**Phase guidance:** Discovery phase. Build invalidation alongside initial population.
-
----
-
-### Pitfall 13: Laminark Routing Conflicts with Claude Code's Native Tool Search
-
-**What goes wrong:** Claude Code (since January 2026) has its own MCP Tool Search feature that dynamically loads tools when they would exceed 10% of context window. Laminark's routing suggestions overlap or conflict with this built-in behavior, creating confusion -- the user gets tool recommendations from two different systems that may disagree.
-
-**Why it happens:** Tool Search is Anthropic's solution to the "too many tools" problem. It defers MCP tool loading and uses a search mechanism to find relevant tools on demand. If Laminark independently suggests tools that Tool Search has already surfaced (or worse, suggests tools that Tool Search has deliberately deferred), the two systems interfere.
-
-**Laminark-specific risk:** Laminark is itself an MCP server. Its tools (`recall`, `save_memory`, `query_graph`, etc.) are subject to Tool Search's deferral logic. If Laminark has >10 tools and Claude Code defers some of them, Laminark's routing cannot suggest its own deferred tools because they are not loaded in context.
-
-**Prevention:**
-- Focus Laminark routing on cross-session intelligence (tools used before in similar contexts) rather than intra-session discovery (what tools exist right now)
-- Do NOT duplicate Tool Search's job of listing available tools -- instead, provide memory-augmented context ("last time you worked on database migrations, you used mcp__postgres__query")
-- Keep Laminark's own tool count low (6-8 tools) to stay below Tool Search's deferral threshold
-- Test with `ENABLE_TOOL_SEARCH=true` to ensure Laminark works correctly when Tool Search is active
-
-**Detection (warning signs):**
-- Laminark routing that lists available tools (duplicates Tool Search)
-- More than 10 Laminark MCP tools registered
-- No testing with Tool Search enabled
-
-**Phase guidance:** Routing design phase. Must define how Laminark routing complements (not competes with) Tool Search.
+**Detection:**
+- Debug paths consistently missing their first 3-5 observations as waypoints
+- Users reporting "the debug path started in the middle of my investigation"
+- Time between first error observation and debug path creation exceeds 60 seconds
 
 ---
 
 ## Minor Pitfalls
 
-Issues that are annoying but not blocking.
+Issues that cause friction or technical debt but are recoverable.
 
 ---
 
-### Pitfall 14: Environment Variable Expansion in Config Parsing
+### Pitfall 9: Entity Type Taxonomy Rigidity
 
-**What goes wrong:** `.mcp.json` files use `${VAR}` syntax for environment variable expansion. Laminark reads the file and stores the literal string `${API_KEY}` instead of the expanded value, making tool metadata contain unexpanded variables.
+**What goes wrong:** The existing entity types (types.ts) are a fixed const array with a comment "FIXED -- no other types allowed." Adding DebugPath or DebugStep as entity types requires modifying this array, updating SQL CHECK constraints in migrations, updating the write-quality-gate.ts confidence thresholds, updating the D3 color scheme, and updating the graph-stats.ts query.
 
-**Prevention:**
-- Implement the same expansion rules as Claude Code: `${VAR}` expands to env value, `${VAR:-default}` uses default if unset
-- If a required variable is not set and has no default, log a warning and skip that server (do not crash)
-- Only expand variables that Laminark needs for identification (server command/url); do NOT expand secrets into the database
-
-**Phase guidance:** Config parsing phase.
+**Prevention:** If the separate-table approach is adopted (Pitfall 3), this is a non-issue. If entity types must be extended, batch all type additions into a single migration and update all downstream consumers in the same commit. The fuzzy-dedup.ts, constraints.ts, and write-quality-gate.ts files all reference entity types and need updates.
 
 ---
 
-### Pitfall 15: MCP Tool Description Token Budget
+### Pitfall 10: Temporal Decay Mismatch for Debug Edges
 
-**What goes wrong:** Laminark stores full tool descriptions for routing and they consume excessive space in the database or in context injection.
+**What goes wrong:** The existing temporal decay (temporal-decay.ts) uses a 30-day half-life with 180-day max age. Debug path edges should decay much faster (debug from 3 months ago is rarely relevant) but the current system applies uniform decay to all edges. Old debug paths survive in the graph long after they are useful.
 
-**Prevention:**
-- Truncate tool descriptions to 200 characters in the registry (enough for routing, not a full manual)
-- When injecting tool suggestions into context, use one-line summaries, not full descriptions
-- Follow the existing `estimateTokens` / `TOKEN_BUDGET` pattern from `src/mcp/token-budget.ts`
-
-**Phase guidance:** Registry phase.
+**Prevention:** Add a `decay_class` field to edges (or use edge type to determine decay parameters). Debug-related edges get a 7-day half-life and 30-day max age. The `applyTemporalDecay()` function (temporal-decay.ts lines 95-149) should branch on edge type to select decay parameters.
 
 ---
 
-### Pitfall 16: Windows Path Handling in Config Discovery
+### Pitfall 11: Duplicate Debug Paths for the Same Issue
 
-**What goes wrong:** Config file paths use Unix-style paths (`~/.claude/settings.json`). On Windows, the home directory is different and path separators are backslashes.
+**What goes wrong:** A developer encounters the same bug twice (perhaps after a merge or revert). The system creates two separate debug paths because it has no mechanism to link the current error pattern to a previously resolved path. The same root cause gets debugged and documented twice.
 
-**Prevention:**
-- Use `os.homedir()` (already done in `src/shared/config.ts`) instead of hardcoding `~`
-- Use `path.join()` for all config file paths
-- Note that Claude Code on Windows requires `cmd /c` wrappers for npx commands -- Laminark should not need to replicate this since it reads configs rather than executing them, but should be aware of it for documentation
-
-**Phase guidance:** Global installation phase.
+**Prevention:** Before creating a new debug path, check if any resolved path in the last 7 days has a similar problem statement (using the existing Jaccard similarity from similarity.ts or semantic search from the embedding store). If a match is found, reopen the existing path instead of creating a new one. This also enables a "recurring bugs" metric.
 
 ---
 
-### Pitfall 17: Managed MCP Configuration Override in Enterprise Environments
+### Pitfall 12: SSE Broadcast Storm During Active Debugging
 
-**What goes wrong:** In enterprise environments, `managed-mcp.json` takes exclusive control of MCP servers. Laminark discovers tools from user config files but those tools are actually blocked by the managed configuration.
+**What goes wrong:** The HaikuProcessor broadcasts `entity_updated` SSE events for every entity it persists (haiku-processor.ts lines 181-188). If debug tracking creates 10+ entities per debug session and there are multiple sessions per hour, the SSE channel floods the D3 UI with update events, causing excessive re-renders.
 
-**Prevention:**
-- Check for managed config at `/Library/Application Support/ClaudeCode/managed-mcp.json` (macOS) or `/etc/claude-code/managed-mcp.json` (Linux)
-- If managed config exists, ONLY discover tools from managed servers plus `allowedMcpServers` / `deniedMcpServers` in managed settings
-- Log a warning when enterprise management is detected: "Managed MCP configuration detected -- discovery limited to approved servers"
-- Also check `allowedMcpServers` and `deniedMcpServers` in managed settings for allowlist/denylist filtering
-
-**Phase guidance:** Discovery phase (handle as a variant, not an afterthought).
-
----
-
-### Pitfall 18: Intent Classification Cascading Errors
-
-**What goes wrong:** A single misclassification in conversation intent analysis causes the router to send the user down the wrong tool path. The wrong tool's output then feeds back into the conversation, compounding the error -- the next routing decision is based on corrupted context.
-
-**Prevention:**
-- Never auto-invoke tools based on routing classification; only suggest (require user or Claude confirmation)
-- Include an "uncertain" / "no match" classification that results in no suggestion (safe default)
-- Limit routing influence to tool metadata / context enrichment, not tool invocation
-- Log all routing decisions for retrospective analysis
-
-**Phase guidance:** Routing implementation phase.
+**Prevention:** Batch debug-related SSE events into a single `debug_path_updated` event per path update cycle. The SSE broadcast function (sse.ts) already supports custom event types. The UI should handle `debug_path_updated` with a debounced re-render (500ms cooldown).
 
 ---
 
 ## Phase-Specific Warnings
 
-| Phase Topic | Likely Pitfall | Severity | Mitigation |
-|-------------|---------------|----------|------------|
-| Global installation | Path resolution (#11), ensure-deps script (#11), Windows paths (#16) | Critical | Use `${CLAUDE_PLUGIN_ROOT}`, test full install lifecycle |
-| Config parsing | Format confusion (#2), silent override (#3), env expansion (#14) | Critical | Per-file-type parsers with Zod schemas, match `JSON.parse` behavior |
-| Registry design | Ghost tools (#1), scope precedence (#4), name collisions (#8) | Critical | Scope-aware schema with full MCP namespaces, local>project>user precedence |
-| Discovery implementation | Hook performance (#7), stale registry (#12), managed config (#17) | Moderate | mtime caching, invalidation timestamps, enterprise detection |
-| Routing implementation | Cold start (#9), over-suggestion (#10), Tool Search conflict (#13), cascading errors (#18) | Moderate | Heuristic fallbacks, rate limiting, complement not compete with Tool Search |
-| Migration / upgrade | Schema conflicts (#6), stdout contract (#5) | Critical | CREATE TABLE IF NOT EXISTS only, upgrade-path tests, stdout assertion tests |
+| Phase Topic | Likely Pitfall | Mitigation |
+|-------------|---------------|------------|
+| Data model design | Pitfall 3 (graph pollution) | Use separate table for debug paths, not graph entities |
+| Detection heuristics | Pitfall 1 (false positives) | State machine with temporal confirmation, not keyword matching |
+| Haiku integration | Pitfall 2 (call volume) | Extend existing classifier prompt, do NOT add new agent module |
+| State persistence | Pitfall 4 (cross-session) | All state in SQLite, hook handler has no persistent memory |
+| Waypoint capture | Pitfall 5 (path noise) | Filter by observation kind, cap at 20-30 per path |
+| Waypoint capture | Pitfall 8 (detection latency) | Two-tier detection: rule-based fast path + Haiku confirmation |
+| KISS summaries | Pitfall 6 (quality) | Structured output format, pre-filtered waypoints, few-shot examples |
+| UI integration | Pitfall 7 (visualization clutter) | Separate debug timeline view, NOT graph overlay |
+| UI integration | Pitfall 12 (SSE storms) | Batched debug_path_updated events with debounce |
+| Graph maintenance | Pitfall 10 (temporal decay) | Per-type decay parameters, faster decay for debug edges |
+| Edge cases | Pitfall 11 (duplicate paths) | Similarity check against recent resolved paths before creating new |
+| Schema changes | Pitfall 9 (taxonomy rigidity) | Prefer separate table; if extending types, batch all updates |
 
----
+## Integration Risk Matrix
 
-## Integration-Specific Pitfalls (Laminark V1 -> V2)
+These risks are specific to Laminark's architecture and would not apply to a greenfield system.
 
-These pitfalls are specific to adding V2 features to the existing Laminark architecture.
-
-### The Hook Handler Import Chain Must Stay Light
-
-The hook handler (`src/hooks/handler.ts`) is Laminark's performance-critical path. It currently imports ONLY storage modules. Any V2 module imported into this chain (config parsers, registry queries, routing logic) must:
-- Not import `@modelcontextprotocol/sdk` (adds ~50ms cold start)
-- Not import `zod` in the hot path (validate offline, query validated data)
-- Not use `console.log` anywhere in the import chain
-- Complete within the existing ~100ms performance budget
-
-### The Database Is Shared Between Two Processes
-
-The MCP server process and hook handler process both access the same SQLite database. V1 handles this with WAL mode and busy_timeout. V2 adds more writes (tool registry updates, routing pattern storage). The busy_timeout of 5000ms (`src/shared/config.ts` line 58) should remain sufficient, but V2 must not add long-running write transactions that block the hook handler.
-
-### The ProjectHash Is Not the Only Scope Identifier
-
-V1 uses `projectHash` as the sole scope key. V2 needs to distinguish between user-scope (no project hash -- available everywhere), project-scope (needs project hash), and local-scope (needs project hash + user identity). This does not mean changing V1's schema, but V2 tables need a richer scope model beyond just `project_hash`.
-
-### Session Context Injection Budget Is Already Tight
-
-The current context injection budget is 6000 characters / ~2000 tokens (`src/context/injection.ts` line 12). Tool suggestions must fit within this budget OR use a separate injection mechanism. Adding a "Available tools for this project" section to SessionStart context will compete with observation summaries, session context, and decision history for the same token budget. Prioritize memory context over tool suggestions -- the user came to this project to work, not to read a tool catalog.
-
-### Self-Referential Loop Risk with Routing
-
-If Laminark routes tool suggestions through its own MCP tools (e.g., a `suggest_tools` tool), the hook handler's self-referential filter (`mcp__laminark__` prefix on line 70) will correctly skip capturing observations about Laminark's own suggestions. But if routing logic triggers via hooks (e.g., PostToolUse of a non-Laminark tool triggers a routing evaluation), care must be taken to ensure the routing evaluation itself does not generate observations that trigger further routing evaluations. This is an infinite-loop risk.
-
----
+| Integration Point | Risk Level | Specific Concern |
+|-------------------|------------|------------------|
+| PostToolUse hook handler | HIGH | Hook runs as subprocess with no persistent state -- all debug detection state must be in SQLite |
+| HaikuProcessor pipeline | HIGH | Adding calls increases per-observation processing time; must extend existing classifier, not add calls |
+| Entity type taxonomy | MEDIUM | Fixed array with CHECK constraints; prefer separate table to avoid ripple changes |
+| SaveGuard duplicate detection | LOW | Debug waypoints should bypass duplicate detection (same error recurring IS the signal) |
+| Research buffer | LOW | Debug waypoints could reuse the research buffer pattern for low-signal tool calls |
+| D3 visualization | MEDIUM | New entity types or edge types require color scheme, filter, and legend updates |
+| SSE broadcast | MEDIUM | High-frequency debug updates can flood the UI; needs batching |
+| Temporal decay | LOW | Uniform decay parameters need per-type branching for debug edges |
+| Session lifecycle | MEDIUM | SessionEnd must NOT close debug paths; needs `suspended` status |
+| Observation classifier | HIGH | Debug signal must be part of existing classification, not a separate call |
 
 ## Sources
 
-- [Claude Code MCP Documentation](https://code.claude.com/docs/en/mcp) -- Official scope hierarchy, config formats, precedence rules (HIGH confidence)
-- [Claude Code Hooks Guide](https://code.claude.com/docs/en/hooks-guide) -- Hook lifecycle, settings locations, matcher system (HIGH confidence)
-- [Claude Code Plugins Reference](https://code.claude.com/docs/en/plugins-reference) -- Plugin manifest, `CLAUDE_PLUGIN_ROOT`, caching behavior (HIGH confidence)
-- [GitHub Issue #4938: Multiple mcpServers sections silently override](https://github.com/anthropics/claude-code/issues/4938) -- Silent override bug with duplicate mcpServers sections (HIGH confidence)
-- [GitHub Issue #4976: Documentation incorrect about config location](https://github.com/anthropics/claude-code/issues/4976) -- Documentation error about config file locations (HIGH confidence)
-- [GitHub Issue #2731: npx MCP servers fail after update](https://github.com/anthropics/claude-code/issues/2731) -- Path resolution failures after Claude Code updates (HIGH confidence)
-- [MCP and Context Overload (EclipseSource)](https://eclipsesource.com/blogs/2026/01/22/mcp-context-overload/) -- Too many tools degrades performance (MEDIUM confidence)
-- [MCP Tool Overload Prevention (Lunar.dev)](https://www.lunar.dev/post/why-is-there-mcp-tool-overload-and-how-to-solve-it-for-your-ai-agents) -- Tool naming collisions, ghost tools (MEDIUM confidence)
-- [LLM Ignoring MCP Tools (Arsturn)](https://www.arsturn.com/blog/why-your-llm-is-ignoring-your-mcp-tools-and-how-to-fix-it) -- Tool hallucination, selection degradation after 40+ tools (MEDIUM confidence)
-- [Intent Classification in Agentic LLM Apps](https://medium.com/@mr.murga/enhancing-intent-classification-and-error-handling-in-agentic-llm-applications-df2917d0a3cc) -- Routing misclassification, cascading errors (MEDIUM confidence)
-- [AI Agent Routing Best Practices (Patronus)](https://www.patronus.ai/ai-agent-development/ai-agent-routing) -- Over-suggestion, hybrid routing patterns (MEDIUM confidence)
-- [MCP Tool Search announcement](https://www.atcyrus.com/stories/mcp-tool-search-claude-code-context-pollution-guide) -- Claude Code's native tool discovery (MEDIUM confidence)
-- [Too Many Tools Problem](https://demiliani.com/2025/09/04/model-context-protocol-and-the-too-many-tools-problem/) -- Tool count limits, 400-500 tokens per tool definition (MEDIUM confidence)
-- Laminark source code analysis: `src/index.ts`, `src/hooks/handler.ts`, `src/shared/config.ts`, `src/context/injection.ts`, `src/hooks/admission-filter.ts`, `src/hooks/session-lifecycle.ts`, `src/mcp/server.ts`, `scripts/ensure-deps.sh` (HIGH confidence -- direct code reading)
-
----
-*Pitfalls research for Laminark V2: Global Tool Intelligence*
-*Researched: 2026-02-10*
+- Direct source analysis of Laminark codebase (all files referenced by path above)
+- Existing HaikuProcessor architecture (src/intelligence/haiku-processor.ts)
+- Hook handler pipeline (src/hooks/handler.ts)
+- Graph schema and constraints (src/graph/schema.ts, src/graph/constraints.ts, src/graph/types.ts)
+- Temporal decay system (src/graph/temporal-decay.ts)
+- Write quality gate (src/graph/write-quality-gate.ts)
+- Haiku client architecture (src/intelligence/haiku-client.ts)
+- Session lifecycle (src/hooks/session-lifecycle.ts)
+- Admission filter (src/hooks/admission-filter.ts)
+- Summarizer (src/curation/summarizer.ts)

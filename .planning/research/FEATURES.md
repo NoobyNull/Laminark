@@ -1,661 +1,384 @@
-# Feature Landscape: Tool Discovery, Registry, and Conversation-Driven Routing
+# Feature Landscape: Debug Resolution Paths
 
-**Domain:** Global tool intelligence layer for Claude Code (Laminark V2)
-**Researched:** 2026-02-10
-**Focus:** NEW features only -- tool discovery, scope-aware registry, conversation-driven routing
-**Confidence:** MEDIUM-HIGH (Claude Code platform mechanics verified via official docs; routing intelligence patterns well-established but novel in this application context)
+**Domain:** Automatic debug journey tracking within a knowledge graph memory system
+**Researched:** 2026-02-14
+**Focus:** NEW features only -- automatic debug session detection, waypoint capture, path-as-graph-entity, resolution detection, KISS summary generation, path visualization overlay, multi-layer dimensions
+**Confidence:** MEDIUM-HIGH (debug detection heuristics are well-understood from observability tooling; novel application to LLM coding assistant context tracking)
 
 ---
 
-## Context: What Already Exists in Laminark V1
+## Context: What Already Exists in Laminark
 
-These features are BUILT and SHIPPING. V2 features build on this infrastructure:
+These features are BUILT and SHIPPING. Debug resolution paths build directly on this infrastructure:
 
-- SQLite database with WAL mode, FTS5, sqlite-vec (single file at `~/.claude/plugins/cache/laminark/data/data.db`)
-- Project scoping via SHA-256 hash of canonical project path (`getProjectHash()`)
-- `project_metadata` table tracking project_hash -> project_path -> last_seen_at
-- Observation pipeline: hooks -> admission filter -> save guard -> observations table
-- Knowledge graph: `graph_nodes` (6 entity types) + `graph_edges` (8 relationship types)
-- Embedding infrastructure: ONNX local model + piggyback, background embedding loop
-- Session lifecycle: SessionStart context injection, SessionEnd summaries, Stop hook
-- MCP tools: recall, save_memory, topic_context, query_graph, graph_stats, status
-- Web UI: graph visualization, timeline, SSE broadcasts
-- Hook handler: PostToolUse/PostToolUseFailure/SessionStart/SessionEnd/Stop
+- **Observation pipeline:** PostToolUse hooks capture every tool invocation with semantic summaries, routed through `capture.ts` and `handler.ts`
+- **Haiku classification:** Background processor classifies observations as `noise | signal` and then `discovery | problem | solution` via `haiku-classifier-agent.ts`
+- **Knowledge graph:** `graph_nodes` (6 entity types: Project, File, Decision, Problem, Solution, Reference) + `graph_edges` (8 relationship types including `solved_by`, `caused_by`, `preceded_by`)
+- **Semantic signal extraction:** `piggyback-extractor.ts` does rule-based sentiment detection (positive/negative/neutral/technical) and entity extraction in <10ms
+- **Session tracking:** Every observation has a `session_id`, sessions have start/end lifecycle hooks
+- **Haiku entity extraction + relationship inference:** Background processing pipeline that extracts entities and infers relationships from observation content
+- **Context stashing:** Topic-scoped context snapshots with observation references
+- **D3 graph visualization:** Interactive graph with filters, legend, edge label toggles, SSE live updates
+- **Adaptive threshold system:** EWMA-based distance tracking for topic shift detection
 
-**Key infrastructure constraint:** Laminark runs as an MCP server per-project (spawned by Claude Code when the project is opened). It has NO global daemon. The hook handler (`handler.ts`) opens its own database connection per invocation. All data flows through a single shared SQLite database.
+**Key principle driving this feature:** The knowledge graph captures the full debug journey (every attempt, failure, reasoning), while the codebase only gets the clean KISS fix. Paths are the directed trails through this graph.
+
+**Key infrastructure constraint:** All processing must be non-blocking. Haiku calls are batched in background. Hook handler processes synchronously and must complete fast. The existing pattern of "capture now, enrich later via HaikuProcessor" must be preserved.
 
 ---
 
 ## Table Stakes
 
-Features users expect from a "global tool intelligence layer." Missing these means the product feels broken or pointless.
+Features that are essential for debug resolution paths to function. Without these, the feature has no value.
 
-### TS-1: Global Installation (Zero-Config Presence)
+### TS-1: Automatic Debug Session Detection
 
-**Why Expected:** The entire premise of V2 is "open any project, Laminark is there." If users must manually configure `.mcp.json` per project, this is just V1 with extra steps. Claude Code supports `user` scope MCP servers in `~/.claude.json` that are available across all projects.
+| Aspect | Detail |
+|--------|--------|
+| **Why Expected** | The entire value proposition is "vibe tool" -- zero manual intervention. If the user has to signal "I'm debugging now," the feature fails its core promise. |
+| **Complexity** | Medium |
+| **Depends On** | Existing Haiku classifier (`problem` classification), existing sentiment detection (`negative` sentiment in `piggyback-extractor.ts`), existing observation pipeline |
 
-**Complexity:** LOW
+**What it looks like in practice:**
 
-**Dependencies on Existing Laminark:**
-- Existing `getDatabaseConfig()` already resolves to `~/.claude/plugins/cache/laminark/data/data.db` (global path)
-- Existing `getProjectHash(process.cwd())` already scopes data per-project
-- Existing hook handler already opens its own DB connection per invocation
+Detection must work from signals already flowing through the system. The existing classifier already tags observations as `problem` -- that is the primary trigger. Secondary signals:
 
-**What This Actually Means:**
-- Laminark MCP server configured at `user` scope in `~/.claude.json` (not per-project `.mcp.json`)
-- Hook configuration at `~/.claude/settings.json` (global hooks, not per-project)
-- On session start in ANY project, Laminark automatically registers the project in `project_metadata`
-- No per-project setup required. It just works.
+1. **Haiku classification trigger (primary):** When `classifyWithHaiku()` returns `classification: "problem"`, that observation is a candidate debug path entry point. Two or more `problem` observations within a time/sequence window strongly indicate active debugging.
 
-**User Experience:**
-```
-# One-time setup:
-claude mcp add --scope user --transport stdio laminark -- node /path/to/laminark/dist/index.js
+2. **Sentiment-based fast trigger (secondary):** The existing `piggyback-extractor.ts` detects `negative` sentiment from words like "error", "failed", "broken", "bug", "crash". This runs in <10ms and provides an early signal before Haiku classification completes.
 
-# After that, in ANY project:
-$ claude
-[Laminark] Session context loaded. 3 tools available for this project.
-```
+3. **Tool pattern trigger (tertiary):** Repeated Bash commands with error output, followed by Edit/Write, followed by more Bash (the classic "run-fail-fix-run" cycle) are detectable from `tool_name` sequences already captured in observations.
 
-**Notes:** This is nearly free -- Laminark's architecture already assumes a global database. The shift is configuration scope, not code architecture. The existing `.mcp.json` in the Laminark repo root is a development convenience, not the production install path.
+4. **Error output detection (tertiary):** Bash tool responses containing stack traces, error codes, or failure messages. The existing `tool_response` field in `PostToolUsePayload` provides this data.
 
----
-
-### TS-2: Tool/Skill Discovery (Know What's Available)
-
-**Why Expected:** If Laminark claims to route users to tools, it must first know what tools exist. Claude Code's ecosystem provides multiple discovery surfaces: MCP servers (via `/mcp`), plugins (via `/plugin`), slash commands (via `/help`), and agent skills. A registry that doesn't know about available tools is useless.
-
-**Complexity:** MEDIUM
-
-**Dependencies on Existing Laminark:**
-- Existing `project_metadata` table for project scoping
-- Existing hook handler receives `tool_name` on every PostToolUse event
-- Existing observation capture pipeline (can capture tool usage patterns)
-- SessionStart hook receives `session_id` and `cwd`
-
-**Discovery Sources (ranked by reliability):**
-
-| Source | What It Reveals | How to Access | Reliability |
-|--------|----------------|---------------|-------------|
-| PostToolUse hook events | Every tool Claude actually uses, with full input/output | Already captured -- `tool_name` field in hook JSON | HIGH -- ground truth, tools that actually execute |
-| `.mcp.json` files (project scope) | MCP servers configured for specific projects | Read file at `$CLAUDE_PROJECT_DIR/.mcp.json` | HIGH -- explicit configuration |
-| `~/.claude.json` (user scope) | Globally configured MCP servers | Read file at `~/.claude.json` | HIGH -- explicit configuration |
-| `.claude/commands/` directory | Slash commands available in project | Glob `$CLAUDE_PROJECT_DIR/.claude/commands/**/*.md` | HIGH -- filesystem presence |
-| `~/.claude/commands/` directory | Global slash commands | Glob `~/.claude/commands/**/*.md` | HIGH -- filesystem presence |
-| `.claude/skills/` directory | Agent skills available in project | Glob `$CLAUDE_PROJECT_DIR/.claude/skills/**/SKILL.md` | HIGH -- filesystem presence |
-| `~/.claude/skills/` directory | Global agent skills | Glob `~/.claude/skills/**/SKILL.md` | HIGH -- filesystem presence |
-| Installed plugins | Plugin-bundled skills, commands, MCP servers | Read `~/.claude/plugins/installed_plugins.json` | HIGH -- explicit installation records |
-| MCP tool call patterns | Which MCP tools are used, how often, in what context | Derived from PostToolUse observations over time | MEDIUM -- requires accumulation |
-
-**What Gets Stored:**
-A new `tool_registry` table:
-```sql
-CREATE TABLE tool_registry (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,           -- e.g., "mcp__gsd__plan_phase", "/gsd:plan-phase"
-  tool_type TEXT NOT NULL,      -- 'mcp_tool', 'slash_command', 'skill', 'plugin'
-  scope TEXT NOT NULL,          -- 'global', 'project', 'plugin'
-  source TEXT NOT NULL,         -- where discovered: 'hook_observation', 'config_scan', 'plugin_manifest'
-  project_hash TEXT,            -- NULL for global tools, specific hash for project-scoped
-  description TEXT,             -- human-readable description (from SKILL.md frontmatter, tool schema, etc.)
-  capability_tags TEXT,         -- JSON array: ["planning", "debugging", "testing"]
-  usage_count INTEGER DEFAULT 0,
-  last_used_at TEXT,
-  discovered_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-```
-
-**User Experience:**
-Laminark knows: "In this project, you have: GSD (global plugin), Playwright MCP (project config), 3 custom slash commands, and 2 agent skills. Across 47 past sessions, you've used GSD 23 times and Playwright 8 times."
-
----
-
-### TS-3: Scope-Aware Tool Resolution
-
-**Why Expected:** Suggesting a project-specific tool when working in a different project is worse than suggesting nothing. Scope awareness is fundamental to not being annoying.
-
-**Complexity:** MEDIUM
-
-**Dependencies on Existing Laminark:**
-- Existing `getProjectHash()` for project identification
-- Existing `project_metadata` table
-- Existing pattern of filtering by `project_hash` in all queries
-
-**Scope Hierarchy (matches Claude Code's own hierarchy):**
-
-| Scope | Visibility | Storage | Example |
-|-------|------------|---------|---------|
-| **Global** | All projects, always | `tool_registry WHERE scope = 'global'` | GSD plugin (installed at `~/.claude/`), Context7 MCP server |
-| **Project** | Only in the originating project | `tool_registry WHERE scope = 'project' AND project_hash = ?` | Custom `/deploy` command in `.claude/commands/deploy.md` |
-| **Plugin** | Wherever the plugin is enabled | `tool_registry WHERE scope = 'plugin' AND (project_hash IS NULL OR project_hash = ?)` | Plugin installed at user scope vs project scope |
-
-**Resolution Logic:**
-```
-On SessionStart for project P:
-  available_tools =
-    (global tools)
-    UNION (project tools WHERE project_hash = hash(P))
-    UNION (plugin tools WHERE plugin enabled for P or globally)
-```
-
-**Critical Rule:** NEVER suggest a project-scoped tool from project A when working in project B. The tool_registry query MUST filter by current project_hash for project-scoped entries.
-
-**User Experience:**
-```
-# In project A (has Playwright MCP):
-User: "I need to test the login flow"
-Laminark: [Knows Playwright is available] -> suggests browser testing approach
-
-# In project B (no Playwright):
-User: "I need to test the login flow"
-Laminark: [Knows only standard tools available] -> suggests unit test approach
-```
-
----
-
-### TS-4: Tool Usage Tracking
-
-**Why Expected:** Routing decisions need data. Which tools does this user actually use? Which tools solve which kinds of problems? Without usage history, routing is just guessing.
-
-**Complexity:** LOW
-
-**Dependencies on Existing Laminark:**
-- Existing PostToolUse hook already captures `tool_name`, `tool_input`, and `tool_response`
-- Existing observation pipeline with session tracking
-- Existing admission filter (already classifies tool significance)
-
-**What Changes:**
-The existing PostToolUse handler already observes every tool call. V2 adds a lightweight side-effect: increment `usage_count` and update `last_used_at` in the `tool_registry` for each tool call. Also record the task context (derived from recent observations) to build tool-context associations.
-
-New table for context association:
-```sql
-CREATE TABLE tool_usage_context (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  tool_name TEXT NOT NULL,
-  project_hash TEXT NOT NULL,
-  session_id TEXT,
-  context_embedding BLOB,       -- embedding of the conversation context when tool was used
-  context_summary TEXT,          -- short text: "debugging auth flow", "planning feature X"
-  outcome TEXT,                  -- 'success', 'failure', 'unknown'
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-```
-
-**User Experience:** Invisible. This is infrastructure that powers routing suggestions. Users never interact with it directly.
-
----
-
-### TS-5: Basic Tool Suggestion on Session Start
-
-**Why Expected:** If Laminark knows what tools are available and what the user has been working on, the minimum viable intelligence is: "Here are tools relevant to your current context." This is table stakes because the existing SessionStart injection already surfaces prior context -- adding tool awareness is the natural extension.
-
-**Complexity:** MEDIUM
-
-**Dependencies on Existing Laminark:**
-- Existing `assembleSessionContext()` in `context/injection.ts`
-- Existing `formatContextIndex()` with sections (changes, decisions, findings, references)
-- Tool registry (TS-2)
-- Scope resolution (TS-3)
-
-**What Changes:**
-Add a new section to `assembleSessionContext()` output:
+**Detection state machine:**
 
 ```
-[Laminark - Session Context]
-
-## Previous Session
-<existing summary>
-
-## Recent Changes
-<existing>
-
-## Available Tools
-- /gsd:plan-phase - Plan implementation phases (used 23x)
-- mcp__playwright__browser_screenshot - Browser testing (project-specific)
-- /deploy - Custom deploy workflow (project-specific)
+IDLE -> SUSPECTED (first problem signal)
+SUSPECTED -> ACTIVE (second signal within window OR Haiku confirms)
+ACTIVE -> ACTIVE (more problem/solution signals)
+ACTIVE -> RESOLVED (resolution detected, see TS-3)
+ACTIVE -> ABANDONED (timeout or session end without resolution)
+SUSPECTED -> IDLE (no confirmation within window, discard)
 ```
 
-**Critical constraint:** This must fit within the existing 6000-char token budget (`MAX_CONTEXT_CHARS`). Tool suggestions compete with observations for context window real estate. Keep tool list to top 5-7 most relevant, not an exhaustive dump.
+**Implementation approach:** A lightweight `DebugDetector` class that runs in the hook handler's synchronous path using only rule-based signals (sentiment, tool patterns). Haiku confirmation happens asynchronously in the background processor. This preserves the "capture fast, enrich later" pattern.
 
-**User Experience:**
+### TS-2: Waypoint Capture (Breadcrumb Trail)
+
+| Aspect | Detail |
+|--------|--------|
+| **Why Expected** | A debug path without waypoints is just a start and end marker. The journey between is the entire value. |
+| **Complexity** | Low |
+| **Depends On** | TS-1 (detection), existing observation pipeline, existing graph mutation functions (`upsertNode`, `insertEdge`) |
+
+**What gets captured as waypoints:**
+
+Once a debug session is ACTIVE, every observation becomes a potential waypoint. The system must capture:
+
+- **Error observations:** The actual errors encountered (from Bash failures, PostToolUseFailure events)
+- **Hypothesis observations:** What was tried (Edit/Write tool invocations during active debugging)
+- **Investigation observations:** What was examined (Read/Grep/Glob during active debugging -- note: these currently route to research buffer, not observations. Need to also track them as waypoints or reference the research buffer)
+- **Dead ends:** Attempts that did not resolve the problem (detected by continued problem signals after a fix attempt)
+
+Each waypoint is an observation ID linked to the path. The waypoint captures are already happening via the existing observation pipeline. The new work is marking which observations belong to a debug path and in what order.
+
+**Data model:** A waypoint is not a new entity -- it is a reference from a path entity to an existing observation, with ordering metadata. This is the KISS approach: reuse existing observations, add path-level structure on top.
+
+### TS-3: Resolution Detection
+
+| Aspect | Detail |
+|--------|--------|
+| **Why Expected** | Without knowing when debugging ended successfully, you cannot generate a summary. The "next time just do X" requires knowing what X was. |
+| **Complexity** | Medium |
+| **Depends On** | TS-1 (detection), existing Haiku classifier (`solution` classification), existing sentiment detection |
+
+**Resolution signals (ordered by reliability):**
+
+1. **Haiku classifies as `solution`:** Most reliable. The existing classifier already distinguishes solutions from problems and discoveries. A `solution` observation during an ACTIVE debug session is a strong resolution signal.
+
+2. **Positive sentiment shift:** Sentiment changes from `negative` to `positive` (words like "works", "fixed", "resolved", "passed" in `POSITIVE_WORDS` set). Already computed by `piggyback-extractor.ts`.
+
+3. **Test pass after test fail:** A Bash observation with test output showing passes after a previous observation showed failures. Detectable from tool response content.
+
+4. **Explicit user confirmation:** User says something like "that fixed it" or "working now." Detectable from UserMessage hook events if available, or from observation content.
+
+5. **Activity pattern change:** Debugging activity (repeated error-fix cycles) stops and shifts to different work. This is the weakest signal -- could mean abandoned rather than resolved.
+
+**Resolution vs. abandonment:** If a debug session ends without a clear solution signal (no `solution` classification, no positive sentiment shift), it should be marked ABANDONED, not RESOLVED. Abandoned paths are still valuable -- they record dead ends for future reference.
+
+### TS-4: Path as Graph Entity
+
+| Aspect | Detail |
+|--------|--------|
+| **Why Expected** | Paths must live in the knowledge graph to be searchable, visualizable, and connected to other entities. A path that exists only in a separate table is invisible to the graph. |
+| **Complexity** | Medium |
+| **Depends On** | TS-1, TS-2, TS-3, existing graph schema and types system |
+
+**Graph integration approach:**
+
+The existing entity types are `Project | File | Decision | Problem | Solution | Reference`. The existing relationship types include `solved_by`, `caused_by`, `preceded_by`. These are already well-suited for debug paths:
+
+- A **Path** is a new entity type (adds to the 6 existing types, making 7)
+- A path entity CONNECTS to existing Problem and Solution entities via existing relationship types
+- Waypoints are represented as `preceded_by` edges between observation-linked entities along the path
+- The path entity's `metadata` field stores: status (active/resolved/abandoned), start time, end time, waypoint count, summary
+
+**Entity type extension:**
+
+```typescript
+// Current: 'Project' | 'File' | 'Decision' | 'Problem' | 'Solution' | 'Reference'
+// New:     'Project' | 'File' | 'Decision' | 'Problem' | 'Solution' | 'Reference' | 'Path'
 ```
-$ claude
-[Laminark - Session Context]
 
-## Previous Session
-Implemented auth middleware, fixed JWT expiration bug.
+**Relationship usage for paths:**
 
-## Available Tools
-- /gsd:plan-phase (global, 23 uses) - structured feature planning
-- /gsd:debug (global, 12 uses) - systematic debugging workflow
-- /deploy (project) - deploy to staging environment
+- `Path --caused_by--> Problem` (the problem that initiated the debug journey)
+- `Path --solved_by--> Solution` (the solution that resolved it, if any)
+- `Path --references--> File` (files involved in the debug journey)
+- Waypoint ordering stored in path metadata as ordered observation ID array (not as graph edges -- avoids edge explosion)
+
+### TS-5: KISS Summary Generation
+
+| Aspect | Detail |
+|--------|--------|
+| **Why Expected** | The entire "next time just do X" promise. Without distilled summaries, users must re-read the full path. The codebase gets the clean fix; the graph stores the journey; the summary bridges the two. |
+| **Complexity** | Medium |
+| **Depends On** | TS-3 (resolution detection triggers summary generation), existing Haiku client infrastructure |
+
+**Summary format:**
+
 ```
+Problem: [one line describing the error/issue]
+Root cause: [one line describing what actually caused it]
+Fix: [one line describing the specific fix applied]
+Key insight: [one line -- the "next time just do X" takeaway]
+Files involved: [comma-separated list]
+Dead ends: [brief note on what was tried but did not work]
+```
+
+**Generation approach:** Use the existing `callHaiku()` infrastructure with a focused prompt. Input: the ordered waypoint observations (their content field). Output: structured summary per the format above. This is a single Haiku call per resolved path, triggered when resolution is detected.
+
+**Token budget:** Path waypoints can be numerous. Truncate to the most recent ~20 waypoints, prioritizing `problem` and `solution` classified observations. The existing `truncate()` helper in `capture.ts` provides the pattern.
 
 ---
 
 ## Differentiators
 
-Features that set Laminark V2 apart. No other tool in the Claude Code ecosystem does these.
+Features that set debug resolution paths apart from basic error logging. Not expected but significantly valuable.
 
-### D-1: Conversation-Driven Tool Routing (Intent Detection)
+### D-1: Multi-Layer Dimensions (Logical / Programmatic / Development)
 
-**Value Proposition:** User discusses a problem in natural language. Laminark detects the intent and proactively suggests the right tool BEFORE the user thinks to invoke it. This is the killer feature -- turning passive memory into active intelligence.
+| Aspect | Detail |
+|--------|--------|
+| **Value Proposition** | Debug paths exist in multiple conceptual layers simultaneously. A "TypeError: cannot read property of undefined" is a programmatic error, caused by a logical misunderstanding of the API, encountered during a development task. Capturing these layers enables richer search and cross-referencing. |
+| **Complexity** | High |
+| **Depends On** | TS-4 (path entity), TS-5 (summary generation), existing Haiku classification |
 
-**Complexity:** HIGH
+**Three dimensions:**
 
-**Dependencies on Existing Laminark:**
-- Existing embedding infrastructure (for intent embedding)
-- Existing topic detection (for tracking conversation direction)
-- Tool registry with capability tags (TS-2)
-- Tool usage context (TS-4)
-- Existing notification system (`NotificationStore`)
+1. **Logical:** The conceptual understanding layer. "I assumed the API returned an array but it returns an object." This captures WHY the bug existed -- the mental model mismatch.
 
-**How It Works:**
+2. **Programmatic:** The code-level layer. "TypeError at line 42 of parser.ts because `result.items` was undefined when `result` is actually `{data: {items: [...]}}` not `{items: [...]}` ." This captures WHAT the bug was technically.
 
-1. **Intent Embedding:** As the user converses, Laminark embeds recent conversation context (last 3-5 observations from PostToolUse/UserPromptSubmit).
+3. **Development:** The workflow layer. "This came up while migrating from v1 to v2 of the API client." This captures WHEN/WHERE in the development lifecycle this occurred.
 
-2. **Context Matching:** Compare conversation embedding against stored `tool_usage_context` embeddings. When similarity exceeds threshold, the conversation is moving toward a domain where a specific tool has historically been useful.
+**Implementation:** These are metadata fields on the Path entity populated by Haiku during summary generation. The summary prompt asks Haiku to categorize the path along all three dimensions. Stored in the path node's `metadata` JSON field.
 
-3. **Routing Signal:** When match confidence is high enough, queue a notification via existing `NotificationStore`. The next MCP tool call from Claude will include the suggestion as a prepended notification (existing pattern in all Laminark tool handlers).
+**Search value:** When a user later encounters a similar error, the system can match on the programmatic dimension. When they are doing a similar task, it can match on the development dimension. When they have a similar misunderstanding, it can match on the logical dimension.
 
-4. **Feedback Loop:** If the user follows the suggestion (subsequent tool call matches suggested tool), increase the association weight. If ignored, decrease it.
+### D-2: Path Visualization Overlay on Graph
 
-**User Experience:**
-```
-User: "I need to plan out the authentication system. There are several
-       components: login, registration, password reset, and OAuth."
+| Aspect | Detail |
+|--------|--------|
+| **Value Proposition** | Seeing debug journeys overlaid on the knowledge graph reveals patterns invisible in text: which files are repeatedly involved in bugs, which problems are related, where solutions cluster. |
+| **Complexity** | Medium |
+| **Depends On** | TS-4 (path entity in graph), existing D3 visualization, existing SSE infrastructure |
 
-[Laminark notification on next tool response]:
-"Structured planning task detected. /gsd:plan-phase is available and
-has been used for similar tasks 8 times in this project."
+**Visualization approach:**
 
-User: "/gsd:plan-phase authentication system"
-[Routing worked -- feedback loop strengthens association]
-```
+- Paths are rendered as highlighted, directed trails through the existing graph
+- Path edges get a distinct visual treatment: thicker lines, different color per path status (active=yellow, resolved=green, abandoned=red)
+- Path entity nodes are visually distinct (different shape or icon from the 6 existing entity types)
+- Clicking a path node shows the summary and waypoint timeline
+- Filter controls to show/hide paths, filter by status, filter by time range
 
-**Why No One Else Does This:**
-- Claude Code's built-in Tool Search (ENABLE_TOOL_SEARCH) only defers/loads MCP tools based on context window pressure -- it does not proactively suggest tools based on conversation intent
-- Plugin skills are model-invoked (Claude decides), but they lack historical usage context and cross-tool awareness
-- MCP gateways route requests after they're made -- they don't suggest before
+**Existing infrastructure leverage:** The D3 graph already supports per-type edge label toggles, entity type filters, and a legend. Adding a Path entity type and path-specific edge styling follows the established patterns.
 
-**Implementation Approach:**
-This builds directly on Laminark's existing topic detection infrastructure. The same embedding comparison that detects topic shifts can detect when conversation context drifts toward a "tool activation zone" -- a region in embedding space associated with past tool usage.
+### D-3: Proactive Path Recall During Active Debugging
 
----
+| Aspect | Detail |
+|--------|--------|
+| **Value Proposition** | When a new debug session starts, automatically surface relevant past debug paths. "Last time you saw this error, the root cause was X and the fix was Y." This is where the investment in path capture pays dividends. |
+| **Complexity** | Medium-High |
+| **Depends On** | TS-1 (detection), TS-5 (summaries), existing PreToolUse proactive context injection |
 
-### D-2: Tool Capability Indexing with Semantic Search
+**Implementation approach:**
 
-**Value Proposition:** Users can ask "what tools can help me with X?" and get semantically relevant answers, not just keyword matches. Laminark indexes tool descriptions, past usage contexts, and SKILL.md contents into its existing search infrastructure.
+The existing `PreToolUse` hook already supports proactive context injection. When TS-1 detects a new debug session entering ACTIVE state, query the graph for resolved paths that share:
 
-**Complexity:** MEDIUM
+- Same files involved (via `Path --references--> File` edges)
+- Similar problem descriptions (via embedding similarity on the path's problem observation)
+- Same error patterns (via FTS5 search on waypoint observations)
 
-**Dependencies on Existing Laminark:**
-- Existing hybrid search (FTS5 + sqlite-vec)
-- Existing embedding pipeline
-- Tool registry (TS-2)
+Surface the top 1-2 most relevant path summaries in the PreToolUse context injection. The existing `assembleSessionContext()` provides the injection point.
 
-**What Gets Indexed:**
-- Tool descriptions (from MCP tool schemas, SKILL.md frontmatter, command file descriptions)
-- Historical usage summaries ("Used to plan auth system", "Used to debug memory leak")
-- Capability tags (derived from description + usage patterns)
+### D-4: Dead End Tracking and Anti-Pattern Detection
 
-**New MCP Tool: `discover_tools`**
-```
-discover_tools:
-  query: "testing browser interactions"
-  scope: "all" | "global" | "project"
+| Aspect | Detail |
+|--------|--------|
+| **Value Proposition** | Recording what DID NOT work is as valuable as recording what did. "Do not try X, it leads to Y" prevents repeating the same mistakes. Over time, patterns of dead ends reveal systemic issues. |
+| **Complexity** | Medium |
+| **Depends On** | TS-2 (waypoints), TS-3 (resolution detection), TS-5 (summary) |
 
-Returns:
-  - mcp__playwright__* (project-scoped, 8 uses, relevance: 0.92)
-  - /test-e2e (project command, 3 uses, relevance: 0.78)
-```
+**Detection approach:**
 
-**User Experience:**
-```
-User: "What tools do I have for database work?"
-Claude: [calls mcp__laminark__discover_tools with query "database"]
-Response: "You have these database-related tools:
-  - mcp__postgres__query (global, used 15 times)
-  - /db:migrate (project command, used 4 times)
-  - /db:seed (project command, used 2 times)"
-```
+A dead end is a sequence within an ACTIVE debug path where:
+1. An Edit/Write is made (hypothesis: "this will fix it")
+2. A subsequent Bash/test run fails (hypothesis disproven)
+3. Another Edit/Write reverts or changes the same file (backtracking)
 
----
+This run-fail-revert pattern is detectable from the observation sequence. Each dead end gets tagged in the path metadata with what was tried and why it failed.
 
-### D-3: Cross-Project Tool Intelligence
+**Anti-pattern aggregation:** When multiple paths share similar dead ends (same approach tried and failed across different debug sessions), this is an anti-pattern. Surfaceable during proactive recall: "This approach has failed in 3 previous sessions."
 
-**Value Proposition:** Laminark's global database sees tool usage across ALL projects. It can learn that "when debugging memory issues, users in Node.js projects tend to use tool X" and apply that knowledge to new projects. This is organizational learning that no project-scoped tool can achieve.
+### D-5: Cross-Session Path Linking
 
-**Complexity:** HIGH
+| Aspect | Detail |
+|--------|--------|
+| **Value Proposition** | Debug sessions can span multiple Claude sessions (user closes Claude, reopens later, continues debugging the same issue). Linking these produces a complete picture. |
+| **Complexity** | Medium |
+| **Depends On** | TS-1, TS-4, existing session lifecycle hooks |
 
-**Dependencies on Existing Laminark:**
-- Existing `project_metadata` table (tracks all known projects)
-- Existing global database (already stores data from all projects)
-- Tool usage context (TS-4)
-- Tool registry (TS-2)
+**Linking approach:**
 
-**What This Enables:**
-- "In your other TypeScript projects, you've used /gsd:debug for similar issues"
-- "Projects with similar dependency patterns (React + Tailwind) commonly use these tools"
-- Tool recommendation for new projects based on project similarity
+When a new session starts and TS-1 detects debugging activity, check if there is an ACTIVE or recently ABANDONED path from a previous session that involves the same files and similar error patterns. If so, link the new session's debug activity to the existing path rather than creating a new one.
 
-**Critical Safety Rule:** Cross-project intelligence surfaces tool NAMES and PATTERNS, never observation content from other projects. Project memory isolation is sacrosanct.
-
-**User Experience:**
-```
-# First time opening a new React project:
-[Laminark] New project detected. Based on 3 similar TypeScript/React projects:
-  - /gsd:plan-phase (used in 3/3 projects)
-  - mcp__playwright__* (used in 2/3 projects)
-  - /component-gen (used in 2/3 projects, project-scoped -- not available here)
-```
-
----
-
-### D-4: Tool Workflow Chains (Learned Sequences)
-
-**Value Proposition:** Users often invoke tools in sequences: research -> plan -> implement -> test. Laminark observes these patterns and suggests the next step in a workflow. "You just finished planning with GSD. In past sessions, you typically ran tests next."
-
-**Complexity:** HIGH
-
-**Dependencies on Existing Laminark:**
-- Existing temporal ordering (preceded_by edges in knowledge graph)
-- Existing session tracking
-- Tool usage context (TS-4)
-
-**What Gets Tracked:**
-A `tool_sequences` table that records tool invocation order within sessions:
-```sql
-CREATE TABLE tool_sequences (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  project_hash TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  tool_name TEXT NOT NULL,
-  sequence_position INTEGER NOT NULL,
-  context_hash TEXT,            -- hash of conversation context at invocation
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-```
-
-Pattern mining: After N sessions, identify common subsequences (A -> B -> C) and their frequency. When the user completes step A, suggest step B.
-
-**User Experience:**
-```
-User: [just completed /gsd:plan-phase]
-[Laminark notification]: "Planning complete. In past sessions, you typically:
-  1. Created implementation files (Write)
-  2. Ran tests (Bash: npm test)
-  3. Committed (Bash: git commit)
-  Consider starting implementation."
-```
-
----
-
-### D-5: Deprecation and Staleness Awareness
-
-**Value Proposition:** Tools come and go. A project removes an MCP server, a plugin gets uninstalled, a slash command file is deleted. Laminark should detect this and stop suggesting stale tools. It should also notice when a tool hasn't been used in weeks and deprioritize it.
-
-**Complexity:** LOW
-
-**Dependencies on Existing Laminark:**
-- Existing staleness detection in knowledge graph (`graph/staleness.ts`)
-- Existing curation agent for graph maintenance
-- Tool registry (TS-2)
-
-**What Changes:**
-- Periodic config rescan (on SessionStart): check if `.mcp.json`, command files, skill files still exist
-- Mark tools as `status = 'stale'` if config source is gone
-- Decay `usage_count` influence over time (recency-weighted)
-- Curation agent prunes tools not seen in 30+ days
+Linking criteria:
+- Previous path status is ACTIVE or ABANDONED within the last 24 hours
+- At least 2 common files referenced
+- Error pattern similarity above threshold (via embedding comparison)
 
 ---
 
 ## Anti-Features
 
-Features that seem logical for V2 but would create problems. Explicitly NOT building these.
+Features to explicitly NOT build. These are tempting but wrong for this context.
 
-### AF-1: Automatic Tool Installation
+### AF-1: Full Execution Recording / Time-Travel Replay
 
-| Why Requested | Why Problematic | What to Do Instead |
-|---------------|-----------------|-------------------|
-| "If Laminark knows I need Playwright, just install it" | Security nightmare. Auto-installing npm packages or MCP servers without explicit user consent violates trust. Claude Code requires explicit approval for project-scoped MCP servers for good reason. | Suggest the tool and provide the install command. User runs it. "To add Playwright MCP: `claude mcp add --transport stdio playwright -- npx -y @playwright/mcp@latest`" |
+| Aspect | Detail |
+|--------|--------|
+| **Why Avoid** | Time-travel debugging (TTD) records every CPU instruction for deterministic replay. This requires process injection, massive storage (trace files in GB range), and runtime-specific tooling. Laminark operates at the observation layer, not the runtime layer. We are capturing the developer's journey through the codebase, not the program's execution trace. |
+| **What to Do Instead** | Capture tool invocations and their semantic summaries (already done). The observation-level view is the correct abstraction for an LLM assistant's memory. |
 
-### AF-2: Tool Execution Proxy
+### AF-2: Git Bisect Integration / Commit-Level Bug Localization
 
-| Why Requested | Why Problematic | What to Do Instead |
-|---------------|-----------------|-------------------|
-| "Laminark should invoke tools on my behalf" | Laminark is a memory/intelligence layer, not a tool execution engine. MCP tools already have their own execution paths. Adding a proxy layer creates: redundant permission checks, error surface area, confused responsibility boundaries. | Route the user to the tool. Let Claude Code's existing tool execution handle the rest. Laminark observes outcomes via PostToolUse hooks. |
+| Aspect | Detail |
+|--------|--------|
+| **Why Avoid** | Git bisect finds which commit introduced a bug through binary search. This is a fundamentally different problem: Laminark tracks debug sessions within a single working session, not across commit history. Integrating git bisect would require Laminark to understand the commit graph, execute tests, and manage git state -- all outside its domain. |
+| **What to Do Instead** | If a debug path involves git operations (Bash commands with git), capture those as waypoints naturally. The path summary will note "reverted commit X" as part of the journey, without Laminark driving the git workflow. |
 
-### AF-3: Real-Time MCP Server Health Monitoring
+### AF-3: Manual Debug Session Annotation / Notebook Interface
 
-| Why Requested | Why Problematic | What to Do Instead |
-|---------------|-----------------|-------------------|
-| "Check if MCP servers are responsive before suggesting them" | Laminark runs as an MCP server itself -- it cannot make outbound connections to other MCP servers. MCP servers communicate with clients, not with each other. Health checking would require a separate daemon. | Track PostToolUseFailure events. If a tool fails repeatedly, deprioritize it in suggestions. Reactive, not proactive. |
+| Aspect | Detail |
+|--------|--------|
+| **Why Avoid** | Debug notebooks (Jupyter-style) require users to manually organize and annotate their debugging steps. This contradicts the "vibe tool" principle -- zero manual intervention. Adding manual annotation creates friction and relies on the user remembering to use it during the most cognitively loaded moments (active debugging). |
+| **What to Do Instead** | Everything is automatic. The only manual interaction is reading the generated summary after the fact. If a user wants to add context, the existing `save_memory` MCP tool serves that purpose. |
 
-### AF-4: Natural Language Tool Creation
+### AF-4: Real-Time Debugging Dashboard / Live Metrics
 
-| Why Requested | Why Problematic | What to Do Instead |
-|---------------|-----------------|-------------------|
-| "If no tool exists for X, generate one" | Code generation from intent is Claude's job, not Laminark's. Creating tools requires understanding the full project context, testing, permissions. This is a completely different product (and Claude Code already does it via skills). | Detect the gap: "No tool found for X. Consider creating a skill: `mkdir .claude/skills/X && edit .claude/skills/X/SKILL.md`" |
+| Aspect | Detail |
+|--------|--------|
+| **Why Avoid** | Observability platforms (Datadog, Elastic) provide real-time dashboards with metrics, alerting, and drill-down. Laminark is a memory system, not a monitoring system. Real-time dashboards add UI complexity, WebSocket overhead, and solve the wrong problem. The user is already debugging in their terminal -- they do not need a separate dashboard to watch. |
+| **What to Do Instead** | The existing web UI shows the graph after the fact. Path visualization (D-2) adds debug journey overlays to this existing view. No real-time "debugging in progress" dashboard. |
 
-### AF-5: Multi-User Tool Sharing / Team Registry
+### AF-5: Automatic Fix Application / Self-Healing
 
-| Why Requested | Why Problematic | What to Do Instead |
-|---------------|-----------------|-------------------|
-| "Share tool configurations across the team" | Requires auth, conflict resolution, network infrastructure. Claude Code already handles team sharing via project-scoped `.mcp.json` (checked into git) and marketplace plugins. Laminark duplicating this adds complexity with no benefit. | Respect existing scopes. Project-scoped `.mcp.json` IS the team sharing mechanism. Laminark discovers and indexes it; it doesn't replace it. |
+| Aspect | Detail |
+|--------|--------|
+| **Why Avoid** | Some AI debugging tools attempt to automatically apply fixes. This is dangerous for a memory system: Laminark observes and remembers, it does not act. Auto-applying fixes would require Laminark to invoke tools on the user's behalf, which violates the observation-only architecture and creates safety risks. |
+| **What to Do Instead** | Surface relevant past solutions during proactive recall (D-3). The human (or Claude agent) decides whether and how to apply them. |
 
-### AF-6: Universal Tool Abstraction Layer
+### AF-6: Custom Debug Detection Rules / User-Configurable Triggers
 
-| Why Requested | Why Problematic | What to Do Instead |
-|---------------|-----------------|-------------------|
-| "Normalize all tools into a common interface" | MCP tools, slash commands, skills, and agents have fundamentally different invocation patterns, argument schemas, and lifecycle behaviors. Forcing them into one abstraction loses the characteristics that make each useful. | Index them with common metadata (name, description, capability tags, usage stats) but preserve their native invocation format. Tell the user "/gsd:plan-phase" or "mcp__playwright__browser_screenshot" -- don't abstract away the invocation path. |
+| Aspect | Detail |
+|--------|--------|
+| **Why Avoid** | Premature configuration surface. The detection heuristics (TS-1) should work well out of the box for the common case. Adding user-configurable triggers before the system has proven its defaults creates complexity without value. Configuration can be added later if the defaults prove insufficient. |
+| **What to Do Instead** | Ship with sensible defaults. Tune based on real usage data. If users consistently report false positives/negatives, then add configuration knobs. |
 
 ---
 
 ## Feature Dependencies
 
 ```
-[Global Installation (TS-1)]
-    |
-    +--enables--> [Tool Discovery (TS-2)]
-    |                 |
-    |                 +--requires--> [Config Scanning] (read .mcp.json, commands/, skills/, plugins)
-    |                 |
-    |                 +--requires--> [PostToolUse observation] (existing)
-    |                 |
-    |                 +--produces--> [tool_registry table]
-    |                                    |
-    |                                    +--enables--> [Scope-Aware Resolution (TS-3)]
-    |                                    |                 |
-    |                                    |                 +--requires--> [getProjectHash()] (existing)
-    |                                    |
-    |                                    +--enables--> [Tool Usage Tracking (TS-4)]
-    |                                    |                 |
-    |                                    |                 +--requires--> [PostToolUse hook] (existing)
-    |                                    |                 |
-    |                                    |                 +--produces--> [tool_usage_context table]
-    |                                    |
-    |                                    +--enables--> [Session Start Suggestions (TS-5)]
-    |                                                      |
-    |                                                      +--requires--> [assembleSessionContext()] (existing)
-
-[Tool Usage Context (TS-4)]
-    |
-    +--combined-with--> [Embedding Infrastructure] (existing)
-    |
-    +--enables--> [Conversation-Driven Routing (D-1)]
-    |                 |
-    |                 +--requires--> [Topic Detection] (existing)
-    |                 +--requires--> [NotificationStore] (existing)
-    |
-    +--enables--> [Tool Capability Search (D-2)]
-    |                 |
-    |                 +--requires--> [Hybrid Search] (existing)
-    |
-    +--enables--> [Cross-Project Intelligence (D-3)]
-    |                 |
-    |                 +--requires--> [project_metadata] (existing)
-    |
-    +--enables--> [Tool Workflow Chains (D-4)]
-                      |
-                      +--requires--> [Session Tracking] (existing)
-
-[Staleness Awareness (D-5)]
-    |
-    +--requires--> [Tool Registry (TS-2)]
-    +--requires--> [Curation Agent] (existing)
+TS-1: Debug Session Detection
+  |
+  +---> TS-2: Waypoint Capture (requires detection to know when to capture)
+  |       |
+  |       +---> D-4: Dead End Tracking (requires waypoint sequence analysis)
+  |
+  +---> TS-3: Resolution Detection (requires active session to resolve)
+  |       |
+  |       +---> TS-5: KISS Summary Generation (triggered by resolution)
+  |               |
+  |               +---> D-1: Multi-Layer Dimensions (enriches summary)
+  |
+  +---> TS-4: Path as Graph Entity (requires detection to create path node)
+  |       |
+  |       +---> D-2: Path Visualization Overlay (requires path in graph)
+  |       |
+  |       +---> D-5: Cross-Session Path Linking (requires path entity persistence)
+  |
+  +---> D-3: Proactive Path Recall (requires detection + past summaries)
 ```
 
-### Key Dependency Observations
+**Critical path:** TS-1 -> TS-2 + TS-3 (parallel) -> TS-4 -> TS-5
 
-1. **TS-1 (Global Install) is the prerequisite for everything.** Without global presence, there is no multi-project visibility.
-
-2. **TS-2 (Discovery) is the foundation.** Every other feature depends on having a populated tool registry. Discovery must work before routing can work.
-
-3. **TS-4 (Usage Tracking) bridges table stakes and differentiators.** It's simple to implement but enables all the intelligent features (D-1 through D-4).
-
-4. **D-1 (Conversation Routing) is the highest-value differentiator** but has the most dependencies. It needs: registry, usage context, embeddings, and topic detection all working.
-
-5. **Existing Laminark infrastructure covers ~60% of the dependency graph.** The embedding pipeline, topic detection, notification system, hybrid search, session management, and knowledge graph are all already built.
+Everything downstream of TS-5 (D-1, D-3) and TS-4 (D-2, D-5) can follow in later phases.
 
 ---
 
-## MVP Recommendation for V2
+## MVP Recommendation
 
-### Phase 1: Foundation (Must Ship)
+**Prioritize (Phase 1 -- Core Path Tracking):**
 
-Build the registry and make Laminark globally present:
+1. **TS-1: Debug Session Detection** -- The foundation. Start with rule-based detection only (sentiment + tool patterns from existing extractors). Haiku confirmation as background enrichment. Ship fast, tune later.
 
-1. **TS-1: Global Installation** -- configure user-scope MCP server + global hooks
-2. **TS-2: Tool Discovery** -- config scanning on SessionStart + passive observation via PostToolUse
-3. **TS-3: Scope-Aware Resolution** -- filter registry queries by current project_hash
-4. **TS-4: Tool Usage Tracking** -- lightweight side-effect in existing hook pipeline
-5. **TS-5: Session Start Suggestions** -- add "Available Tools" section to context injection
-6. **D-5: Staleness Awareness** -- config rescan + decay (low cost, prevents bad suggestions)
+2. **TS-2: Waypoint Capture** -- Low complexity because the observation pipeline already captures everything. New work is linking observations to paths.
 
-**Rationale:** These features are individually low-to-medium complexity, build directly on existing infrastructure, and create the data foundation for intelligent routing.
+3. **TS-3: Resolution Detection** -- Essential companion to detection. Use existing `solution` classification from Haiku as primary signal.
 
-### Phase 2: Intelligence (Differentiators)
+4. **TS-4: Path as Graph Entity** -- Add `Path` to entity types. Store waypoints as ordered observation IDs in metadata. Connect to Problem/Solution entities.
 
-Once the registry is populated and stable:
+5. **TS-5: KISS Summary Generation** -- Single Haiku call on resolution. This is the user-facing value.
 
-7. **D-2: Tool Capability Search** -- new `discover_tools` MCP tool using existing hybrid search
-8. **D-1: Conversation-Driven Routing** -- intent detection using existing embedding + topic infrastructure
-9. **D-4: Tool Workflow Chains** -- pattern mining from accumulated usage sequences
+**Prioritize (Phase 2 -- Enrichment):**
 
-### Defer
+6. **D-1: Multi-Layer Dimensions** -- Enriches summary generation prompt, low marginal cost once TS-5 exists.
 
-10. **D-3: Cross-Project Intelligence** -- requires significant accumulated data across multiple projects; premature to build before the registry is proven useful in single-project context
+7. **D-4: Dead End Tracking** -- Waypoint sequence analysis on top of TS-2.
 
----
+**Defer (Phase 3 -- Leverage):**
 
-## Feature Prioritization Matrix
+8. **D-2: Path Visualization Overlay** -- Valuable but requires D3 work. Existing graph already shows path entities.
 
-| Feature | User Value | Implementation Cost | Risk | Priority |
-|---------|------------|---------------------|------|----------|
-| TS-1: Global Installation | CRITICAL | LOW | LOW | P0 |
-| TS-2: Tool Discovery | CRITICAL | MEDIUM | LOW | P0 |
-| TS-3: Scope-Aware Resolution | HIGH | MEDIUM | LOW | P0 |
-| TS-4: Tool Usage Tracking | MEDIUM (enables HIGH) | LOW | LOW | P0 |
-| TS-5: Session Start Suggestions | HIGH | MEDIUM | LOW | P0 |
-| D-5: Staleness Awareness | MEDIUM | LOW | LOW | P0 |
-| D-2: Tool Capability Search | HIGH | MEDIUM | LOW | P1 |
-| D-1: Conversation-Driven Routing | VERY HIGH | HIGH | MEDIUM (threshold tuning) | P1 |
-| D-4: Tool Workflow Chains | MEDIUM | HIGH | MEDIUM (pattern quality) | P2 |
-| D-3: Cross-Project Intelligence | MEDIUM | HIGH | HIGH (data sparsity) | P3 |
+9. **D-3: Proactive Path Recall** -- The highest-value differentiator but requires a corpus of resolved paths to be useful. Defer until paths have accumulated.
 
----
+10. **D-5: Cross-Session Path Linking** -- Edge case handling that can wait until the base system is proven.
 
-## Concrete User Workflow Examples
-
-### Workflow 1: First-Time Global Setup
-```
-# User installs Laminark globally
-$ claude mcp add --scope user --transport stdio laminark -- node ~/.local/lib/laminark/dist/index.js
-
-# User also configures global hooks in ~/.claude/settings.json
-# (or Laminark ships as a plugin with hooks/hooks.json)
-
-# Now, in any project:
-$ cd ~/projects/my-app && claude
-[Laminark] New project detected: /home/user/projects/my-app
-[Laminark] Scanning for available tools...
-[Laminark] Found: 2 MCP servers (laminark, context7), 3 global commands, 1 project command
-[Laminark - Session Context]
-## Available Tools
-- /gsd:plan-phase (global, new) - structured feature planning
-- /gsd:debug (global, new) - systematic debugging
-- mcp__context7__query-docs (global) - library documentation lookup
-```
-
-### Workflow 2: Conversation-Driven Routing
-```
-User: "The login page is broken. Users are seeing a white screen after
-       entering their credentials."
-
-# Laminark observes this via PostToolUse (Claude will read files, etc.)
-# Embedding of conversation context lands in "debugging" zone
-# tool_usage_context shows /gsd:debug used 12 times in debugging contexts
-
-[Laminark notification on next tool response]:
-"Debugging pattern detected. /gsd:debug has been effective for similar
-issues (used 12 times in debugging contexts)."
-
-User: "/gsd:debug white screen after login"
-# GSD debug workflow begins, Laminark continues observing
-```
-
-### Workflow 3: Tool Discovery by Query
-```
-User: "What tools do I have for testing?"
-Claude: [calls mcp__laminark__discover_tools query="testing"]
-
-Laminark returns:
-  Tools matching "testing":
-  1. mcp__playwright__browser_screenshot (project, 8 uses) - Browser automation
-  2. /test-integration (project command, 5 uses) - Run integration test suite
-  3. /gsd:debug (global, 12 uses) - Includes test verification step
-
-  Not installed but commonly used in similar projects:
-  - mcp__jest__ - Jest test runner MCP (install: claude mcp add ...)
-```
-
-### Workflow 4: Scope Awareness in Action
-```
-# In project A (has Playwright MCP + custom deploy command):
-User: "Deploy to staging"
-[Laminark]: /deploy command available (project-scoped, 7 uses)
-
-# User switches to project B (different project, no Playwright, no deploy):
-$ cd ~/projects/other-app && claude
-[Laminark - Session Context]
-## Available Tools
-- /gsd:plan-phase (global, 23 uses)
-- /gsd:debug (global, 12 uses)
-# Note: /deploy and Playwright are NOT listed -- they're project A only
-
-User: "Deploy to staging"
-[Laminark]: No deployment tool configured for this project.
-Consider creating .claude/commands/deploy.md or configuring a CI/CD MCP server.
-```
+**Defer rationale:** D-2 and D-3 require the base system to be generating paths before they add value. Ship the detection-capture-resolution-summary pipeline first, let paths accumulate, then add visualization and proactive recall.
 
 ---
 
 ## Sources
 
-- [Claude Code MCP Configuration Scopes](https://code.claude.com/docs/en/mcp) -- local/project/user scopes, `.mcp.json` format, `~/.claude.json`, `managed-mcp.json`, scope hierarchy and precedence, plugin MCP servers (HIGH confidence)
-- [Claude Code Hooks Reference](https://code.claude.com/docs/en/hooks) -- full hook event schema, PostToolUse/SessionStart/Stop input JSON, matcher patterns, MCP tool naming convention `mcp__<server>__<tool>`, decision control (HIGH confidence)
-- [Claude Code Plugins System](https://code.claude.com/docs/en/plugins) -- plugin structure (`.claude-plugin/plugin.json`, `commands/`, `skills/`, `agents/`, `hooks/`, `.mcp.json`), namespacing (`/plugin-name:skill`), discovery via marketplace (HIGH confidence)
-- [Claude Code Skills](https://code.claude.com/docs/en/skills) -- model-invoked vs user-invoked, SKILL.md frontmatter format, `.claude/skills/` directory structure (HIGH confidence)
-- [Claude Code MCP Tool Search](https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search) -- ENABLE_TOOL_SEARCH, auto mode, context window threshold, deferred tool loading (HIGH confidence)
-- [MCP Proxy Server Pattern](https://github.com/adamwattis/mcp-proxy-server) -- capability aggregation, request routing, connection management for multiple backends (MEDIUM confidence)
-- [MCP Gateway Architecture](https://obot.ai/resources/learning-center/mcp-gateway/) -- tools/list aggregation, request routing, policy enforcement (MEDIUM confidence)
-- [AI Agent Routing Best Practices](https://www.patronus.ai/ai-agent-development/ai-agent-routing) -- LLM-powered routing vs rule-based, context preservation, intent classification (MEDIUM confidence)
-- [Intent Recognition in Multi-Agent Systems](https://gist.github.com/mkbctrl/a35764e99fe0c8e8c00b2358f55cd7fa) -- conversation context as routing input, last N messages for intent detection (MEDIUM confidence)
-- [Claude Code Community Plugin Registry](https://claude-plugins.dev/) -- 11,989 plugins, 63,065 skills indexed; demonstrates ecosystem scale (MEDIUM confidence)
-- [MCP Registry and Server Discovery](https://modelcontextprotocol.io/development/roadmap) -- .well-known URLs for capability advertisement, public/private sub-registries (MEDIUM confidence)
-
----
-*Feature research for: Laminark V2 -- Tool Discovery, Registry, and Conversation-Driven Routing*
-*Researched: 2026-02-10*
+- [Braintrust AI Observability Guide 2026](https://www.braintrust.dev/articles/best-ai-observability-tools-2026) -- Session analysis and pattern detection patterns
+- [Middleware Root Cause Analysis in Distributed Systems](https://middleware.io/blog/identify-root-cause-analysis/) -- Automated detection techniques, anomaly detection
+- [Replay.io Time Travel Debugging](https://blog.replay.io/introduction-to-time-travel-debugging) -- Session replay vs runtime replay architecture distinctions
+- [DZone LLMs for Root Cause Analysis](https://dzone.com/articles/llms-automated-root-cause-analysis-incident-response) -- LLM-driven RCA and postmortem generation patterns
+- [Rootly AI-Generated Postmortems](https://rootly.com/sre/ai-generated-postmortems-rootlys-automated-rca-tool) -- Automated summary generation from incident timelines
+- [Acquia Automating Error Detection with Git Bisect](https://dev.acquia.com/tutorial/automating-error-detection-git-bisect-run) -- Binary search debugging workflow (informed AF-2 decision)
+- [Akira AI Agents for Software Error Resolution](https://www.akira.ai/blog/ai-agents-for-debugging) -- AI debug agent memory stack and session tracking patterns
+- [Elastic Root Cause Analysis with Logs](https://www.elastic.co/observability-labs/blog/observability-logs-machine-learning-aiops) -- Log pattern analysis and anomaly detection
+- Laminark codebase analysis: `src/intelligence/haiku-classifier-agent.ts`, `src/hooks/piggyback-extractor.ts`, `src/graph/types.ts`, `src/graph/schema.ts`, `src/hooks/capture.ts`, `src/intelligence/haiku-processor.ts`

@@ -1,19 +1,21 @@
-# Technology Stack: Global Tool Discovery & Routing
+# Technology Stack: Debug Resolution Paths
 
-**Project:** Laminark -- Global Installation, Tool Discovery, Scope-Aware Registry, Conversation-Driven Routing
-**Researched:** 2026-02-10
-**Scope:** NEW capabilities only. Existing validated stack (SQLite/WAL, MCP SDK, Hono, Cytoscape, tsdown, etc.) is NOT re-researched.
+**Project:** Laminark v2.2 -- Automatic Debug Path Tracking, Waypoint Capture, KISS Summary Generation, Graph Overlay Visualization
+**Researched:** 2026-02-14
+**Scope:** NEW capabilities only. Existing validated stack (SQLite/WAL/FTS5, better-sqlite3, Hono, D3.js, Claude Agent SDK V2, tsdown, vitest, Zod) is NOT re-researched.
 
 ## Executive Summary
 
-This milestone requires **zero new npm dependencies**. Every capability needed for global installation, tool discovery, scope-aware registry, and conversation-driven routing can be built with Node.js standard library (`fs`, `path`, `os`, `crypto`) and the existing Laminark stack. The work is primarily:
+This milestone requires **zero new npm dependencies**. Every capability needed for debug path tracking -- state machines, pattern detection, graph traversal, path visualization -- can be built with TypeScript/Node.js primitives and the existing Laminark stack. The work breaks down to:
 
-1. Parsing JSON config files at known filesystem paths (Node.js `fs.readFileSync`)
-2. Adding new SQLite tables/queries to the existing database
-3. Modifying the hook handler to extract tool provenance from `tool_name` prefixes
-4. Adjusting the plugin manifest and build for global installation
+1. **State machine for path lifecycle** -- Plain TypeScript enum + transition table (10-15 lines). No library needed.
+2. **Pattern detection for debug start/resolution** -- Regex patterns on tool output (extending existing `piggyback-extractor.ts` approach) + Haiku AI classification for ambiguous cases (existing Agent SDK V2 session API).
+3. **Waypoint capture** -- Extension of existing PostToolUse hook pipeline. New "path-aware" middleware taps the same event stream.
+4. **SQLite schema for paths/waypoints** -- Two new tables via existing migration framework (version 20+). Paths reference existing graph nodes.
+5. **KISS summary generation** -- Haiku AI call via existing Claude Agent SDK V2 session API. Same pattern as existing observation enrichment.
+6. **D3 graph overlay** -- New SVG layer group in existing `graph.js` force-directed visualization. D3 line generators with animated dashes for breadcrumb trails.
 
-**Key insight from research:** Claude Code's config system is fully file-based (JSON files at deterministic paths). No API calls, no service discovery, no dynamic protocol needed. The "discovery" is just reading files.
+**Key architectural insight:** Paths are a *parallel data structure* alongside the knowledge graph, not embedded in it. A path references graph nodes as waypoints but has its own lifecycle (active/resolved/abandoned/stale). This keeps the core graph clean and paths queryable independently.
 
 ## Recommended Stack Additions
 
@@ -21,413 +23,387 @@ This milestone requires **zero new npm dependencies**. Every capability needed f
 
 | Capability | Implementation | Why No New Package |
 |------------|---------------|-------------------|
-| Parse Claude Code config JSON files | `fs.readFileSync` + `JSON.parse` | Config files are plain JSON at known paths. Zod (already installed) handles validation. |
-| Determine config file paths | `os.homedir()` + `path.join()` | All paths are deterministic: `~/.claude/settings.json`, `.claude/settings.json`, `.mcp.json`, etc. |
-| Tool name parsing (scope detection) | String matching / regex | Tool names follow known patterns: `Read`, `mcp__server__tool`, `mcp__plugin_market_name__tool` |
-| Tool registry storage | New SQLite table in existing database | Already using better-sqlite3 with WAL. Just add a migration. |
-| Conversation routing | Extend existing hook handler + context injection | SessionStart hook and PostToolUse hook already capture all needed data. |
-| Global installation | Modify `.claude-plugin/plugin.json` + marketplace config | File-based configuration, no runtime dependency. |
+| Path lifecycle state machine | TypeScript `const enum` + transition map | 4 states, 6 transitions. A library (xstate, robot) would be massive overkill. |
+| Debug session detection | Regex on tool output + Haiku AI classification | Existing `piggyback-extractor.ts` already does regex-based signal extraction. Haiku handles edge cases. |
+| Waypoint capture | PostToolUse hook middleware | Existing hook pipeline (`hooks/capture.ts`) already processes every tool event. Add path-aware logic. |
+| Path storage | New SQLite tables via migration framework | Already at migration v19. Add v20 (debug_paths) and v21 (path_waypoints). |
+| Loop detection | Simple visited-set algorithm in TypeScript | Track repeated file/error patterns. O(n) where n = waypoints in current path. |
+| KISS summary generation | Claude Agent SDK V2 session API (Haiku) | Same pattern used by existing observation enrichment. No new API integration. |
+| Path graph overlay | D3.js SVG layer + line generator | Existing `graph.js` already has layered SVG groups (edges, labels, nodes). Add a `pathsGroup` layer. |
+| Animated breadcrumb trail | CSS `stroke-dashoffset` animation | Pure CSS animation on SVG path elements. No JS animation library needed. |
+| MCP tools for path control | MCP SDK `server.tool()` | Same pattern as existing `topic-context` and `graph-stats` tools. |
+| Path-aware context injection | PreToolUse hook extension | Existing PreToolUse hook pipeline. Inject active path context when relevant. |
 
 ## Detailed Technology Decisions
 
-### 1. Claude Code Config File Parsing
+### 1. State Machine: Plain TypeScript (not xstate/robot)
 
-**Decision:** Use Node.js `fs.readFileSync` + `JSON.parse` with Zod schema validation.
+**Decision:** Implement path lifecycle as a simple transition table.
 
-**Config file locations discovered from official docs (HIGH confidence):**
+**Why:** The debug path lifecycle has exactly 4 states and 6 valid transitions:
 
-| File | Path | Scope | Contains |
-|------|------|-------|----------|
-| Global user settings | `~/.claude/settings.json` | User-wide | `hooks`, `statusLine`, `enabledPlugins`, `env` |
-| Global personal settings | `~/.claude/settings.local.json` | User-wide, private | `permissions`, `enableAllProjectMcpServers` |
-| Project team settings | `{cwd}/.claude/settings.json` | Per-project, committed | `permissions`, `enabledPlugins` |
-| Project local settings | `{cwd}/.claude/settings.local.json` | Per-project, private | `permissions` |
-| Project MCP servers | `{cwd}/.mcp.json` | Per-project, committed | `mcpServers` config |
-| User/local MCP servers | `~/.claude.json` | User-wide | `mcpServers` in `projects[path]` entries |
-| Plugin registry | `~/.claude/plugins/installed_plugins.json` | User-wide | Plugin install records with scopes/paths |
-| Known marketplaces | `~/.claude/plugins/known_marketplaces.json` | User-wide | Marketplace source+install paths |
-
-**Implementation pattern:**
-
-```typescript
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { z } from 'zod';
-
-// Zod schemas for each config format
-const SettingsSchema = z.object({
-  hooks: z.record(z.array(z.unknown())).optional(),
-  enabledPlugins: z.record(z.boolean()).optional(),
-  statusLine: z.unknown().optional(),
-}).passthrough();
-
-function readConfigSafe<T>(path: string, schema: z.ZodType<T>): T | null {
-  try {
-    const raw = readFileSync(path, 'utf-8');
-    return schema.parse(JSON.parse(raw));
-  } catch {
-    return null; // File missing or invalid -- graceful degradation
-  }
-}
+```
+idle --> active       (debug detected or manual start)
+active --> active     (waypoint added -- self-transition)
+active --> resolved   (fix confirmed or manual resolve)
+active --> abandoned  (session ends without resolution)
+active --> stale      (timeout, e.g., 30 min no activity)
 ```
 
-**Why NOT use chokidar/fs.watch for file watching:** Config files change rarely (user edits settings, installs a plugin). Laminark already reads config at startup via SessionStart hook. Re-reading on each SessionStart is sufficient. File watching adds complexity and resource overhead for zero benefit in a tool that restarts each session.
-
-**Confidence: HIGH** -- Verified against live system files at `/home/matthew/.claude/settings.json`, `/home/matthew/.claude.json`, `/home/matthew/.claude/plugins/installed_plugins.json`, and official Claude Code docs.
-
-### 2. Tool Name Parsing & Scope Detection
-
-**Decision:** Pattern-match tool_name strings using a deterministic prefix taxonomy. No external library needed.
-
-**Tool naming taxonomy discovered from official docs + live observation (HIGH confidence):**
-
-| Pattern | Scope | Example | Source |
-|---------|-------|---------|--------|
-| No prefix (bare name) | Built-in | `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `Task`, `WebFetch`, `WebSearch` | Claude Code core |
-| `mcp__{server}__{tool}` | Project MCP (.mcp.json) or User MCP (~/.claude.json) | `mcp__laminark__recall`, `mcp__github__search_repositories` | .mcp.json or ~/.claude.json mcpServers |
-| `mcp__plugin_{marketplace}_{plugin}__{tool}` | Plugin MCP | `mcp__plugin_laminark_laminark__status` | Plugin .mcp.json |
-
-**Critical finding:** The `tool_name` field in PostToolUse hook payloads uses these exact patterns. There is no `tool_scope` or `tool_source` field in the payload. Scope must be inferred from the tool_name prefix.
-
-**Implementation pattern:**
+This is trivially representable as:
 
 ```typescript
-interface ToolProvenance {
-  scope: 'builtin' | 'project-mcp' | 'user-mcp' | 'plugin-mcp';
-  serverName: string | null;     // e.g., 'laminark', 'github'
-  toolName: string;              // e.g., 'recall', 'search_repositories'
-  marketplace: string | null;    // e.g., 'laminark' (for plugin scope)
-  pluginName: string | null;     // e.g., 'laminark' (for plugin scope)
-}
-
-const BUILTIN_TOOLS = new Set([
-  'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep',
-  'Task', 'WebFetch', 'WebSearch', 'MCPSearch',
-]);
-
-function parseToolProvenance(toolName: string): ToolProvenance {
-  // Built-in tools: no prefix
-  if (BUILTIN_TOOLS.has(toolName)) {
-    return { scope: 'builtin', serverName: null, toolName, marketplace: null, pluginName: null };
-  }
-
-  // Plugin MCP: mcp__plugin_{marketplace}_{plugin}__{tool}
-  const pluginMatch = toolName.match(/^mcp__plugin_([^_]+)_([^_]+)__(.+)$/);
-  if (pluginMatch) {
-    return {
-      scope: 'plugin-mcp',
-      serverName: `${pluginMatch[1]}_${pluginMatch[2]}`,
-      toolName: pluginMatch[3],
-      marketplace: pluginMatch[1],
-      pluginName: pluginMatch[2],
-    };
-  }
-
-  // Regular MCP: mcp__{server}__{tool}
-  const mcpMatch = toolName.match(/^mcp__([^_]+)__(.+)$/);
-  if (mcpMatch) {
-    return {
-      scope: 'project-mcp', // Disambiguated later via config file lookup
-      serverName: mcpMatch[1],
-      toolName: mcpMatch[2],
-      marketplace: null,
-      pluginName: null,
-    };
-  }
-
-  // Unknown -- treat as external
-  return { scope: 'builtin', serverName: null, toolName, marketplace: null, pluginName: null };
-}
+const TRANSITIONS: Record<PathState, PathState[]> = {
+  idle: ['active'],
+  active: ['active', 'resolved', 'abandoned', 'stale'],
+  resolved: [],
+  abandoned: [],
+  stale: [],
+};
 ```
 
-**Disambiguation note:** To distinguish `project-mcp` from `user-mcp` for regular MCP tools (`mcp__{server}__{tool}`), check whether the server name exists in the project's `.mcp.json` vs `~/.claude.json`. This is the only case requiring config file lookup at tool-capture time.
+xstate (446 KB) or robot (2 KB) are designed for complex hierarchical/parallel state charts with guards, actions, and actors. Using them here would add dependency weight for a pattern that's 15 lines of TypeScript. The path state machine has no parallel states, no hierarchical nesting, no delayed transitions (timers are external), and no need for serialization/deserialization beyond what SQLite already provides.
 
-**Confidence: HIGH** -- Verified tool naming from:
-- Live system SKILL.md referencing `mcp__plugin_laminark_laminark__status`
-- Official docs showing `mcp__memory__create_entities` pattern
-- Hook handler code that matches `mcp__laminark__` prefix
-- Official hook reference confirming `tool_name` field in PostToolUse payloads
+**Confidence:** HIGH -- this is a well-understood pattern.
 
-### 3. Tool Registry (New SQLite Table)
+### 2. Debug Detection: Hybrid Regex + Haiku AI
 
-**Decision:** Add a `tool_registry` table to the existing Laminark SQLite database via the migration system.
+**Decision:** Two-tier detection. Fast regex first (< 1ms), Haiku AI for ambiguous cases.
 
-**Schema:**
+**Tier 1 -- Regex patterns (zero latency):**
+
+```typescript
+const ERROR_PATTERNS = [
+  /\b(?:Error|TypeError|ReferenceError|SyntaxError)\b/,
+  /\bfailed\b.*\b(?:test|build|compile|deploy)\b/i,
+  /\b(?:ENOENT|EACCES|EPERM|ECONNREFUSED)\b/,
+  /\bstack\s*trace\b/i,
+  /\b(?:segfault|panic|abort|core dump)\b/i,
+  /\bexit\s*code\s*[1-9]/i,
+];
+```
+
+The existing `piggyback-extractor.ts` already classifies sentiment as `negative` using a similar word list (`NEGATIVE_WORDS`). Extend this with structured error pattern matching.
+
+**Tier 2 -- Haiku classification (for ambiguous cases):**
+
+When regex confidence is low (e.g., the word "error" appears in a comment, not an actual error), call Haiku via existing Agent SDK V2 session API with a classification prompt:
+
+```
+Is this tool output indicating a debug/troubleshooting scenario?
+Output: [truncated tool output]
+Answer: YES/NO with one-line reasoning
+```
+
+This matches the existing Haiku enrichment pattern used by observation processing.
+
+**Why not ML-based classification?** The vocabulary of debugging is small and highly patterned. Regex catches 80%+ of cases. Haiku catches the rest. Training a classifier would require labeled data we don't have, add dependency weight (ONNX model loading), and wouldn't outperform the regex + LLM hybrid for this specific domain.
+
+**Confidence:** HIGH -- regex for error detection is battle-tested. Haiku fallback ensures edge cases are covered.
+
+### 3. SQLite Schema: Two New Tables
+
+**Decision:** Add `debug_paths` and `path_waypoints` tables via migrations v20 and v21.
+
+#### Table: `debug_paths` (migration v20)
 
 ```sql
-CREATE TABLE tool_registry (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  tool_name TEXT NOT NULL,          -- Full tool_name as seen in hooks (e.g., 'mcp__github__search_repositories')
-  canonical_name TEXT NOT NULL,     -- Just the tool part (e.g., 'search_repositories')
-  scope TEXT NOT NULL,              -- 'builtin' | 'project-mcp' | 'user-mcp' | 'plugin-mcp'
-  server_name TEXT,                 -- MCP server name (null for builtins)
-  project_hash TEXT,                -- NULL for global tools, project_hash for project-scoped
-  first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
-  last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
-  use_count INTEGER NOT NULL DEFAULT 0,
-  metadata TEXT DEFAULT '{}'        -- JSON: description, marketplace, plugin name, etc.
+CREATE TABLE debug_paths (
+  id TEXT PRIMARY KEY,
+  project_hash TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'active'
+    CHECK(state IN ('active','resolved','abandoned','stale')),
+  trigger_observation_id TEXT,
+  trigger_summary TEXT,
+  resolution_summary TEXT,
+  kiss_summary TEXT,
+  waypoint_count INTEGER NOT NULL DEFAULT 0,
+  started_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE UNIQUE INDEX idx_tool_registry_name_project
-  ON tool_registry(tool_name, project_hash);
-CREATE INDEX idx_tool_registry_scope
-  ON tool_registry(scope);
-CREATE INDEX idx_tool_registry_server
-  ON tool_registry(server_name);
+CREATE INDEX idx_debug_paths_project ON debug_paths(project_hash);
+CREATE INDEX idx_debug_paths_session ON debug_paths(session_id);
+CREATE INDEX idx_debug_paths_state ON debug_paths(state);
+CREATE INDEX idx_debug_paths_started ON debug_paths(started_at DESC);
 ```
 
-**Why this belongs in the existing SQLite database:**
-- WAL mode already handles concurrent access from hook handler + MCP server
-- Migration system already exists (`src/storage/migrations.ts`)
-- Same `project_hash` scoping pattern used by observations, sessions, graph tables
-- No new connection management needed
+Design rationale:
+- `state` column with CHECK constraint matches the pattern used in `graph_nodes.type` and `graph_edges.type`.
+- `trigger_observation_id` links back to the observation that triggered debug detection. Nullable because manual `path:start` MCP calls may not have one.
+- `trigger_summary` stores the initial error/problem description for quick display without joining.
+- `resolution_summary` stores what fixed it.
+- `kiss_summary` stores the Haiku-generated "Keep It Simple" summary (e.g., "Error was caused by missing import. Fixed by adding `import X from Y`.").
+- `waypoint_count` is denormalized for fast display. Updated via trigger or application code.
+- Timestamps follow existing pattern (`datetime('now')` defaults).
 
-**Integration with existing code:** New migration (version 16) in `MIGRATIONS` array. New `ToolRegistryRepository` class following the same pattern as `ObservationRepository`.
+#### Table: `path_waypoints` (migration v21)
 
-**Confidence: HIGH** -- This is a straightforward extension of the existing storage pattern.
+```sql
+CREATE TABLE path_waypoints (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  path_id TEXT NOT NULL REFERENCES debug_paths(id) ON DELETE CASCADE,
+  sequence INTEGER NOT NULL,
+  waypoint_type TEXT NOT NULL
+    CHECK(waypoint_type IN ('error','attempt','discovery','pivot','backtrack','resolution')),
+  observation_id TEXT,
+  node_id TEXT,
+  summary TEXT NOT NULL,
+  tool_name TEXT,
+  metadata TEXT DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
-### 4. Global Installation Configuration
+CREATE INDEX idx_waypoints_path ON path_waypoints(path_id, sequence);
+CREATE INDEX idx_waypoints_node ON path_waypoints(node_id) WHERE node_id IS NOT NULL;
+```
 
-**Decision:** Laminark transitions from project-scoped (.mcp.json) to user-scoped plugin installation. The plugin system handles this.
+Design rationale:
+- `sequence` provides deterministic ordering within a path (timestamps can collide).
+- `waypoint_type` classifies the nature of each step. This enables visualization (color-code waypoints by type) and pattern analysis (detect loops = repeated `error` after `attempt`).
+- `node_id` optionally links to a graph node. Not all waypoints map to entities (e.g., a bash command failure doesn't necessarily have a graph node).
+- `observation_id` links to the raw observation for audit trail.
+- `tool_name` captures which tool produced this waypoint (for pattern analysis).
+- `metadata` is flexible JSON for waypoint-type-specific data (error codes, file paths, etc.).
+- `INTEGER PRIMARY KEY AUTOINCREMENT` matches the pattern used in `observations` and `research_buffer`.
 
-**Current state (project-scoped):**
-- `.mcp.json` in project root defines the MCP server
-- Hook handler runs from project-relative path
-- Tool names appear as `mcp__laminark__*`
+#### Why separate tables (not extending graph_nodes/graph_edges)?
 
-**Target state (global plugin):**
-- Plugin installed via marketplace to `~/.claude/plugins/cache/laminark/`
-- Enabled in `~/.claude/settings.json` -> `enabledPlugins`
-- MCP server defined in `.claude-plugin/plugin.json` or plugin `.mcp.json`
-- Hooks defined in plugin `hooks/hooks.json`
-- Tool names appear as `mcp__plugin_laminark_laminark__*`
+Paths are temporal sequences with lifecycle state. Graph nodes/edges are atemporal knowledge. Mixing them would:
+1. Pollute the graph taxonomy (adding `Path` and `Waypoint` entity types breaks the clean 6-type taxonomy).
+2. Make path queries expensive (filtering temporal path data from atemporal graph data).
+3. Create awkward state management (graph nodes don't have lifecycle states).
 
-**Changes required to existing files:**
+Instead, paths *reference* graph nodes via `path_waypoints.node_id`, creating a clean overlay relationship.
 
-| File | Change | Rationale |
-|------|--------|-----------|
-| `.claude-plugin/plugin.json` | Add `mcpServers` or reference `.mcp.json` | Plugin system auto-starts MCP servers when plugin is enabled |
-| `.claude-plugin/plugin.json` | Add `hooks` field referencing hooks config | Plugin hooks merge with user/project hooks automatically |
-| `hooks/hooks.json` (new) | Move hook config from project `.claude/settings.json` to plugin | Hooks travel with the plugin, not with each project |
-| `src/hooks/handler.ts` | Update self-referential filter prefix | Change from `mcp__laminark__` to `mcp__plugin_laminark_laminark__` |
-| `src/shared/config.ts` | Use `${CLAUDE_PLUGIN_ROOT}` for paths | Plugin runs from cache dir, not project root |
-| `skills/status/SKILL.md` | Already references `mcp__plugin_laminark_laminark__status` | Already correct for plugin scope |
+**Confidence:** HIGH -- follows established Laminark migration patterns exactly.
 
-**Plugin `.mcp.json` format for global installation:**
+### 4. Loop Detection: Visited-Set Pattern
 
-```json
-{
-  "mcpServers": {
-    "laminark": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"],
-      "env": {}
-    }
-  }
+**Decision:** Track `(file_path, error_signature)` tuples in a Map during active path.
+
+```typescript
+interface LoopDetector {
+  seen: Map<string, number>; // key -> count
+  threshold: number;         // default: 3
 }
 ```
 
-**Hook migration for global scope:**
+A "loop" is detected when the same file + similar error appears 3+ times. This triggers a `backtrack` waypoint and optionally a Haiku prompt: "You seem to be trying the same approach repeatedly. Consider a different strategy."
 
-```json
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js"
-          }
-        ]
-      }
-    ],
-    "PostToolUseFailure": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/handler.js"
-          }
-        ]
-      }
-    ]
-  }
+**Why not a graph cycle detection algorithm?** Path waypoints are a linear sequence, not a graph. The "loop" we're detecting is semantic repetition (same error recurring), not structural cycles. A simple frequency counter on `(file, error_hash)` keys is more appropriate and O(1) per check.
+
+**Confidence:** HIGH -- straightforward frequency counting.
+
+### 5. KISS Summary Generation: Haiku via Agent SDK V2
+
+**Decision:** Generate summaries using the existing Haiku session API when a path transitions to `resolved`.
+
+Prompt template:
+
+```
+Summarize this debug journey in 2-3 sentences. Focus on: what broke, why, and what fixed it.
+
+Problem: {trigger_summary}
+Steps taken: {waypoint_summaries}
+Resolution: {resolution_summary}
+
+Write a KISS (Keep It Simple) summary a developer would find useful months later.
+```
+
+This matches the existing enrichment pattern. The Agent SDK V2 session API is already configured and working. No new API setup needed.
+
+**Cost consideration:** One Haiku call per resolved path. At typical debugging frequency (1-5 paths per session), this adds < $0.01 per session.
+
+**Confidence:** HIGH -- existing pattern, no new integration.
+
+### 6. D3 Graph Overlay: SVG Layer with Animated Paths
+
+**Decision:** Add a `pathsOverlayGroup` SVG layer between `edgesGroup` and `nodesGroup` in the existing `graph.js`.
+
+```javascript
+// In initGraph(), after edgesGroup creation:
+pathsOverlayGroup = svgG.append('g').attr('class', 'paths-overlay-group');
+```
+
+Path visualization:
+
+```javascript
+// Render path as a sequence of connected waypoint nodes
+var pathLine = d3.line()
+  .x(function(d) { return d.x; })
+  .y(function(d) { return d.y; })
+  .curve(d3.curveCatmullRom.alpha(0.5)); // Smooth curves through waypoints
+
+pathsOverlayGroup.selectAll('path.debug-path')
+  .data(activePaths)
+  .join('path')
+  .attr('class', 'debug-path')
+  .attr('d', function(d) { return pathLine(d.waypoints); })
+  .attr('stroke', '#f85149')       // Error red for active, green for resolved
+  .attr('stroke-width', 3)
+  .attr('fill', 'none')
+  .attr('stroke-dasharray', '8 4') // Dashed line for breadcrumb effect
+  .attr('marker-mid', 'url(#path-arrow)'); // Direction arrows
+```
+
+Animated breadcrumb effect via CSS:
+
+```css
+.debug-path {
+  stroke-dasharray: 8 4;
+  stroke-dashoffset: 0;
+  animation: path-flow 1s linear infinite;
+}
+
+@keyframes path-flow {
+  to { stroke-dashoffset: -12; }
+}
+
+.debug-path.resolved {
+  stroke: #3fb950;
+  animation: none;
+  stroke-dasharray: none;
 }
 ```
 
-**Critical constraint discovered:** Plugin MCP servers start automatically when the plugin is enabled, but "you must restart Claude Code to apply MCP server changes (enabling or disabling)." This means installing/enabling the plugin requires a Claude Code restart -- acceptable for a one-time setup.
+**Why D3 line generator (not manual SVG paths)?** `d3.curveCatmullRom` produces smooth curves through waypoint positions without manual bezier control point calculation. The existing graph already uses D3 extensively.
 
-**Confidence: HIGH** -- Verified from official plugin docs, live `installed_plugins.json`, `known_marketplaces.json`, and the working `frontend-design` plugin structure.
+**Why not a separate canvas/WebGL layer?** Paths overlay a small number of nodes (typically 5-20 waypoints). SVG handles this with zero performance concern. Canvas would be warranted only at 1000+ simultaneous paths, which is not a realistic scenario.
 
-### 5. Conversation-Driven Routing
+**Confidence:** HIGH -- D3 line generators and SVG animations are well-documented, standard patterns.
 
-**Decision:** Extend the SessionStart context injection (`src/context/injection.ts`) to include tool-awareness context. Extend PostToolUse hook to update tool registry.
+### 7. MCP Tools: Three New Tool Definitions
 
-**What "routing" means in this context:**
-1. At SessionStart, inject context about what tools are available and recently used
-2. During conversation, the hook handler tags each observation with tool provenance
-3. When recalling memories, weight results by tool relevance to current conversation
-4. The MCP `recall` tool gets an optional `scope` filter parameter
+**Decision:** Add three MCP tools following the existing `server.tool()` pattern from `topic-context.ts`:
 
-**No new technology needed.** This is:
-- Extending the existing `assembleSessionContext()` function to query the tool registry
-- Adding a `scope` parameter to the existing `recall` MCP tool's Zod input schema
-- Modifying `processPostToolUseFiltered()` to upsert tool registry entries
+| Tool | Purpose | Parameters |
+|------|---------|-----------|
+| `path:start` | Manually start a debug path | `summary: string` (what you're debugging) |
+| `path:resolve` | Mark active path as resolved | `resolution: string` (what fixed it) |
+| `path:show` | Display path history | `pathId?: string` (optional, defaults to most recent), `format?: 'summary' \| 'detailed'` |
 
-**Implementation touches:**
+These follow the existing MCP tool pattern. Zod schemas for input validation (already a dependency).
 
-| Existing File | Change |
-|---------------|--------|
-| `src/context/injection.ts` | Add "Available tools" section to context output |
-| `src/hooks/handler.ts` | Call `toolRegistry.upsert()` on each PostToolUse event |
-| `src/mcp/tools/recall.ts` | Add optional `scope` filter to search |
-| `src/storage/observations.ts` | Add `tool_scope` column or tag in metadata |
+**Confidence:** HIGH -- extends existing MCP tool pattern.
 
-**Confidence: HIGH** -- This builds directly on existing patterns.
+### 8. PostToolUse Hook Integration Point
 
-### 6. Config File Scope Resolution
+**Decision:** Add path-aware processing as a new middleware in the existing PostToolUse pipeline.
 
-**Decision:** Implement a `ConfigResolver` class that reads all Claude Code config files and merges them according to the documented precedence hierarchy.
-
-**Precedence (highest to lowest, from official docs):**
-1. Managed settings (`/etc/claude-code/managed-settings.json` on Linux)
-2. Local settings (`.claude/settings.local.json`)
-3. Project settings (`.claude/settings.json`)
-4. User settings (`~/.claude/settings.json`)
-
-**MCP server scope resolution:**
-1. Local scope: `~/.claude.json` under project path key
-2. Project scope: `.mcp.json` in project root
-3. User scope: `~/.claude.json` top-level `mcpServers`
-4. Plugin scope: plugin `.mcp.json` files
-
-**What Laminark needs from config resolution:**
-- List of enabled plugins (to know what plugin MCP tools to expect)
-- List of MCP servers per scope (to disambiguate `mcp__{server}__` tool names)
-- Project path (from `cwd` in hook payload, already available)
-
-**Implementation:** Single `ConfigResolver` class in `src/config/` that:
-1. Reads files once per session (SessionStart hook)
-2. Caches results in memory
-3. Provides `getServerScope(serverName, projectPath): 'local' | 'project' | 'user' | 'plugin'`
-4. Provides `getEnabledPlugins(): string[]`
-5. Provides `getAllMcpServers(projectPath): Map<string, {scope, config}>`
-
-**Why a class, not individual functions:** The config files are read once and cached. A class encapsulates the cache lifetime with the session lifetime. When the hook handler creates a `ConfigResolver`, it reads all files once. The MCP server process can also create one at startup.
-
-**Confidence: HIGH** -- All file paths and formats verified from live system.
-
-## Integration Map: Existing Code -> New Code
-
+Current flow:
 ```
-EXISTING                              NEW
--------                               ---
-src/hooks/handler.ts                  src/config/resolver.ts (ConfigResolver)
-  |-- processPostToolUseFiltered()      |-- reads all Claude Code config files
-  |     NOW: captures observations      |-- caches per session
-  |     ADD: upserts tool registry      |-- resolves server -> scope mapping
-  |                                     |
-  |-- handleSessionStart()            src/storage/tool-registry.ts (ToolRegistryRepository)
-        NOW: assembles context            |-- upsert(), getByProject(), getByScope()
-        ADD: queries tool registry        |-- migration 16 adds table
-        ADD: reads config resolver        |
-                                      src/hooks/tool-provenance.ts (parseToolProvenance)
-src/context/injection.ts                |-- parses tool_name into scope/server/tool
-  NOW: recent changes, decisions        |-- uses ConfigResolver for disambiguation
-  ADD: tool landscape section
-                                      .claude-plugin/plugin.json (updated)
-src/mcp/tools/recall.ts                 |-- mcpServers config for global install
-  NOW: search by text/vector            |-- hooks reference
-  ADD: optional scope filter
-                                      hooks/hooks.json (new)
-src/storage/migrations.ts                |-- hook config for plugin distribution
-  ADD: migration 16 (tool_registry)
+PostToolUse event --> capture.ts (extractObservation) --> database
 ```
+
+New flow:
+```
+PostToolUse event --> capture.ts (extractObservation) --> database
+                  \-> path-tracker.ts (detect debug / add waypoint) --> debug_paths + path_waypoints
+```
+
+The path tracker runs *in parallel* with observation capture (not blocking it). It reads the same `PostToolUsePayload` and makes independent decisions about path lifecycle.
+
+Integration point in `hooks/index.ts`:
+```typescript
+export { processPostToolUse, extractObservation } from './capture.js';
+export { processPathEvent } from './path-tracker.js';  // NEW
+```
+
+The hook handler (`handler.ts`, not in the src directory but in the hooks bin) calls both.
+
+**Confidence:** HIGH -- clean extension of existing pipeline.
 
 ## What NOT to Add
 
-| Temptation | Why Avoid | What to Do Instead |
-|------------|-----------|-------------------|
-| chokidar / fs.watch for config watching | Config changes are rare. Adds dependency + complexity. | Re-read configs at SessionStart (once per session) |
-| A separate config database | Over-engineering. Config is static within a session. | In-memory cache in ConfigResolver, populated from JSON files |
-| Tool description scraping via MCP | MCP list_tools is available only to the MCP client (Claude Code), not to MCP servers. Laminark is a server. | Extract descriptions from tool_response metadata if available, or from config files |
-| Dynamic plugin scanning | Claude Code already manages plugin lifecycle. Don't duplicate. | Read `installed_plugins.json` and `enabledPlugins` from settings |
-| WebSocket/IPC for tool change notifications | Adds complexity. Tool lists change only when user installs/uninstalls. | Refresh registry at SessionStart |
-| npm package for JSON schema validation of Claude Code configs | Zod (already installed) does this. Claude Code has no published JSON schemas for config files. | Define Zod schemas inline |
-| A process manager for the MCP server | Claude Code plugin system manages process lifecycle (start on enable, stop on disable) | Trust the plugin system |
+These technologies were considered and explicitly rejected:
 
-## Migration Path: Project -> Global
+| Technology | Why NOT |
+|-----------|---------|
+| **xstate** (state machine library) | 446 KB for 4 states and 6 transitions. Plain TypeScript is clearer and lighter. |
+| **robot** (tiny state machine) | Even at 2 KB, adds a dependency for trivial logic. |
+| **dagre / dagre-d3** (graph layout) | Paths are linear sequences, not DAGs. D3 line generators handle this. |
+| **graphlib** (graph algorithms) | No graph algorithms needed. Loop detection is frequency counting, not cycle detection. |
+| **bull / bee-queue** (job queues) | Path events are synchronous within the hook pipeline. No async job processing needed. |
+| **redis** | All state lives in SQLite. No cross-process coordination needed. |
+| **Additional embedding model** | Path similarity could use embeddings for "similar error" detection, but Jaccard on tokenized error messages (already in `shared/similarity.ts`) suffices. |
+| **D3 sankey / chord diagrams** | Path visualization is a simple directed trail, not a flow diagram. Line + arrows is the right abstraction. |
 
-The transition from project-scoped to global plugin must be backwards-compatible:
+## Existing Stack Leveraged (NOT re-researched)
 
-**Phase 1 (this milestone):** Support both install modes
-- Plugin `.mcp.json` uses `${CLAUDE_PLUGIN_ROOT}` for paths (works in both contexts)
-- Hook handler detects both `mcp__laminark__` and `mcp__plugin_laminark_laminark__` prefixes for self-referential filtering
-- `getConfigDir()` already resolves to `~/.claude/plugins/cache/laminark/data/` (correct for global)
-- `getProjectHash(process.cwd())` already scopes data per project (correct for global)
+| Component | Version | How Used for Paths |
+|-----------|---------|-------------------|
+| better-sqlite3 | ^12.6.2 | Path + waypoint storage, migrations |
+| Hono | ^4.11.9 | API endpoints for path data (`/api/paths`, `/api/paths/:id`) |
+| D3.js | (CDN, v7) | Graph overlay visualization with line generators |
+| @anthropic-ai/claude-agent-sdk | ^0.2.42 | Haiku calls for KISS summary generation |
+| @modelcontextprotocol/sdk | ^1.26.0 | MCP tool definitions (`path:start`, `path:resolve`, `path:show`) |
+| Zod | ^4.3.6 | Input validation for MCP tool parameters |
+| vitest | ^4.0.18 | Testing path lifecycle, detection, storage |
 
-**Phase 2 (documentation):** Update marketplace and README
-- Remove `.mcp.json` from project root in favor of plugin installation
-- Publish to marketplace for `claude plugin install laminark@laminark`
+## New File Structure
 
-**Key insight:** The existing database path (`~/.claude/plugins/cache/laminark/data/data.db`) is already global-scoped. The `project_hash` column in every table already provides per-project isolation. The global database with project scoping is the correct architecture -- no database migration needed for the global/project transition.
+```
+src/
+  paths/                          # NEW module
+    types.ts                      # PathState, WaypointType, interfaces
+    lifecycle.ts                  # State machine, transitions
+    detector.ts                   # Debug detection (regex + Haiku)
+    tracker.ts                    # Waypoint capture, loop detection
+    repository.ts                 # SQLite CRUD for paths + waypoints
+    summary.ts                    # KISS summary generation via Haiku
+  hooks/
+    path-tracker.ts               # PostToolUse hook integration (NEW)
+  mcp/tools/
+    path-tools.ts                 # MCP tool definitions (NEW)
+  web/routes/
+    api.ts                        # Extended with /api/paths endpoints
+  storage/
+    migrations.ts                 # Extended with v20, v21 migrations
+ui/
+  graph.js                        # Extended with paths overlay layer
+```
 
-## Version Requirements
+## Installation / Build Changes
 
-| Component | Current Version | Required Changes | Version Change |
-|-----------|----------------|------------------|----------------|
-| Node.js | >=22.0.0 | None | Same |
-| @modelcontextprotocol/sdk | ^1.26.0 | None | Same |
-| better-sqlite3 | ^12.6.2 | None (new table only) | Same |
-| zod | ^4.3.6 | None (new schemas only) | Same |
-| typescript | ^5.9.3 | None | Same |
-| hono | ^4.11.9 | None | Same |
+```bash
+# No new packages to install
+# No build configuration changes
+# No new environment variables
+# No new external services
+```
 
-**Zero dependency additions. Zero version bumps.**
+The only changes are source code additions within the existing project structure.
+
+## API Endpoints (New)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/paths` | List paths (filterable by state, project) |
+| GET | `/api/paths/:id` | Get path with waypoints |
+| GET | `/api/paths/active` | Get currently active path |
+| GET | `/api/paths/:id/overlay` | Get path waypoints with node positions for D3 overlay |
+
+These follow the existing API pattern in `web/routes/api.ts` (Hono router, typed context with `db` variable).
 
 ## Sources
 
-- [Claude Code MCP Documentation](https://code.claude.com/docs/en/mcp) -- MCP scopes, tool search, plugin MCP servers (HIGH confidence, fetched 2026-02-10)
-- [Claude Code Plugins Reference](https://code.claude.com/docs/en/plugins-reference) -- Plugin manifest schema, MCP server bundling, hooks config, skills (HIGH confidence, fetched 2026-02-10)
-- [Claude Code Hooks Reference](https://code.claude.com/docs/en/hooks) -- All hook events, payload schemas, tool_name patterns, MCP tool matching (HIGH confidence, fetched 2026-02-10)
-- [Claude Code Settings](https://code.claude.com/docs/en/settings) -- Settings file locations, precedence, MCP config, permissions (HIGH confidence, fetched 2026-02-10)
-- Live system files at `/home/matthew/.claude/settings.json`, `/home/matthew/.claude/settings.local.json`, `/home/matthew/.claude.json`, `/home/matthew/.claude/plugins/installed_plugins.json`, `/home/matthew/.claude/plugins/known_marketplaces.json` -- Actual Claude Code config structure (HIGH confidence, direct observation)
-- Live Laminark codebase at `/data/Laminark/` -- Existing architecture, hook handler, MCP server, database schema (HIGH confidence, direct observation)
-- Plugin structure comparison: `frontend-design@claude-code-plugins` and `clangd-lsp@claude-plugins-official` installed plugins (HIGH confidence, direct observation)
+- Codebase analysis: `/data/Laminark/src/` (all source files reviewed)
+- Existing patterns: `hooks/capture.ts`, `piggyback-extractor.ts`, `graph/schema.ts`, `storage/migrations.ts`
+- D3.js line generators: standard D3 v7 API (d3.line, d3.curveCatmullRom)
+- SVG animation: standard CSS animation on stroke-dashoffset
+- SQLite CHECK constraints: already used in graph_nodes.type and graph_edges.type
 
----
-*Stack research for: Laminark V2 -- Global Tool Discovery & Routing Milestone*
-*Researched: 2026-02-10*
-*Result: Zero new dependencies. Pure architectural changes to existing codebase.*
+## Confidence Assessment
+
+| Decision | Confidence | Rationale |
+|----------|------------|-----------|
+| Zero new dependencies | HIGH | Every capability maps to existing patterns in the codebase |
+| SQLite schema design | HIGH | Follows established migration pattern (19 prior migrations) |
+| State machine approach | HIGH | 4 states, trivial complexity, no library warranted |
+| Regex + Haiku detection | HIGH | Extends existing piggyback-extractor pattern |
+| D3 overlay visualization | HIGH | Standard D3 patterns, existing graph.js architecture supports layers |
+| Waypoint type taxonomy | MEDIUM | The 6 waypoint types (error, attempt, discovery, pivot, backtrack, resolution) may need refinement during implementation. Start with these, adjust based on real usage. |
+| Loop detection threshold | MEDIUM | Default of 3 repetitions is a guess. May need tuning. Configurable. |
