@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-10)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
-**Current focus:** Milestone v2.0 -- Phase 16 COMPLETE (Staleness Management)
+**Current focus:** Phase 17 -- Replace regex-based analysis with Haiku agents
 
 ## Current Position
 
-Phase: 16 of 16 (Staleness Management) -- COMPLETE
-Plan: 2 of 2 complete
-Status: Phase 16 complete. All v2.0 phases complete.
-Last activity: 2026-02-12 - Completed quick task 2: add in a help section to the Laminark GUI
+Phase: 17 of 17 (Replace Regex Analysis with Haiku Agents)
+Plan: 1 of 3 complete
+Status: Plan 01 complete -- Haiku intelligence foundation (SDK, config, client, 3 agents)
+Last activity: 2026-02-14 - Completed 17-01: Haiku intelligence foundation
 
-Progress (v2.0): [██████████] 100% (Phase 16 plan 2/2 complete)
+Progress (Phase 17): [███-------] 33% (Plan 1/3 complete)
 
 ## Performance Metrics
 
@@ -107,6 +107,9 @@ Recent decisions affecting current work:
 - [16-02]: Age penalty computed in JS using MAX(last_used_at/discovered_at, updated_at) not SQL
 - [16-02]: Router uses strict t.status === 'active' for forward-compatibility with new statuses
 - [16-02]: Stacking score penalties: 0.25x for status (stale/demoted) and 0.5x for 30+ day age
+- [17-01]: Used @anthropic-ai/sdk (not claude-agent-sdk) for simple Messages API calls -- agent SDK is overkill for structured extraction
+- [17-01]: Combined noise/signal + observation classification into one Haiku call (one concern, cheaper)
+- [17-01]: Defensive JSON extractor strips markdown fences and finds JSON arrays/objects in response text
 
 ### Pending Todos
 
@@ -124,6 +127,10 @@ Recent decisions affecting current work:
 |---|-------------|------|--------|-----------|
 | 2 | add in a help section to the Laminark GUI | 2026-02-12 | cd7bc1d | [2-add-in-a-help-section-to-the-laminark-gu](./quick/2-add-in-a-help-section-to-the-laminark-gu/) |
 
+### Roadmap Evolution
+
+- Phase 17 added: replace decisionmaking regexes and broken haiku with agent-sdk haiku
+
 ### Blockers/Concerns
 
 - ~~Global installation changes MCP prefix from `mcp__laminark__` to `mcp__plugin_laminark_laminark__` — dual-prefix support needed during migration~~ RESOLVED by 09-01
@@ -133,6 +140,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-02-12
-Stopped at: Completed quick-2 -- Help tab added to Laminark GUI with 5 documentation sections.
+Last session: 2026-02-14
+Stopped at: Completed 17-01-PLAN.md -- Haiku intelligence foundation (SDK, config, client, 3 agents)
 Resume file: None
