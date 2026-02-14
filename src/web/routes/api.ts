@@ -10,6 +10,8 @@
 
 import { Hono } from 'hono';
 import type BetterSqlite3 from 'better-sqlite3';
+import { PathRepository } from '../../paths/path-repository.js';
+import type { PathWaypoint } from '../../paths/types.js';
 
 type AppEnv = {
   Variables: {
@@ -883,6 +885,105 @@ apiRoutes.get('/graph/communities', (c) => {
   } catch { /* tables may not exist */ }
 
   return c.json({ communities, isolatedNodes });
+});
+
+// ---------------------------------------------------------------------------
+// Debug Path endpoints
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/paths
+ *
+ * Returns a list of recent debug paths for the current project.
+ * Query params:
+ *   ?limit=20  - max results (default 20, max 50)
+ */
+apiRoutes.get('/paths', (c) => {
+  const db = getDb(c);
+  const projectHash = getProjectHash(c);
+
+  if (!projectHash) {
+    return c.json({ paths: [] });
+  }
+
+  const limitStr = c.req.query('limit');
+  const limit = limitStr ? Math.min(Math.max(parseInt(limitStr, 10) || 20, 1), 50) : 20;
+
+  try {
+    const repo = new PathRepository(db, projectHash);
+    const paths = repo.listPaths(limit);
+    return c.json({ paths });
+  } catch (err) {
+    console.error('[laminark] Failed to list paths:', err);
+    return c.json({ paths: [] });
+  }
+});
+
+/**
+ * GET /api/paths/active
+ *
+ * Returns the currently active debug path for the current project.
+ */
+apiRoutes.get('/paths/active', (c) => {
+  const db = getDb(c);
+  const projectHash = getProjectHash(c);
+
+  if (!projectHash) {
+    return c.json({ path: null });
+  }
+
+  try {
+    const repo = new PathRepository(db, projectHash);
+    const path = repo.getActivePath();
+    return c.json({ path });
+  } catch (err) {
+    console.error('[laminark] Failed to get active path:', err);
+    return c.json({ path: null });
+  }
+});
+
+/**
+ * GET /api/paths/:id
+ *
+ * Returns a single debug path with its waypoints.
+ */
+apiRoutes.get('/paths/:id', (c) => {
+  const db = getDb(c);
+  const projectHash = getProjectHash(c);
+  const pathId = c.req.param('id');
+
+  if (!projectHash) {
+    return c.json({ error: 'Path not found' }, 404);
+  }
+
+  try {
+    const repo = new PathRepository(db, projectHash);
+    const path = repo.getPath(pathId);
+
+    if (!path) {
+      return c.json({ error: 'Path not found' }, 404);
+    }
+
+    const waypoints: PathWaypoint[] = repo.getWaypoints(pathId);
+
+    // Parse kiss_summary from JSON string back to object if present
+    let kissSummary: unknown = null;
+    if (path.kiss_summary) {
+      try {
+        kissSummary = JSON.parse(path.kiss_summary);
+      } catch {
+        kissSummary = path.kiss_summary;
+      }
+    }
+
+    return c.json({
+      path: { ...path, kiss_summary: kissSummary },
+      waypoints,
+    });
+  } catch (err) {
+    console.error('[laminark] Failed to get path:', err);
+    return c.json({ error: 'Path not found' }, 404);
+  }
 });
 
 // ---------------------------------------------------------------------------
