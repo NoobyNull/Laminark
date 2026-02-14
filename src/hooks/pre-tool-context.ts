@@ -12,6 +12,8 @@ import { basename } from 'node:path';
 import { isLaminarksOwnTool } from './self-referential.js';
 import { SearchEngine } from '../storage/search.js';
 import { getNodeByNameAndType, traverseFrom } from '../graph/schema.js';
+import { findSimilarPaths, formatPathRecall } from '../paths/path-recall.js';
+import type { PathRepository } from '../paths/path-repository.js';
 import { debug } from '../shared/debug.js';
 
 /** Tools where we skip context injection entirely. */
@@ -102,6 +104,7 @@ export function handlePreToolUse(
   input: Record<string, unknown>,
   db: BetterSqlite3.Database,
   projectHash: string,
+  pathRepo?: PathRepository,
 ): string | null {
   const toolName = input.tool_name as string | undefined;
   if (!toolName) return null;
@@ -155,6 +158,22 @@ export function handlePreToolUse(
     }
   } catch {
     debug('hook', 'PreToolUse graph lookup failed');
+  }
+
+  // 3. Path recall for debugging context
+  if (pathRepo) {
+    try {
+      const toolOutput = (toolInput.content as string) ?? (toolInput.command as string) ?? query ?? '';
+      if (toolOutput.length > 20) {
+        const similar = findSimilarPaths(pathRepo, toolOutput, 2);
+        const recall = formatPathRecall(similar);
+        if (recall) {
+          lines.push(recall);
+        }
+      }
+    } catch {
+      debug('hook', 'PreToolUse path recall failed');
+    }
   }
 
   if (lines.length === 0) return null;
