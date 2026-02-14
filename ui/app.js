@@ -105,6 +105,39 @@ async function fetchProjects() {
   }
 }
 
+/**
+ * Fetches recent debug paths from the REST API.
+ * @returns {Promise<{paths: Array}>}
+ */
+async function fetchPaths() {
+  try {
+    const params = new URLSearchParams();
+    if (window.laminarkState.currentProject) params.set('project', window.laminarkState.currentProject);
+    const res = await fetch('/api/paths' + (params.toString() ? '?' + params.toString() : ''));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.json();
+  } catch (err) {
+    console.error('[laminark] Failed to fetch paths:', err);
+    return { paths: [] };
+  }
+}
+
+/**
+ * Fetches detail for a single debug path including waypoints.
+ * @param {string} pathId - Path ID
+ * @returns {Promise<{path: Object, waypoints: Array}|null>}
+ */
+async function fetchPathDetail(pathId) {
+  try {
+    const res = await fetch('/api/paths/' + encodeURIComponent(pathId));
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error('[laminark] Failed to fetch path detail:', err);
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // SSE connection with auto-reconnect and heartbeat watchdog
 // ---------------------------------------------------------------------------
@@ -220,6 +253,24 @@ function connectSSE() {
     var data = JSON.parse(e.data);
     recordEventReceived();
     document.dispatchEvent(new CustomEvent('laminark:session_end', { detail: data }));
+  });
+
+  eventSource.addEventListener('path_started', function (e) {
+    var data = JSON.parse(e.data);
+    recordEventReceived();
+    document.dispatchEvent(new CustomEvent('laminark:path_started', { detail: data }));
+  });
+
+  eventSource.addEventListener('path_waypoint', function (e) {
+    var data = JSON.parse(e.data);
+    recordEventReceived();
+    document.dispatchEvent(new CustomEvent('laminark:path_waypoint', { detail: data }));
+  });
+
+  eventSource.addEventListener('path_resolved', function (e) {
+    var data = JSON.parse(e.data);
+    recordEventReceived();
+    document.dispatchEvent(new CustomEvent('laminark:path_resolved', { detail: data }));
   });
 
   eventSource.onerror = function () {
@@ -1248,6 +1299,25 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
   });
 
+  // Path overlay event handlers (Plan 02 adds the graph overlay functions)
+  document.addEventListener('laminark:path_started', function (e) {
+    if (window.laminarkGraph && window.laminarkGraph.addPathOverlay) {
+      window.laminarkGraph.addPathOverlay(e.detail);
+    }
+  });
+
+  document.addEventListener('laminark:path_waypoint', function (e) {
+    if (window.laminarkGraph && window.laminarkGraph.updatePathOverlay) {
+      window.laminarkGraph.updatePathOverlay(e.detail);
+    }
+  });
+
+  document.addEventListener('laminark:path_resolved', function (e) {
+    if (window.laminarkGraph && window.laminarkGraph.resolvePathOverlay) {
+      window.laminarkGraph.resolvePathOverlay(e.detail);
+    }
+  });
+
   // Filter change handler for graph (legacy listener)
   document.addEventListener('laminark:filter_change', function () {
     // Filter changes now handled directly in initFilters via graph.filterByType/resetFilters
@@ -1360,6 +1430,8 @@ window.laminarkApp = {
   fetchTimelineData: fetchTimelineData,
   fetchNodeDetails: fetchNodeDetails,
   fetchProjects: fetchProjects,
+  fetchPaths: fetchPaths,
+  fetchPathDetail: fetchPathDetail,
   showNodeDetails: showNodeDetails,
   getActiveFilters: getActiveFilters,
 };
