@@ -338,3 +338,13 @@ Plans:
 - [x] 17-01-PLAN.md -- SDK installation, API key config, Haiku client singleton, and 3 focused agent modules (entity, relationship, classifier)
 - [x] 17-02-PLAN.md -- HaikuProcessor background orchestrator, admission filter simplification, index.ts rewiring, delete obsolete regex/classifier files
 - [x] 17-03-PLAN.md -- Test suite: new Haiku module tests (mocked API), updated tests for modified modules, removed tests for deleted modules
+
+### Phase 18: Replace @anthropic-ai/sdk with Claude Agent SDK for subscription-based Haiku calls
+
+**Goal:** Haiku enrichment calls route through Claude Code subscription auth via @anthropic-ai/claude-agent-sdk instead of requiring a separate Anthropic API key
+**Depends on:** Phase 17
+**Plans:** 2 plans
+
+Plans:
+- [ ] 18-01-PLAN.md -- SDK dependency swap, haiku-config simplification, and haiku-client rewrite to Agent SDK V2 session API
+- [ ] 18-02-PLAN.md -- Test suite rewrite for Agent SDK mocks and full migration verification
