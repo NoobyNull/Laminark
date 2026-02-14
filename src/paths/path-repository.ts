@@ -23,6 +23,9 @@ export class PathRepository {
   private readonly stmtGetPath: BetterSqlite3.Statement;
   private readonly stmtListPaths: BetterSqlite3.Statement;
 
+  // Prepared statements — KISS summary
+  private readonly stmtUpdateKiss: BetterSqlite3.Statement;
+
   // Prepared statements — waypoint management
   private readonly stmtAddWaypoint: BetterSqlite3.Statement;
   private readonly stmtGetWaypoints: BetterSqlite3.Statement;
@@ -69,6 +72,12 @@ export class PathRepository {
       WHERE project_hash = ?
       ORDER BY started_at DESC
       LIMIT ?
+    `);
+
+    // --- KISS summary statement ---
+
+    this.stmtUpdateKiss = db.prepare(`
+      UPDATE debug_paths SET kiss_summary = ? WHERE id = ? AND project_hash = ?
     `);
 
     // --- Waypoint statements ---
@@ -150,6 +159,18 @@ export class PathRepository {
   listPaths(limit: number = 20): DebugPath[] {
     const rows = this.stmtListPaths.all(this.projectHash, limit) as DebugPathRow[];
     return rows.map(rowToDebugPath);
+  }
+
+  // ===========================================================================
+  // KISS Summary
+  // ===========================================================================
+
+  /**
+   * Updates the kiss_summary column for a resolved debug path.
+   * Stores the full KissSummary JSON string.
+   */
+  updateKissSummary(pathId: string, kissSummary: string): void {
+    this.stmtUpdateKiss.run(kissSummary, pathId, this.projectHash);
   }
 
   // ===========================================================================

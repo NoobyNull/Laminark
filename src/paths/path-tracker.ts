@@ -20,6 +20,7 @@ import type { DebugSignal } from '../intelligence/haiku-classifier-agent.js';
 import type { PathRepository } from './path-repository.js';
 import type { WaypointType } from './types.js';
 import { debug } from '../shared/debug.js';
+import { generateKissSummary } from './kiss-summary-agent.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -240,6 +241,13 @@ export class PathTracker {
           consecutiveSuccesses: this.consecutiveSuccesses,
         });
 
+        // Fire-and-forget KISS generation (non-blocking)
+        const savedPathId = this.currentPathId;
+        const savedResolutionSummary = summary;
+        this.generateAndStoreKiss(savedPathId, savedResolutionSummary).catch((err) => {
+          debug('paths', 'KISS generation failed (fire-and-forget)', { error: String(err) });
+        });
+
         // Reset state
         this.state = 'idle';
         this.currentPathId = null;
@@ -250,5 +258,96 @@ export class PathTracker {
       // Error resets the consecutive success counter
       this.consecutiveSuccesses = 0;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // KISS summary generation
+  // -------------------------------------------------------------------------
+
+  /**
+   * Generates and stores a KISS summary for a resolved path.
+   * Non-fatal — failures are logged but do not affect path resolution.
+   */
+  private async generateAndStoreKiss(
+    pathId: string,
+    resolutionSummary: string,
+  ): Promise<void> {
+    try {
+      const path = this.repo.getPath(pathId);
+      if (!path) return;
+
+      const waypoints = this.repo.getWaypoints(pathId);
+      const kiss = await generateKissSummary(
+        path.trigger_summary,
+        waypoints,
+        resolutionSummary,
+      );
+
+      this.repo.updateKissSummary(pathId, JSON.stringify(kiss));
+      debug('paths', 'KISS summary stored', { pathId });
+    } catch (err) {
+      debug('paths', 'KISS generation failed', {
+        pathId,
+        error: String(err),
+      });
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Manual control (for MCP tools — Plan 02)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Manually starts a debug path. Used by MCP tools.
+   * If already tracking, returns the existing path ID.
+   */
+  startManually(triggerSummary: string): string | null {
+    if (this.state === 'active_debug' && this.currentPathId) {
+      return this.currentPathId;
+    }
+
+    const path = this.repo.createPath(triggerSummary);
+    this.state = 'active_debug';
+    this.currentPathId = path.id;
+    this.consecutiveSuccesses = 0;
+    this.errorBuffer = [];
+
+    debug('paths', 'Path started manually', { pathId: path.id });
+    return path.id;
+  }
+
+  /**
+   * Manually resolves the active debug path. Used by MCP tools.
+   * Adds a resolution waypoint, resolves the path, and fires KISS generation.
+   */
+  resolveManually(resolutionSummary: string): void {
+    if (!this.currentPathId || this.state !== 'active_debug') return;
+
+    // Add resolution waypoint
+    this.repo.addWaypoint(this.currentPathId, 'resolution', resolutionSummary);
+
+    // Resolve the path
+    this.repo.resolvePath(this.currentPathId, resolutionSummary);
+
+    // Fire-and-forget KISS generation
+    const savedPathId = this.currentPathId;
+    this.generateAndStoreKiss(savedPathId, resolutionSummary).catch((err) => {
+      debug('paths', 'KISS generation failed (fire-and-forget)', { error: String(err) });
+    });
+
+    // Reset state
+    this.state = 'idle';
+    this.currentPathId = null;
+    this.consecutiveSuccesses = 0;
+    this.errorBuffer = [];
+
+    debug('paths', 'Path resolved manually', { pathId: savedPathId });
+  }
+
+  /**
+   * Returns the active path ID, or null if no path is being tracked.
+   */
+  getActivePathId(): string | null {
+    return this.currentPathId;
   }
 }
