@@ -9,7 +9,7 @@
 import type BetterSqlite3 from 'better-sqlite3';
 import { randomBytes } from 'node:crypto';
 
-import type { DebugPath, PathWaypoint, WaypointType } from './types.js';
+import type { DebugPath, PathStatus, PathWaypoint, WaypointType } from './types.js';
 
 export class PathRepository {
   private readonly db: BetterSqlite3.Database;
@@ -25,6 +25,10 @@ export class PathRepository {
 
   // Prepared statements — KISS summary
   private readonly stmtUpdateKiss: BetterSqlite3.Statement;
+
+  // Prepared statements — cross-session linking
+  private readonly stmtFindRecentActive: BetterSqlite3.Statement;
+  private readonly stmtListByStatus: BetterSqlite3.Statement;
 
   // Prepared statements — waypoint management
   private readonly stmtAddWaypoint: BetterSqlite3.Statement;
@@ -70,6 +74,23 @@ export class PathRepository {
     this.stmtListPaths = db.prepare(`
       SELECT * FROM debug_paths
       WHERE project_hash = ?
+      ORDER BY started_at DESC
+      LIMIT ?
+    `);
+
+    // --- Cross-session linking statements ---
+
+    this.stmtFindRecentActive = db.prepare(`
+      SELECT * FROM debug_paths
+      WHERE project_hash = ? AND status = 'active'
+        AND started_at > datetime('now', '-24 hours')
+      ORDER BY started_at DESC
+      LIMIT 1
+    `);
+
+    this.stmtListByStatus = db.prepare(`
+      SELECT * FROM debug_paths
+      WHERE project_hash = ? AND status = ?
       ORDER BY started_at DESC
       LIMIT ?
     `);
@@ -158,6 +179,25 @@ export class PathRepository {
    */
   listPaths(limit: number = 20): DebugPath[] {
     const rows = this.stmtListPaths.all(this.projectHash, limit) as DebugPathRow[];
+    return rows.map(rowToDebugPath);
+  }
+
+  /**
+   * Finds a recently active path (started within the last 24 hours).
+   * Used for cross-session path linking — detects paths that may need
+   * continuation from a prior session.
+   */
+  findRecentActivePath(): DebugPath | null {
+    const row = this.stmtFindRecentActive.get(this.projectHash) as DebugPathRow | undefined;
+    return row ? rowToDebugPath(row) : null;
+  }
+
+  /**
+   * Lists paths filtered by status, ordered by started_at DESC.
+   * Useful for filtering to resolved/active/abandoned paths specifically.
+   */
+  listPathsByStatus(status: PathStatus, limit: number = 20): DebugPath[] {
+    const rows = this.stmtListByStatus.all(this.projectHash, status, limit) as DebugPathRow[];
     return rows.map(rowToDebugPath);
   }
 

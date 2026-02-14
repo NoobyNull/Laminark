@@ -8,6 +8,7 @@ import { generateSessionSummary } from '../curation/summarizer.js';
 import { assembleSessionContext } from '../context/injection.js';
 import { scanConfigForTools } from './config-scanner.js';
 import { extractPatterns, storePrecomputedPatterns } from '../routing/intent-patterns.js';
+import type { PathRepository } from '../paths/path-repository.js';
 import { debug } from '../shared/debug.js';
 
 /**
@@ -85,6 +86,7 @@ export function handleSessionStart(
   db: BetterSqlite3.Database,
   projectHash: string,
   toolRegistry?: ToolRegistryRepository,
+  pathRepo?: PathRepository,
 ): string | null {
   const sessionId = input.session_id as string | undefined;
 
@@ -161,7 +163,7 @@ export function handleSessionStart(
 
   // Assemble context from prior sessions and observations
   const startTime = Date.now();
-  const context = assembleSessionContext(db, projectHash, toolRegistry);
+  let context = assembleSessionContext(db, projectHash, toolRegistry);
   const elapsed = Date.now() - startTime;
 
   if (elapsed > 500) {
@@ -173,6 +175,33 @@ export function handleSessionStart(
     contextLength: context.length,
     elapsed,
   });
+
+  // PATH-06: Check for active debug paths from prior sessions
+  if (pathRepo) {
+    try {
+      const activePath = pathRepo.findRecentActivePath();
+      if (activePath) {
+        const ageMs = Date.now() - new Date(activePath.started_at).getTime();
+        if (ageMs > 24 * 60 * 60 * 1000) {
+          // Auto-abandon stale paths (>24h old)
+          pathRepo.abandonPath(activePath.id);
+          debug('session', 'Auto-abandoned stale debug path', { pathId: activePath.id, ageMs });
+        } else {
+          // Surface the active path for continuation
+          const waypoints = pathRepo.getWaypoints(activePath.id);
+          const lastWaypoint = waypoints[waypoints.length - 1];
+          const pathContext = `\n[Laminark] Active debug path carried over from prior session:\n` +
+            `  Issue: ${activePath.trigger_summary}\n` +
+            `  Waypoints: ${waypoints.length}\n` +
+            `  Last activity: ${lastWaypoint?.summary?.slice(0, 100) ?? 'none'}\n` +
+            `  Use path_show to see full path, or path_resolve to close it.\n`;
+          context = context + pathContext;
+        }
+      }
+    } catch {
+      debug('session', 'Cross-session path check failed (non-fatal)');
+    }
+  }
 
   // DISC-05: Prompt Claude to report its available tools for registry population.
   // The report_available_tools MCP tool accepts {tools: [{name, description}]}.
