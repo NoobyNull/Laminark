@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-02-10)
 ## Current Position
 
 Phase: 17 of 17 (Replace Regex Analysis with Haiku Agents)
-Plan: 2 of 3 complete
-Status: Plan 02 complete -- Pipeline integration (HaikuProcessor, admission filter, regex deletion)
-Last activity: 2026-02-14 - Completed 17-02: Pipeline integration
+Plan: 3 of 3 complete
+Status: Phase 17 COMPLETE -- All Haiku agents tested, existing tests updated
+Last activity: 2026-02-14 - Completed 17-03: Test coverage for Haiku migration
 
-Progress (Phase 17): [██████----] 67% (Plan 2/3 complete)
+Progress (Phase 17): [██████████] 100% (Plan 3/3 complete)
 
 ## Performance Metrics
 
@@ -48,6 +48,7 @@ Progress (Phase 17): [██████----] 67% (Plan 2/3 complete)
 | 14-conversation-routing | 2/2 | 5min | 2.5min |
 | 15-tool-search | 2/2 | 4min | 2min |
 | 16-staleness-management | 2/2 | 4min | 2min |
+| 17-haiku-intelligence | 3/3 | 14min | 5min |
 
 ## Accumulated Context
 
@@ -113,6 +114,8 @@ Recent decisions affecting current work:
 - [17-02]: Deleted regex extraction rules entirely -- HaikuProcessor is sole extraction path, no fallback
 - [17-02]: Store-then-classify pattern: observations stored unconditionally, classified by Haiku, noise soft-deleted
 - [17-02]: Provenance/temporal edges removed from embedding loop along with regex extraction block
+- [17-03]: Used vi.mock for all Haiku agents in processor tests -- real SQLite but mocked API calls
+- [17-03]: Noise rejection tests converted to admission tests -- documents behavioral shift to post-storage classification
 
 ### Pending Todos
 
@@ -144,5 +147,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 17-02-PLAN.md -- Pipeline integration (HaikuProcessor, admission filter, regex deletion)
+Stopped at: Completed 17-03-PLAN.md -- Test coverage for Haiku migration (Phase 17 COMPLETE)
 Resume file: None
