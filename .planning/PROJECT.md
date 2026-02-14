@@ -10,12 +10,26 @@ You never lose context. No matter how many tangents, topic jumps, or scattered s
 
 ## Current State
 
-All milestones through v2.1 shipped. Laminark is a globally-installed Claude Code plugin with persistent adaptive memory, intelligent tool routing, and AI-powered observation enrichment via Claude Agent SDK.
+Building v2.2. Laminark is a globally-installed Claude Code plugin with persistent adaptive memory, intelligent tool routing, and AI-powered observation enrichment via Claude Agent SDK.
 
 **Shipped versions:**
 - v1.0 Persistent Adaptive Memory (Phases 1-8, 2026-02-09)
 - v2.0 Global Tool Intelligence (Phases 9-16, 2026-02-10)
 - v2.1 Agent SDK Migration (Phases 17-18, 2026-02-14)
+
+## Current Milestone: v2.2 Debug Resolution Paths
+
+**Goal:** Make the debugging journey a first-class knowledge artifact — Laminark automatically tracks the path from problem to resolution, captures what was tried and why it failed, and distills the KISS fix.
+
+**Target features:**
+- Automatic debug session detection (Haiku recognizes error/failure patterns in PostToolUse stream)
+- Automatic waypoint capture (breadcrumbs recorded from tool activity — edits, tests, reverts, approach changes)
+- Automatic resolution detection (tests passing, error pattern stops, clean commit)
+- KISS summary generation (Haiku distills "next time, just do X" from the messy journey)
+- Path as first-class graph entity (connected to files, decisions, problems touched along the way)
+- MCP tools for explicit control (path start/resolve/show) and querying past paths
+- D3 graph overlay for visualizing breadcrumb trails on the knowledge graph
+- Multi-layer path dimensions (logical, programmatic, development)
 
 ## Requirements
 
@@ -47,7 +61,14 @@ All milestones through v2.1 shipped. Laminark is a globally-installed Claude Cod
 
 ### Active
 
-(No active requirements — all shipped. Start next milestone with `/gsd:new-milestone`)
+- [ ] Automatic debug session detection from error/failure patterns
+- [ ] Automatic waypoint capture from PostToolUse activity stream
+- [ ] Automatic resolution detection and path closure
+- [ ] KISS summary generation via Haiku on path resolution
+- [ ] Path as first-class graph entity with typed relationships
+- [ ] MCP tools: path start, path resolve, path show
+- [ ] D3 graph breadcrumb trail overlay
+- [ ] Multi-layer path dimensions (logical, programmatic, development)
 
 ### Out of Scope
 
@@ -101,5 +122,9 @@ Claude Code tool scoping model (discovered during V2 planning):
 
 Shipped through v2.1 with 18 phases, 55 plans total. Tech stack: Node.js + TypeScript + SQLite (WAL + FTS5 + sqlite-vec) + Hono web server + D3/vanilla JS UI. All observation enrichment (entity extraction, relationship inference, classification) now flows through Haiku AI via Claude Agent SDK V2 session API — no separate API key required.
 
+v2.2 insight: During debugging, developers accumulate layers of attempted fixes — patches on patches — and the final codebase carries cruft even when the actual solution was simple. The principle: the knowledge graph gets the full story (every attempt, failure, reasoning), the codebase gets only the KISS result. Debug paths are first-class memory artifacts, not throwaway noise. This extends Laminark's core value ("you never lose context") to the debugging journey itself.
+
+Key constraint: path detection and waypoint capture must be fully automatic ("vibe tool"). Errors during any task constitute debugging — not just explicit debug sessions. Haiku analyzes the PostToolUse stream to detect patterns: repeated failures, reverts, approach changes, resolution.
+
 ---
-*Last updated: 2026-02-14 after v2.1 milestone*
+*Last updated: 2026-02-14 after v2.2 milestone start*

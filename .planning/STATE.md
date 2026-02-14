@@ -5,13 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-14)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
-**Current focus:** v2.1 milestone complete. Planning next milestone.
+**Current focus:** v2.2 Debug Resolution Paths — automatic debug journey tracking
 
 ## Current Position
 
-Milestone: v2.1 Agent SDK Migration — SHIPPED 2026-02-14
-All 18 phases complete across 3 milestones (v1.0, v2.0, v2.1)
-Last activity: 2026-02-14 - Milestone v2.1 archived
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-14 — Milestone v2.2 Debug Resolution Paths started
 
 ## Performance Metrics
 
@@ -129,8 +130,8 @@ Recent decisions affecting current work:
 - ~~[v2] Usage event tracking~~ COMPLETE (Phase 12-01: tool_usage_events + temporal queries)
 - ~~[v2] Conversation-driven routing~~ COMPLETE (Phase 14: types, heuristic, learned patterns, router, handler + session integration)
 - ~~[v2] Tool search and discovery~~ COMPLETE (Phase 15: FTS5+vec0 search foundation + discover_tools MCP tool + background embedding)
-- [ ] Add PreToolUse hook for proactive context injection (surfaces relevant memories/graph before tool use)
-- [ ] Add toggle to hide edge type labels on graph (reduce visual clutter from related_to, modifies, etc.)
+- [x] Add PreToolUse hook for proactive context injection (surfaces relevant memories/graph before tool use) — SHIPPED
+- [x] Add toggle to hide edge type labels on graph (reduce visual clutter from related_to, modifies, etc.) — SHIPPED
 
 ### Quick Tasks Completed
 
@@ -153,5 +154,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 18-02-PLAN.md -- Phase 18 complete, Agent SDK migration fully verified
+Stopped at: Defining v2.2 milestone requirements
 Resume file: None
