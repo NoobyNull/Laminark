@@ -13,6 +13,8 @@ import { handlePreToolUse } from './pre-tool-context.js';
 import { ToolRegistryRepository } from '../storage/tool-registry.js';
 import { ConversationRouter } from '../routing/conversation-router.js';
 import { inferToolType, inferScope, extractServerName } from './tool-name-parser.js';
+import { PathRepository } from '../paths/path-repository.js';
+import { initPathSchema } from '../paths/schema.js';
 import { debug } from '../shared/debug.js';
 
 /**
@@ -271,10 +273,17 @@ async function main(): Promise<void> {
     } catch {
       // tool_registry table may not exist yet before migration 16
     }
+    let pathRepo: PathRepository | undefined;
+    try {
+      initPathSchema(laminarkDb.db);
+      pathRepo = new PathRepository(laminarkDb.db, projectHash);
+    } catch {
+      // debug_paths table may not exist yet
+    }
 
     switch (eventName) {
       case 'PreToolUse': {
-        const preContext = handlePreToolUse(input, laminarkDb.db, projectHash);
+        const preContext = handlePreToolUse(input, laminarkDb.db, projectHash, pathRepo);
         if (preContext) process.stdout.write(preContext);
         break;
       }
@@ -283,7 +292,7 @@ async function main(): Promise<void> {
         processPostToolUseFiltered(input, obsRepo, researchBuffer, toolRegistry, projectHash, laminarkDb.db);
         break;
       case 'SessionStart': {
-        const context = handleSessionStart(input, sessionRepo, laminarkDb.db, projectHash, toolRegistry);
+        const context = handleSessionStart(input, sessionRepo, laminarkDb.db, projectHash, toolRegistry, pathRepo);
         // SessionStart is synchronous -- stdout is injected into Claude's context window
         if (context) {
           process.stdout.write(context);
