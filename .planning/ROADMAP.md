@@ -5,6 +5,7 @@
 - ✅ **v1.0 Persistent Adaptive Memory** — Phases 1-8 (shipped 2026-02-09)
 - ✅ **v2.0 Global Tool Intelligence** — Phases 9-16 (shipped 2026-02-10)
 - ✅ **v2.1 Agent SDK Migration** — Phases 17-18 (shipped 2026-02-14)
+- **v2.2 Debug Resolution Paths** — Phases 19-21
 
 ## Phases
 
@@ -44,6 +45,18 @@
 
 </details>
 
+### Phase 19: Path Detection & Storage
+**Goal**: System automatically detects debugging, captures the journey as ordered waypoints, and persists everything to SQLite
+**Plans:** 3 plans
+
+Plans:
+- [ ] 19-01-PLAN.md — SQLite schema, types, and PathRepository CRUD
+- [ ] 19-02-PLAN.md — Extend Haiku classifier with debug signal detection
+- [ ] 19-03-PLAN.md — PathTracker state machine, HaikuProcessor integration, server wiring
+
+### Phase 20: Intelligence & MCP Tools
+### Phase 21: Graph Visualization
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -66,3 +79,6 @@
 | 16. Staleness Management | v2.0 | 2/2 | Complete | 2026-02-10 |
 | 17. Haiku Intelligence | v2.1 | 3/3 | Complete | 2026-02-14 |
 | 18. Agent SDK Migration | v2.1 | 2/2 | Complete | 2026-02-14 |
+| 19. Path Detection & Storage | v2.2 | 0/3 | Planning complete | - |
+| 20. Intelligence & MCP Tools | v2.2 | 0/TBD | Not started | - |
+| 21. Graph Visualization | v2.2 | 0/TBD | Not started | - |
