@@ -736,6 +736,209 @@ function showNodeDetails(nodeData) {
   panel.classList.remove('hidden');
 }
 
+function showPathDetails(pathData) {
+  var panel = document.getElementById('path-detail-panel');
+  var title = document.getElementById('path-detail-title');
+  var body = document.getElementById('path-detail-body');
+
+  if (!panel || !title || !body) return;
+
+  var path = pathData.path;
+  var waypoints = pathData.waypoints || [];
+
+  title.textContent = 'Debug Path';
+  body.innerHTML = '';
+
+  // Status + trigger section
+  var infoSection = document.createElement('div');
+  infoSection.className = 'path-info-section';
+
+  var statusBadge = document.createElement('span');
+  statusBadge.className = 'path-status-badge ' + path.status;
+  statusBadge.textContent = path.status;
+  infoSection.appendChild(statusBadge);
+
+  var triggerLabel = document.createElement('div');
+  triggerLabel.className = 'path-info-label';
+  triggerLabel.style.marginTop = '8px';
+  triggerLabel.textContent = 'Trigger';
+  infoSection.appendChild(triggerLabel);
+
+  var triggerValue = document.createElement('div');
+  triggerValue.className = 'path-info-value';
+  triggerValue.textContent = path.trigger_summary || 'Unknown trigger';
+  infoSection.appendChild(triggerValue);
+
+  // Started at
+  var startedLabel = document.createElement('div');
+  startedLabel.className = 'path-info-label';
+  startedLabel.style.marginTop = '6px';
+  startedLabel.textContent = 'Started';
+  infoSection.appendChild(startedLabel);
+
+  var startedValue = document.createElement('div');
+  startedValue.className = 'path-info-value';
+  startedValue.textContent = formatTime(path.started_at);
+  infoSection.appendChild(startedValue);
+
+  // Resolved at (if resolved)
+  if (path.resolved_at) {
+    var resolvedLabel = document.createElement('div');
+    resolvedLabel.className = 'path-info-label';
+    resolvedLabel.style.marginTop = '6px';
+    resolvedLabel.textContent = 'Resolved';
+    infoSection.appendChild(resolvedLabel);
+
+    var resolvedValue = document.createElement('div');
+    resolvedValue.className = 'path-info-value';
+    resolvedValue.textContent = formatTime(path.resolved_at);
+    infoSection.appendChild(resolvedValue);
+  }
+
+  // Resolution summary
+  if (path.resolution_summary) {
+    var resLabel = document.createElement('div');
+    resLabel.className = 'path-info-label';
+    resLabel.style.marginTop = '6px';
+    resLabel.textContent = 'Resolution';
+    infoSection.appendChild(resLabel);
+
+    var resValue = document.createElement('div');
+    resValue.className = 'path-info-value';
+    resValue.textContent = path.resolution_summary;
+    infoSection.appendChild(resValue);
+  }
+
+  body.appendChild(infoSection);
+
+  // KISS Summary (if present)
+  if (path.kiss_summary) {
+    var kiss;
+    try {
+      kiss = typeof path.kiss_summary === 'string' ? JSON.parse(path.kiss_summary) : path.kiss_summary;
+    } catch (e) { kiss = null; }
+
+    if (kiss) {
+      var kissSection = document.createElement('div');
+      kissSection.className = 'kiss-summary-section';
+
+      var kissTitle = document.createElement('div');
+      kissTitle.className = 'kiss-summary-title';
+      kissTitle.textContent = 'KISS Summary';
+      kissSection.appendChild(kissTitle);
+
+      var kissFields = [
+        { label: 'Problem', value: kiss.problem },
+        { label: 'Cause', value: kiss.cause },
+        { label: 'Fix', value: kiss.fix },
+        { label: 'Prevention', value: kiss.prevention },
+      ];
+
+      kissFields.forEach(function(field) {
+        if (!field.value) return;
+        var fieldDiv = document.createElement('div');
+        fieldDiv.className = 'kiss-summary-field';
+
+        var fieldLabel = document.createElement('div');
+        fieldLabel.className = 'kiss-summary-field-label';
+        fieldLabel.textContent = field.label;
+        fieldDiv.appendChild(fieldLabel);
+
+        var fieldValue = document.createElement('div');
+        fieldValue.className = 'kiss-summary-field-value';
+        fieldValue.textContent = field.value;
+        fieldDiv.appendChild(fieldValue);
+
+        kissSection.appendChild(fieldDiv);
+      });
+
+      body.appendChild(kissSection);
+    }
+  }
+
+  // Waypoint timeline
+  if (waypoints.length > 0) {
+    var wpSectionTitle = document.createElement('div');
+    wpSectionTitle.className = 'waypoint-section-title';
+    wpSectionTitle.textContent = 'Waypoints (' + waypoints.length + ')';
+    body.appendChild(wpSectionTitle);
+
+    var timeline = document.createElement('div');
+    timeline.className = 'waypoint-timeline';
+
+    waypoints.forEach(function(wp) {
+      var item = document.createElement('div');
+      item.className = 'waypoint-item';
+      item.setAttribute('data-type', wp.waypoint_type);
+
+      var header = document.createElement('div');
+      header.className = 'waypoint-header';
+
+      var seq = document.createElement('span');
+      seq.className = 'waypoint-seq';
+      seq.textContent = '#' + wp.sequence_order;
+      header.appendChild(seq);
+
+      var typeLabel = document.createElement('span');
+      typeLabel.className = 'waypoint-type-label';
+      var WAYPOINT_COLORS = {
+        error: '#f85149', attempt: '#d29922', failure: '#f0883e',
+        success: '#3fb950', pivot: '#a371f7', revert: '#79c0ff',
+        discovery: '#58a6ff', resolution: '#3fb950'
+      };
+      typeLabel.style.color = WAYPOINT_COLORS[wp.waypoint_type] || '#8b949e';
+      typeLabel.textContent = wp.waypoint_type;
+      header.appendChild(typeLabel);
+
+      var time = document.createElement('span');
+      time.className = 'waypoint-time';
+      time.textContent = formatTime(wp.created_at);
+      header.appendChild(time);
+
+      item.appendChild(header);
+
+      if (wp.summary) {
+        var summary = document.createElement('div');
+        summary.className = 'waypoint-summary';
+        summary.textContent = wp.summary;
+        item.appendChild(summary);
+      }
+
+      timeline.appendChild(item);
+    });
+
+    body.appendChild(timeline);
+  } else {
+    var emptyMsg = document.createElement('p');
+    emptyMsg.className = 'empty-state';
+    emptyMsg.textContent = 'No waypoints recorded yet.';
+    body.appendChild(emptyMsg);
+  }
+
+  // Hide the node detail panel if it's open (avoid two panels)
+  var nodePanel = document.getElementById('detail-panel');
+  if (nodePanel) nodePanel.classList.add('hidden');
+
+  panel.classList.remove('hidden');
+}
+
+function initPathDetailPanel() {
+  var closeBtn = document.getElementById('path-detail-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', function() {
+      var panel = document.getElementById('path-detail-panel');
+      if (panel) panel.classList.add('hidden');
+    });
+  }
+
+  // Listen for path detail events from graph overlay clicks
+  document.addEventListener('laminark:show_path_detail', function(e) {
+    if (e.detail) {
+      showPathDetails(e.detail);
+    }
+  });
+}
+
 function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
@@ -1226,6 +1429,7 @@ document.addEventListener('DOMContentLoaded', async function () {
   initFilters();
   initTimeRange();
   initDetailPanel();
+  initPathDetailPanel();
   initSearch();
   initAnalysis();
   connectSSE();
@@ -1433,5 +1637,6 @@ window.laminarkApp = {
   fetchPaths: fetchPaths,
   fetchPathDetail: fetchPathDetail,
   showNodeDetails: showNodeDetails,
+  showPathDetails: showPathDetails,
   getActiveFilters: getActiveFilters,
 };
