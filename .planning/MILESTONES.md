@@ -18,21 +18,33 @@
 - Knowledge graph with entity extraction and relationship mapping
 - Interactive web visualization (graph + timeline + activity)
 
-## Current
-
 ### v2.0 — Global Tool Intelligence
 
-**Started:** 2026-02-10
-**Starting phase number:** 9
-**Ending phase number:** 16
-**Status:** Roadmap created, ready to plan Phase 9
+**Completed:** 2026-02-10
+**Phases:** 9-16 (13 plans)
+**Last phase number:** 16
 
-**Phases:**
-- Phase 9: Global Installation (GLOB-01 through GLOB-05)
-- Phase 10: Tool Discovery and Registry (DISC-01 through DISC-06)
-- Phase 11: Scope Resolution (SCOP-01 through SCOP-04)
-- Phase 12: Usage Tracking (UTRK-01 through UTRK-03)
-- Phase 13: Context Enhancement (CTXT-01 through CTXT-03)
-- Phase 14: Conversation Routing (ROUT-01 through ROUT-04)
-- Phase 15: Tool Search (SRCH-01 through SRCH-03)
-- Phase 16: Staleness Management (STAL-01 through STAL-03)
+**Delivered:**
+- Global plugin installation with project-aware session bootstrapping
+- Tool discovery across all Claude Code config scopes (.mcp.json, ~/.claude.json, commands, skills, plugins)
+- Scope-aware tool registry with built-in/global/project/plugin classification
+- Usage tracking with per-session and per-project event history
+- Context-enhanced session start with relevance-ranked tool suggestions
+- Conversation-driven tool routing with learned patterns and heuristic fallback
+- Tool search MCP tool with hybrid FTS5+vector semantic search
+- Staleness management with config rescan, age deprioritization, and failure demotion
+
+### v2.1 — Agent SDK Migration
+
+**Completed:** 2026-02-14
+**Phases:** 17-18 (5 plans, 12 tasks)
+**Last phase number:** 18
+
+**Delivered:**
+- Replaced regex entity extraction and broken MCP classifier with 3 focused Haiku AI agents
+- Created HaikuProcessor background orchestrator for classification, entity extraction, and relationship inference
+- Migrated from @anthropic-ai/sdk to @anthropic-ai/claude-agent-sdk for subscription-based auth (no API key needed)
+- Full test coverage maintained: 727 tests across 46 files, zero failures
+
+---
+

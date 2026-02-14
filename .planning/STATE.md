@@ -2,19 +2,16 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-10)
+See: .planning/PROJECT.md (updated 2026-02-14)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
-**Current focus:** Phase 18 -- Replace @anthropic-ai/sdk with Claude Agent SDK
+**Current focus:** v2.1 milestone complete. Planning next milestone.
 
 ## Current Position
 
-Phase: 18 of 18 (Replace @anthropic-ai/sdk with Claude Agent SDK)
-Plan: 2 of 2 complete
-Status: Phase 18 COMPLETE -- Agent SDK migration fully verified
-Last activity: 2026-02-14 - Completed 18-02: Test updates for Agent SDK migration
-
-Progress (Phase 18): [██████████] 100% (Plan 2/2 complete)
+Milestone: v2.1 Agent SDK Migration — SHIPPED 2026-02-14
+All 18 phases complete across 3 milestones (v1.0, v2.0, v2.1)
+Last activity: 2026-02-14 - Milestone v2.1 archived
 
 ## Performance Metrics
 
