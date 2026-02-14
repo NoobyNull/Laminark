@@ -9,6 +9,7 @@ import { redactSensitiveContent, isExcludedFile } from './privacy-filter.js';
 import { shouldAdmit, isMeaningfulBashCommand } from './admission-filter.js';
 import { SaveGuard } from './save-guard.js';
 import { isLaminarksOwnTool } from './self-referential.js';
+import { handlePreToolUse } from './pre-tool-context.js';
 import { ToolRegistryRepository } from '../storage/tool-registry.js';
 import { ConversationRouter } from '../routing/conversation-router.js';
 import { inferToolType, inferScope, extractServerName } from './tool-name-parser.js';
@@ -22,7 +23,7 @@ import { debug } from '../shared/debug.js';
  * dispatches to the appropriate handler based on hook_event_name, and exits 0.
  *
  * CRITICAL CONSTRAINTS:
- * - Only SessionStart writes to stdout (synchronous hook -- stdout is injected into Claude's context window)
+ * - Only SessionStart and PreToolUse write to stdout (synchronous hooks -- stdout is injected into Claude's context window)
  * - All other hooks NEVER write to stdout (stdout output is interpreted by Claude Code)
  * - ALWAYS exits 0 (non-zero exit codes surface as errors to Claude)
  * - Opens its own database connection (WAL mode handles concurrent access with MCP server)
@@ -272,6 +273,11 @@ async function main(): Promise<void> {
     }
 
     switch (eventName) {
+      case 'PreToolUse': {
+        const preContext = handlePreToolUse(input, laminarkDb.db, projectHash);
+        if (preContext) process.stdout.write(preContext);
+        break;
+      }
       case 'PostToolUse':
       case 'PostToolUseFailure':
         processPostToolUseFiltered(input, obsRepo, researchBuffer, toolRegistry, projectHash, laminarkDb.db);

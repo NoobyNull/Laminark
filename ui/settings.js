@@ -1,13 +1,20 @@
 /**
- * Laminark Settings tab — database statistics and reset operations.
+ * Laminark Settings tab — database statistics, config sections, and reset operations.
  */
 
 (function () {
   var currentStats = null;
 
+  // Preset-to-multiplier mapping
+  var PRESET_MULTIPLIERS = { sensitive: 1.0, balanced: 1.5, relaxed: 2.5 };
+
   function getProjectHash() {
     return window.laminarkState.currentProject || null;
   }
+
+  // =========================================================================
+  // Stats
+  // =========================================================================
 
   async function fetchStats(projectHash) {
     var params = new URLSearchParams();
@@ -60,6 +67,10 @@
       grid.appendChild(el);
     });
   }
+
+  // =========================================================================
+  // Reset
+  // =========================================================================
 
   async function resetData(type, scope) {
     var projectHash = scope === 'current' ? getProjectHash() : undefined;
@@ -142,9 +153,8 @@
         var result = await resetData(type, scope);
         hideConfirmDialog();
         if (result && result.ok) {
-          showSuccessMessage(type);
+          showSuccessMessage('Successfully reset ' + type + ' data.');
           await refreshStats();
-          // Reload graph/timeline data if they're initialized
           if (window.laminarkGraph && window.laminarkState.graphInitialized) {
             window.laminarkGraph.loadGraphData();
           }
@@ -171,10 +181,10 @@
     if (overlay) overlay.classList.add('hidden');
   }
 
-  function showSuccessMessage(type) {
+  function showSuccessMessage(text) {
     var msg = document.getElementById('settings-success');
     if (!msg) return;
-    msg.textContent = 'Successfully reset ' + type + ' data.';
+    msg.textContent = text;
     msg.classList.remove('hidden');
     setTimeout(function () {
       msg.classList.add('hidden');
@@ -192,6 +202,406 @@
     var stats = await fetchStats(projectHash);
     if (stats) renderStats(stats);
   }
+
+  // =========================================================================
+  // Config helpers
+  // =========================================================================
+
+  function bindSlider(sliderId, valueId) {
+    var slider = document.getElementById(sliderId);
+    var label = document.getElementById(valueId);
+    if (!slider || !label) return;
+    slider.addEventListener('input', function () {
+      label.textContent = parseFloat(slider.value).toFixed(2);
+    });
+  }
+
+  function updateStatusBadge(badgeId, enabled) {
+    var badge = document.getElementById(badgeId);
+    if (!badge) return;
+    badge.textContent = enabled ? 'Enabled' : 'Disabled';
+    badge.className = 'config-section-status ' + (enabled ? 'enabled' : 'disabled');
+  }
+
+  function setFieldsDisabled(containerId, disabled) {
+    var el = document.getElementById(containerId);
+    if (!el) return;
+    if (disabled) {
+      el.classList.add('disabled-fields');
+    } else {
+      el.classList.remove('disabled-fields');
+    }
+  }
+
+  // =========================================================================
+  // Topic Detection Config
+  // =========================================================================
+
+  function populateTopicDetection(config) {
+    var enabled = document.getElementById('td-enabled');
+    if (enabled) enabled.checked = config.enabled;
+    updateStatusBadge('td-status', config.enabled);
+    setFieldsDisabled('td-fields', !config.enabled);
+
+    // Preset radio
+    var presetBtns = document.querySelectorAll('#td-preset .config-radio');
+    presetBtns.forEach(function (btn) {
+      btn.classList.toggle('active', btn.getAttribute('data-value') === config.sensitivityPreset);
+    });
+
+    var multiplier = document.getElementById('td-multiplier');
+    if (multiplier) multiplier.value = config.sensitivityMultiplier;
+
+    var manualEnabled = document.getElementById('td-manual-enabled');
+    var manualValue = document.getElementById('td-manual-value');
+    if (manualEnabled) manualEnabled.checked = config.manualThreshold !== null;
+    if (manualValue) {
+      manualValue.disabled = config.manualThreshold === null;
+      manualValue.value = config.manualThreshold !== null ? config.manualThreshold : 0.3;
+    }
+
+    var ewma = document.getElementById('td-ewma');
+    var ewmaVal = document.getElementById('td-ewma-val');
+    if (ewma) ewma.value = config.ewmaAlpha;
+    if (ewmaVal) ewmaVal.textContent = config.ewmaAlpha.toFixed(2);
+
+    var boundsMin = document.getElementById('td-bounds-min');
+    var boundsMax = document.getElementById('td-bounds-max');
+    if (boundsMin) boundsMin.value = config.thresholdBounds.min;
+    if (boundsMax) boundsMax.value = config.thresholdBounds.max;
+  }
+
+  function gatherTopicDetection() {
+    var manualEnabled = document.getElementById('td-manual-enabled');
+    var manualValue = document.getElementById('td-manual-value');
+    var activePreset = document.querySelector('#td-preset .config-radio.active');
+
+    return {
+      enabled: document.getElementById('td-enabled').checked,
+      sensitivityPreset: activePreset ? activePreset.getAttribute('data-value') : 'balanced',
+      sensitivityMultiplier: parseFloat(document.getElementById('td-multiplier').value) || 1.5,
+      manualThreshold: manualEnabled && manualEnabled.checked ? (parseFloat(manualValue.value) || 0.3) : null,
+      ewmaAlpha: parseFloat(document.getElementById('td-ewma').value) || 0.3,
+      thresholdBounds: {
+        min: parseFloat(document.getElementById('td-bounds-min').value) || 0.15,
+        max: parseFloat(document.getElementById('td-bounds-max').value) || 0.6,
+      },
+    };
+  }
+
+  async function loadTopicDetectionConfig() {
+    try {
+      var res = await fetch('/api/admin/config/topic-detection');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var config = await res.json();
+      populateTopicDetection(config);
+    } catch (err) {
+      console.error('[laminark] Failed to load topic detection config:', err);
+    }
+  }
+
+  async function saveTopicDetectionConfig(data) {
+    try {
+      var res = await fetch('/api/admin/config/topic-detection', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var config = await res.json();
+      populateTopicDetection(config);
+      return config;
+    } catch (err) {
+      console.error('[laminark] Failed to save topic detection config:', err);
+      return null;
+    }
+  }
+
+  function initTopicDetection() {
+    // Collapsible section
+    var header = document.querySelector('[data-config-toggle="topic-detection"]');
+    if (header) {
+      header.addEventListener('click', function () {
+        document.getElementById('topic-detection-section').classList.toggle('collapsed');
+      });
+    }
+
+    // Enabled toggle
+    var enabled = document.getElementById('td-enabled');
+    if (enabled) {
+      enabled.addEventListener('change', function () {
+        updateStatusBadge('td-status', enabled.checked);
+        setFieldsDisabled('td-fields', !enabled.checked);
+      });
+    }
+
+    // Preset buttons
+    var presetBtns = document.querySelectorAll('#td-preset .config-radio');
+    presetBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        presetBtns.forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        var preset = btn.getAttribute('data-value');
+        var multiplier = document.getElementById('td-multiplier');
+        if (multiplier && PRESET_MULTIPLIERS[preset] !== undefined) {
+          multiplier.value = PRESET_MULTIPLIERS[preset];
+        }
+      });
+    });
+
+    // Manual threshold toggle
+    var manualEnabled = document.getElementById('td-manual-enabled');
+    var manualValue = document.getElementById('td-manual-value');
+    if (manualEnabled && manualValue) {
+      manualEnabled.addEventListener('change', function () {
+        manualValue.disabled = !manualEnabled.checked;
+      });
+    }
+
+    // EWMA slider
+    bindSlider('td-ewma', 'td-ewma-val');
+
+    // Save button
+    var saveBtn = document.getElementById('td-save');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async function () {
+        var data = gatherTopicDetection();
+        var result = await saveTopicDetectionConfig(data);
+        if (result) showSuccessMessage('Topic detection settings saved.');
+      });
+    }
+
+    // Reset to defaults
+    var defaultsBtn = document.getElementById('td-defaults');
+    if (defaultsBtn) {
+      var tdResetTimer = null;
+      defaultsBtn.addEventListener('click', async function () {
+        if (defaultsBtn.classList.contains('confirming')) {
+          clearTimeout(tdResetTimer);
+          defaultsBtn.classList.remove('confirming');
+          defaultsBtn.textContent = 'Reset to Defaults';
+          var result = await saveTopicDetectionConfig({ __reset: true });
+          if (result) showSuccessMessage('Topic detection reset to defaults.');
+        } else {
+          defaultsBtn.classList.add('confirming');
+          defaultsBtn.textContent = 'Confirm?';
+          tdResetTimer = setTimeout(function () {
+            defaultsBtn.classList.remove('confirming');
+            defaultsBtn.textContent = 'Reset to Defaults';
+          }, 3000);
+        }
+      });
+    }
+
+    loadTopicDetectionConfig();
+  }
+
+  // =========================================================================
+  // Graph Extraction Config
+  // =========================================================================
+
+  function populateGraphExtraction(config) {
+    var enabled = document.getElementById('ge-enabled');
+    if (enabled) enabled.checked = config.enabled;
+    updateStatusBadge('ge-status', config.enabled);
+    setFieldsDisabled('ge-fields', !config.enabled);
+
+    // Temporal decay
+    setVal('ge-halflife', config.temporalDecay.halfLifeDays);
+    setSlider('ge-minfloor', 'ge-minfloor-val', config.temporalDecay.minFloor);
+    setSlider('ge-delthresh', 'ge-delthresh-val', config.temporalDecay.deletionThreshold);
+    setVal('ge-maxage', config.temporalDecay.maxAgeDays);
+
+    // Fuzzy dedup
+    setVal('ge-levenshtein', config.fuzzyDedup.maxLevenshteinDistance);
+    setSlider('ge-jaccard', 'ge-jaccard-val', config.fuzzyDedup.jaccardThreshold);
+
+    // Quality gate
+    setVal('ge-maxfiles', config.qualityGate.maxFilesPerObservation);
+    setSlider('ge-filenonchange', 'ge-filenonchange-val', config.qualityGate.fileNonChangeMultiplier);
+    setVal('ge-minname', config.qualityGate.minNameLength);
+    setVal('ge-maxname', config.qualityGate.maxNameLength);
+
+    // Type confidence thresholds
+    var thresholds = config.qualityGate.typeConfidenceThresholds || {};
+    var grid = document.getElementById('ge-thresholds');
+    if (grid) {
+      var rows = grid.querySelectorAll('.config-threshold-row');
+      rows.forEach(function (row) {
+        var slider = row.querySelector('.config-slider');
+        var label = row.querySelector('.config-slider-value');
+        var type = slider.getAttribute('data-type');
+        if (type && thresholds[type] !== undefined) {
+          slider.value = thresholds[type];
+          if (label) label.textContent = thresholds[type].toFixed(2);
+        }
+      });
+    }
+
+    // Relationship detector
+    setSlider('ge-minedge', 'ge-minedge-val', config.relationshipDetector.minEdgeConfidence);
+
+    // Signal classifier
+    setVal('ge-mincontent', config.signalClassifier.minContentLength);
+  }
+
+  function setVal(id, value) {
+    var el = document.getElementById(id);
+    if (el) el.value = value;
+  }
+
+  function setSlider(sliderId, labelId, value) {
+    var slider = document.getElementById(sliderId);
+    var label = document.getElementById(labelId);
+    if (slider) slider.value = value;
+    if (label) label.textContent = parseFloat(value).toFixed(2);
+  }
+
+  function gatherGraphExtraction() {
+    var thresholds = {};
+    var grid = document.getElementById('ge-thresholds');
+    if (grid) {
+      var sliders = grid.querySelectorAll('.config-slider');
+      sliders.forEach(function (slider) {
+        var type = slider.getAttribute('data-type');
+        if (type) thresholds[type] = parseFloat(slider.value);
+      });
+    }
+
+    return {
+      enabled: document.getElementById('ge-enabled').checked,
+      temporalDecay: {
+        halfLifeDays: parseInt(document.getElementById('ge-halflife').value, 10) || 30,
+        minFloor: parseFloat(document.getElementById('ge-minfloor').value) || 0.05,
+        deletionThreshold: parseFloat(document.getElementById('ge-delthresh').value) || 0.08,
+        maxAgeDays: parseInt(document.getElementById('ge-maxage').value, 10) || 180,
+      },
+      fuzzyDedup: {
+        maxLevenshteinDistance: parseInt(document.getElementById('ge-levenshtein').value, 10) || 2,
+        jaccardThreshold: parseFloat(document.getElementById('ge-jaccard').value) || 0.7,
+      },
+      qualityGate: {
+        maxFilesPerObservation: parseInt(document.getElementById('ge-maxfiles').value, 10) || 5,
+        typeConfidenceThresholds: thresholds,
+        fileNonChangeMultiplier: parseFloat(document.getElementById('ge-filenonchange').value) || 0.74,
+        minNameLength: parseInt(document.getElementById('ge-minname').value, 10) || 3,
+        maxNameLength: parseInt(document.getElementById('ge-maxname').value, 10) || 200,
+      },
+      relationshipDetector: {
+        minEdgeConfidence: parseFloat(document.getElementById('ge-minedge').value) || 0.45,
+      },
+      signalClassifier: {
+        minContentLength: parseInt(document.getElementById('ge-mincontent').value, 10) || 30,
+      },
+    };
+  }
+
+  async function loadGraphExtractionConfig() {
+    try {
+      var res = await fetch('/api/admin/config/graph-extraction');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var config = await res.json();
+      populateGraphExtraction(config);
+    } catch (err) {
+      console.error('[laminark] Failed to load graph extraction config:', err);
+    }
+  }
+
+  async function saveGraphExtractionConfig(data) {
+    try {
+      var res = await fetch('/api/admin/config/graph-extraction', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var config = await res.json();
+      populateGraphExtraction(config);
+      return config;
+    } catch (err) {
+      console.error('[laminark] Failed to save graph extraction config:', err);
+      return null;
+    }
+  }
+
+  function initGraphExtraction() {
+    // Collapsible section
+    var header = document.querySelector('[data-config-toggle="graph-extraction"]');
+    if (header) {
+      header.addEventListener('click', function () {
+        document.getElementById('graph-extraction-section').classList.toggle('collapsed');
+      });
+    }
+
+    // Enabled toggle
+    var enabled = document.getElementById('ge-enabled');
+    if (enabled) {
+      enabled.addEventListener('change', function () {
+        updateStatusBadge('ge-status', enabled.checked);
+        setFieldsDisabled('ge-fields', !enabled.checked);
+      });
+    }
+
+    // Bind all sliders
+    bindSlider('ge-minfloor', 'ge-minfloor-val');
+    bindSlider('ge-delthresh', 'ge-delthresh-val');
+    bindSlider('ge-jaccard', 'ge-jaccard-val');
+    bindSlider('ge-filenonchange', 'ge-filenonchange-val');
+    bindSlider('ge-minedge', 'ge-minedge-val');
+
+    // Threshold grid sliders
+    var grid = document.getElementById('ge-thresholds');
+    if (grid) {
+      var rows = grid.querySelectorAll('.config-threshold-row');
+      rows.forEach(function (row) {
+        var slider = row.querySelector('.config-slider');
+        var label = row.querySelector('.config-slider-value');
+        if (slider && label) {
+          slider.addEventListener('input', function () {
+            label.textContent = parseFloat(slider.value).toFixed(2);
+          });
+        }
+      });
+    }
+
+    // Save button
+    var saveBtn = document.getElementById('ge-save');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async function () {
+        var data = gatherGraphExtraction();
+        var result = await saveGraphExtractionConfig(data);
+        if (result) showSuccessMessage('Graph extraction settings saved.');
+      });
+    }
+
+    // Reset to defaults
+    var defaultsBtn = document.getElementById('ge-defaults');
+    if (defaultsBtn) {
+      var geResetTimer = null;
+      defaultsBtn.addEventListener('click', async function () {
+        if (defaultsBtn.classList.contains('confirming')) {
+          clearTimeout(geResetTimer);
+          defaultsBtn.classList.remove('confirming');
+          defaultsBtn.textContent = 'Reset to Defaults';
+          var result = await saveGraphExtractionConfig({ __reset: true });
+          if (result) showSuccessMessage('Graph extraction reset to defaults.');
+        } else {
+          defaultsBtn.classList.add('confirming');
+          defaultsBtn.textContent = 'Confirm?';
+          geResetTimer = setTimeout(function () {
+            defaultsBtn.classList.remove('confirming');
+            defaultsBtn.textContent = 'Reset to Defaults';
+          }, 3000);
+        }
+      });
+    }
+
+    loadGraphExtractionConfig();
+  }
+
+  // =========================================================================
+  // Init
+  // =========================================================================
 
   function initSettings() {
     // Reset action buttons
@@ -227,6 +637,10 @@
     radios.forEach(function (radio) {
       radio.addEventListener('change', refreshStats);
     });
+
+    // Config sections
+    initTopicDetection();
+    initGraphExtraction();
   }
 
   window.laminarkSettings = {

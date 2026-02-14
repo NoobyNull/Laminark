@@ -179,6 +179,12 @@ var tooltipEl = null;
 var communityNodeMap = {};
 var communityColorMap = {};
 
+// Edge label visibility (per-type)
+var edgeLabelsVisible = localStorage.getItem('laminark-edge-labels') !== 'false';
+var hiddenEdgeLabelTypes = new Set(
+  JSON.parse(localStorage.getItem('laminark-hidden-edge-types') || '[]')
+);
+
 // ---------------------------------------------------------------------------
 // initGraph
 // ---------------------------------------------------------------------------
@@ -279,6 +285,7 @@ function initGraph(containerId) {
   });
 
   initContextMenu();
+  initEdgeLabelToggle();
 
   // Create tooltip element
   tooltipEl = document.createElement('div');
@@ -1069,10 +1076,138 @@ function updateLevelOfDetail() {
     nodeLabelsGroup.style('display', newLevel >= 1 ? 'none' : null);
   }
   if (edgeLabelsGroup) {
-    edgeLabelsGroup.style('display', newLevel >= 1 ? 'none' : null);
+    edgeLabelsGroup.style('display', (newLevel >= 1 || !edgeLabelsVisible) ? 'none' : null);
   }
   if (edgesGroup) {
     edgesGroup.style('display', newLevel >= 2 ? 'none' : null);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Edge label toggle (with per-type dropdown)
+// ---------------------------------------------------------------------------
+
+function initEdgeLabelToggle() {
+  var btn = document.getElementById('edge-labels-btn');
+  if (!btn) return;
+
+  btn.classList.toggle('active', edgeLabelsVisible);
+  applyEdgeLabelVisibility();
+
+  // Build dropdown
+  var dropdown = document.createElement('div');
+  dropdown.className = 'edge-labels-dropdown hidden';
+  dropdown.id = 'edge-labels-dropdown';
+
+  // "All" toggle row
+  var allRow = document.createElement('div');
+  allRow.className = 'edge-labels-dropdown-item edge-labels-all-toggle';
+  var allCheck = document.createElement('input');
+  allCheck.type = 'checkbox';
+  allCheck.checked = edgeLabelsVisible;
+  allCheck.id = 'edge-labels-all-check';
+  var allLabel = document.createElement('label');
+  allLabel.textContent = 'All labels';
+  allLabel.setAttribute('for', 'edge-labels-all-check');
+  allLabel.style.fontWeight = '600';
+  allRow.appendChild(allCheck);
+  allRow.appendChild(allLabel);
+  dropdown.appendChild(allRow);
+
+  var divider = document.createElement('div');
+  divider.className = 'edge-labels-dropdown-divider';
+  dropdown.appendChild(divider);
+
+  // Per-type rows
+  Object.keys(EDGE_TYPE_COLORS).forEach(function (type) {
+    var row = document.createElement('div');
+    row.className = 'edge-labels-dropdown-item';
+
+    var dot = document.createElement('span');
+    dot.className = 'edge-type-dot';
+    dot.style.background = EDGE_TYPE_COLORS[type];
+    row.appendChild(dot);
+
+    var check = document.createElement('input');
+    check.type = 'checkbox';
+    check.checked = !hiddenEdgeLabelTypes.has(type);
+    check.setAttribute('data-edge-type', type);
+    check.id = 'edge-type-' + type;
+    row.appendChild(check);
+
+    var label = document.createElement('label');
+    label.textContent = type;
+    label.setAttribute('for', 'edge-type-' + type);
+    row.appendChild(label);
+
+    check.addEventListener('change', function () {
+      if (check.checked) {
+        hiddenEdgeLabelTypes.delete(type);
+      } else {
+        hiddenEdgeLabelTypes.add(type);
+      }
+      persistHiddenEdgeTypes();
+      applyEdgeLabelVisibility();
+      updateAllCheckState();
+    });
+
+    dropdown.appendChild(row);
+  });
+
+  // Insert dropdown after button
+  btn.parentElement.style.position = 'relative';
+  btn.insertAdjacentElement('afterend', dropdown);
+
+  // Toggle dropdown on click
+  btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var isHidden = dropdown.classList.contains('hidden');
+    dropdown.classList.toggle('hidden', !isHidden);
+  });
+
+  // All toggle handler
+  allCheck.addEventListener('change', function () {
+    edgeLabelsVisible = allCheck.checked;
+    localStorage.setItem('laminark-edge-labels', edgeLabelsVisible ? 'true' : 'false');
+    btn.classList.toggle('active', edgeLabelsVisible);
+    applyEdgeLabelVisibility();
+  });
+
+  // Close on outside click
+  document.addEventListener('click', function (e) {
+    if (!btn.contains(e.target) && !dropdown.contains(e.target)) {
+      dropdown.classList.add('hidden');
+    }
+  });
+
+  function updateAllCheckState() {
+    var anyHidden = hiddenEdgeLabelTypes.size > 0;
+    allCheck.checked = edgeLabelsVisible;
+    allCheck.indeterminate = edgeLabelsVisible && anyHidden;
+  }
+}
+
+function persistHiddenEdgeTypes() {
+  localStorage.setItem('laminark-hidden-edge-types', JSON.stringify(Array.from(hiddenEdgeLabelTypes)));
+}
+
+function applyEdgeLabelVisibility() {
+  if (!edgeLabelsGroup) return;
+  // Hide entire group if master toggle off or LOD too low
+  if (!edgeLabelsVisible || currentLodLevel >= 1) {
+    edgeLabelsGroup.style('display', 'none');
+    return;
+  }
+  edgeLabelsGroup.style('display', null);
+
+  // Per-type visibility
+  if (hiddenEdgeLabelTypes.size > 0) {
+    edgeLabelsGroup.selectAll('.edge-label')
+      .style('display', function (d) {
+        return hiddenEdgeLabelTypes.has(d.type) ? 'none' : null;
+      });
+  } else {
+    edgeLabelsGroup.selectAll('.edge-label').style('display', null);
   }
 }
 
@@ -1973,4 +2108,17 @@ window.laminarkGraph = {
   clearCommunityColors: clearCommunityColors,
   showLinkedNodesOfType: showLinkedNodesOfType,
   hideContextMenu: hideContextMenu,
+  toggleEdgeLabels: function (type) {
+    if (type) {
+      if (hiddenEdgeLabelTypes.has(type)) hiddenEdgeLabelTypes.delete(type);
+      else hiddenEdgeLabelTypes.add(type);
+      persistHiddenEdgeTypes();
+    } else {
+      edgeLabelsVisible = !edgeLabelsVisible;
+      localStorage.setItem('laminark-edge-labels', edgeLabelsVisible ? 'true' : 'false');
+      var btn = document.getElementById('edge-labels-btn');
+      if (btn) btn.classList.toggle('active', edgeLabelsVisible);
+    }
+    applyEdgeLabelVisibility();
+  },
 };

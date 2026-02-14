@@ -89,12 +89,14 @@ export function registerSaveMemory(
         }
 
         const resolvedTitle = args.title ?? generateTitle(args.text);
-        const obs = repo.createClassified({
+        // Create as unclassified so HaikuProcessor picks it up for
+        // entity extraction and graph population in its next cycle.
+        const obs = repo.create({
           content: args.text,
           title: resolvedTitle,
           source: args.source,
           kind: args.kind,
-        }, 'discovery');
+        });
 
         debug('mcp', 'save_memory: saved', {
           id: obs.id,

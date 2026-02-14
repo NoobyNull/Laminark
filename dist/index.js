@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-t8LZeB-u.mjs";
-import { _ as debugTimed, a as inferScope, c as jaccardSimilarity$1, d as ObservationRepository, f as rowToObservation, g as debug, h as runMigrations, i as extractServerName, l as hybridSearch, m as MIGRATIONS, n as NotificationStore, o as inferToolType, p as openDatabase, r as ResearchBufferRepository, s as SaveGuard, t as ToolRegistryRepository, u as SessionRepository } from "./tool-registry-BWSzC89L.mjs";
-import { readFileSync } from "node:fs";
+import { C as MIGRATIONS, E as debugTimed, S as openDatabase, T as debug, _ as hybridSearch, a as inferScope, b as ObservationRepository, c as getEdgesForNode, d as initGraphSchema, f as insertEdge, g as jaccardSimilarity$1, h as SaveGuard, i as extractServerName, l as getNodeByNameAndType, m as upsertNode, n as NotificationStore, o as inferToolType, p as traverseFrom, r as ResearchBufferRepository, s as countEdgesForNode, t as ToolRegistryRepository, u as getNodesByType, v as SearchEngine, w as runMigrations, x as rowToObservation, y as SessionRepository } from "./tool-registry-BIjd5Evf.mjs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
@@ -11,143 +11,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Worker } from "node:worker_threads";
 import { fileURLToPath as fileURLToPath$1 } from "node:url";
+import { unstable_v2_createSession } from "@anthropic-ai/claude-agent-sdk";
 import { Hono } from "hono";
 import fs from "fs";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 
-//#region src/storage/search.ts
-/**
-* FTS5 search engine with BM25 ranking, snippet extraction, and strict project scoping.
-*
-* All queries are scoped to the projectHash provided at construction time.
-* Queries are sanitized to prevent FTS5 syntax errors and injection.
-*/
-var SearchEngine = class {
-	db;
-	projectHash;
-	constructor(db, projectHash) {
-		this.db = db;
-		this.projectHash = projectHash;
-	}
-	/**
-	* Full-text search with BM25 ranking and snippet extraction.
-	*
-	* bm25() returns NEGATIVE values where more negative = more relevant.
-	* ORDER BY rank (ascending) puts best matches first.
-	*
-	* @param query - User's search query (sanitized for FTS5 safety)
-	* @param options - Optional limit and sessionId filter
-	* @returns SearchResult[] ordered by relevance (best match first)
-	*/
-	searchKeyword(query, options) {
-		const sanitized = this.sanitizeQuery(query);
-		if (!sanitized) return [];
-		const limit = options?.limit ?? 20;
-		let sql = `
-      SELECT
-        o.*,
-        bm25(observations_fts, 2.0, 1.0) AS rank,
-        snippet(observations_fts, 1, '<mark>', '</mark>', '...', 32) AS snippet
-      FROM observations_fts
-      JOIN observations o ON o.rowid = observations_fts.rowid
-      WHERE observations_fts MATCH ?
-        AND o.project_hash = ?
-        AND o.deleted_at IS NULL
-        AND o.classification IS NOT NULL AND o.classification != 'noise'
-    `;
-		const params = [sanitized, this.projectHash];
-		if (options?.sessionId) {
-			sql += " AND o.session_id = ?";
-			params.push(options.sessionId);
-		}
-		sql += " ORDER BY rank LIMIT ?";
-		params.push(limit);
-		const results = debugTimed("search", "FTS5 keyword search", () => {
-			return this.db.prepare(sql).all(...params).map((row) => ({
-				observation: rowToObservation(row),
-				score: Math.abs(row.rank),
-				matchType: "fts",
-				snippet: row.snippet
-			}));
-		});
-		debug("search", "Keyword search completed", {
-			query: sanitized,
-			resultCount: results.length
-		});
-		return results;
-	}
-	/**
-	* Prefix search for autocomplete-style matching.
-	* Appends `*` to each word for prefix matching.
-	*/
-	searchByPrefix(prefix, limit) {
-		const words = prefix.trim().split(/\s+/).filter(Boolean);
-		if (words.length === 0) return [];
-		const sanitizedWords = words.map((w) => this.sanitizeWord(w)).filter(Boolean);
-		if (sanitizedWords.length === 0) return [];
-		const ftsQuery = sanitizedWords.map((w) => `${w}*`).join(" ");
-		const effectiveLimit = limit ?? 20;
-		const sql = `
-      SELECT
-        o.*,
-        bm25(observations_fts, 2.0, 1.0) AS rank,
-        snippet(observations_fts, 1, '<mark>', '</mark>', '...', 32) AS snippet
-      FROM observations_fts
-      JOIN observations o ON o.rowid = observations_fts.rowid
-      WHERE observations_fts MATCH ?
-        AND o.project_hash = ?
-        AND o.deleted_at IS NULL
-        AND o.classification IS NOT NULL AND o.classification != 'noise'
-      ORDER BY rank
-      LIMIT ?
-    `;
-		const results = debugTimed("search", "FTS5 prefix search", () => {
-			return this.db.prepare(sql).all(ftsQuery, this.projectHash, effectiveLimit).map((row) => ({
-				observation: rowToObservation(row),
-				score: Math.abs(row.rank),
-				matchType: "fts",
-				snippet: row.snippet
-			}));
-		});
-		debug("search", "Prefix search completed", {
-			prefix,
-			resultCount: results.length
-		});
-		return results;
-	}
-	/**
-	* Rebuild the FTS5 index if it gets out of sync.
-	*/
-	rebuildIndex() {
-		debug("search", "Rebuilding FTS5 index");
-		this.db.exec("INSERT INTO observations_fts(observations_fts) VALUES('rebuild')");
-	}
-	/**
-	* Sanitizes a user query for safe FTS5 MATCH usage.
-	* Removes FTS5 operators and special characters.
-	* Returns null if the query is empty after sanitization.
-	*/
-	sanitizeQuery(query) {
-		const words = query.trim().split(/\s+/).filter(Boolean);
-		if (words.length === 0) return null;
-		const sanitizedWords = words.map((w) => this.sanitizeWord(w)).filter(Boolean);
-		if (sanitizedWords.length === 0) return null;
-		return sanitizedWords.join(" ");
-	}
-	/**
-	* Sanitizes a single word for FTS5 safety.
-	* Removes quotes, parentheses, asterisks, and FTS5 operator keywords.
-	*/
-	sanitizeWord(word) {
-		let cleaned = word.replace(/["*()^{}[\]]/g, "");
-		if (/^(NEAR|OR|AND|NOT)$/i.test(cleaned)) return "";
-		cleaned = cleaned.replace(/[^\w\-]/g, "");
-		return cleaned;
-	}
-};
-
-//#endregion
 //#region src/storage/embeddings.ts
 /**
 * Data layer for vector insert/query against the cosine-distance vec0 table.
@@ -813,12 +682,12 @@ function registerSaveMemory(server, db, projectHash, notificationStore = null, w
 				}] };
 			}
 			const resolvedTitle = args.title ?? generateTitle(args.text);
-			const obs = repo.createClassified({
+			const obs = repo.create({
 				content: args.text,
 				title: resolvedTitle,
 				source: args.source,
 				kind: args.kind
-			}, "discovery");
+			});
 			debug("mcp", "save_memory: saved", {
 				id: obs.id,
 				title: resolvedTitle
@@ -1015,270 +884,6 @@ function isRelationshipType(s) {
 * hub nodes from dominating the graph.
 */
 const MAX_NODE_DEGREE = 50;
-
-//#endregion
-//#region src/graph/migrations/001-graph-tables.ts
-/**
-* Migration 001: Create graph_nodes and graph_edges tables.
-*
-* Graph tables are managed separately from the main observation/session tables
-* because the knowledge graph is a distinct subsystem that operates
-* on extracted entities rather than raw observations.
-*
-* Tables:
-*   - graph_nodes: entities with type-checked taxonomy (6 types)
-*   - graph_edges: directed relationships with type-checked taxonomy (8 types),
-*     weight confidence, and unique constraint on (source_id, target_id, type)
-*
-* Indexes:
-*   - Nodes: type, name
-*   - Edges: source_id, target_id, type, unique(source_id, target_id, type)
-*/
-const up = `
-  CREATE TABLE IF NOT EXISTS graph_nodes (
-    id TEXT PRIMARY KEY,
-    type TEXT NOT NULL CHECK(type IN ('Project','File','Decision','Problem','Solution','Reference')),
-    name TEXT NOT NULL,
-    metadata TEXT DEFAULT '{}',
-    observation_ids TEXT DEFAULT '[]',
-    project_hash TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS graph_edges (
-    id TEXT PRIMARY KEY,
-    source_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
-    target_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
-    type TEXT NOT NULL CHECK(type IN ('related_to','solved_by','caused_by','modifies','informed_by','references','verified_by','preceded_by')),
-    weight REAL NOT NULL DEFAULT 1.0 CHECK(weight >= 0.0 AND weight <= 1.0),
-    metadata TEXT DEFAULT '{}',
-    project_hash TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(type);
-  CREATE INDEX IF NOT EXISTS idx_graph_nodes_name ON graph_nodes(name);
-  CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_id);
-  CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(target_id);
-  CREATE INDEX IF NOT EXISTS idx_graph_edges_type ON graph_edges(type);
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_edges_unique ON graph_edges(source_id, target_id, type);
-`;
-
-//#endregion
-//#region src/graph/schema.ts
-function rowToNode(row) {
-	return {
-		id: row.id,
-		type: row.type,
-		name: row.name,
-		metadata: JSON.parse(row.metadata),
-		observation_ids: JSON.parse(row.observation_ids),
-		created_at: row.created_at,
-		updated_at: row.updated_at
-	};
-}
-function rowToEdge(row) {
-	return {
-		id: row.id,
-		source_id: row.source_id,
-		target_id: row.target_id,
-		type: row.type,
-		weight: row.weight,
-		metadata: JSON.parse(row.metadata),
-		created_at: row.created_at
-	};
-}
-/**
-* Initializes graph tables if they do not exist.
-* Uses CREATE TABLE IF NOT EXISTS so it is safe to call multiple times.
-*/
-function initGraphSchema(db) {
-	db.exec(up);
-}
-/**
-* Traverses the graph from a starting node using a recursive CTE.
-*
-* Supports directional traversal:
-*   - 'outgoing': follows edges where source_id matches (default)
-*   - 'incoming': follows edges where target_id matches
-*   - 'both': follows edges in either direction
-*
-* Returns nodes and the edges that connect them, up to the specified depth.
-* The starting node itself is NOT included in results (depth > 0 filter).
-*
-* @param db - better-sqlite3 Database handle
-* @param nodeId - starting node ID
-* @param opts - traversal options (depth, edgeTypes, direction)
-* @returns Array of { node, edge, depth } for each reachable node
-*/
-function traverseFrom(db, nodeId, opts = {}) {
-	const maxDepth = opts.depth ?? 2;
-	const direction = opts.direction ?? "outgoing";
-	let edgeTypeFilter = "";
-	if (opts.edgeTypes && opts.edgeTypes.length > 0) edgeTypeFilter = `AND e.type IN (${opts.edgeTypes.map(() => "?").join(", ")})`;
-	let recursiveStep;
-	if (direction === "outgoing") recursiveStep = `
-      SELECT e.target_id, t.depth + 1, e.id
-      FROM graph_edges e
-      JOIN traverse t ON e.source_id = t.node_id
-      WHERE t.depth < ?
-      ${edgeTypeFilter}
-    `;
-	else if (direction === "incoming") recursiveStep = `
-      SELECT e.source_id, t.depth + 1, e.id
-      FROM graph_edges e
-      JOIN traverse t ON e.target_id = t.node_id
-      WHERE t.depth < ?
-      ${edgeTypeFilter}
-    `;
-	else recursiveStep = `
-      SELECT e.target_id, t.depth + 1, e.id
-      FROM graph_edges e
-      JOIN traverse t ON e.source_id = t.node_id
-      WHERE t.depth < ?
-      ${edgeTypeFilter}
-      UNION ALL
-      SELECT e.source_id, t.depth + 1, e.id
-      FROM graph_edges e
-      JOIN traverse t ON e.target_id = t.node_id
-      WHERE t.depth < ?
-      ${edgeTypeFilter}
-    `;
-	const sql = `
-    WITH RECURSIVE traverse(node_id, depth, edge_id) AS (
-      SELECT ?, 0, NULL
-      UNION ALL
-      ${recursiveStep}
-    )
-    SELECT DISTINCT
-      n.id AS n_id, n.type AS n_type, n.name AS n_name,
-      n.metadata AS n_metadata, n.observation_ids AS n_observation_ids,
-      n.created_at AS n_created_at, n.updated_at AS n_updated_at,
-      e.id AS e_id, e.source_id AS e_source_id, e.target_id AS e_target_id,
-      e.type AS e_type, e.weight AS e_weight, e.metadata AS e_metadata,
-      e.created_at AS e_created_at,
-      t.depth
-    FROM traverse t
-    JOIN graph_nodes n ON n.id = t.node_id
-    LEFT JOIN graph_edges e ON e.id = t.edge_id
-    WHERE t.depth > 0
-  `;
-	const queryParams = [nodeId];
-	if (direction === "both") {
-		queryParams.push(maxDepth);
-		if (opts.edgeTypes) queryParams.push(...opts.edgeTypes);
-		queryParams.push(maxDepth);
-		if (opts.edgeTypes) queryParams.push(...opts.edgeTypes);
-	} else {
-		queryParams.push(maxDepth);
-		if (opts.edgeTypes) queryParams.push(...opts.edgeTypes);
-	}
-	return db.prepare(sql).all(...queryParams).map((row) => ({
-		node: {
-			id: row.n_id,
-			type: row.n_type,
-			name: row.n_name,
-			metadata: JSON.parse(row.n_metadata),
-			observation_ids: JSON.parse(row.n_observation_ids),
-			created_at: row.n_created_at,
-			updated_at: row.n_updated_at
-		},
-		edge: row.e_id ? {
-			id: row.e_id,
-			source_id: row.e_source_id,
-			target_id: row.e_target_id,
-			type: row.e_type,
-			weight: row.e_weight,
-			metadata: JSON.parse(row.e_metadata),
-			created_at: row.e_created_at
-		} : null,
-		depth: row.depth
-	}));
-}
-/**
-* Returns all nodes of a given entity type.
-*/
-function getNodesByType(db, type) {
-	return db.prepare("SELECT * FROM graph_nodes WHERE type = ?").all(type).map(rowToNode);
-}
-/**
-* Looks up a node by name and type (composite natural key).
-* Returns null if no matching node exists.
-*/
-function getNodeByNameAndType(db, name, type) {
-	const row = db.prepare("SELECT * FROM graph_nodes WHERE name = ? AND type = ?").get(name, type);
-	return row ? rowToNode(row) : null;
-}
-/**
-* Returns edges connected to a node, filtered by direction.
-*
-* @param direction - 'outgoing' (source), 'incoming' (target), or 'both' (default: 'both')
-*/
-function getEdgesForNode(db, nodeId, opts) {
-	const direction = opts?.direction ?? "both";
-	let sql;
-	let params;
-	if (direction === "outgoing") {
-		sql = "SELECT * FROM graph_edges WHERE source_id = ?";
-		params = [nodeId];
-	} else if (direction === "incoming") {
-		sql = "SELECT * FROM graph_edges WHERE target_id = ?";
-		params = [nodeId];
-	} else {
-		sql = "SELECT * FROM graph_edges WHERE source_id = ? OR target_id = ?";
-		params = [nodeId, nodeId];
-	}
-	return db.prepare(sql).all(...params).map(rowToEdge);
-}
-/**
-* Returns the total number of edges connected to a node (both directions).
-* Used for degree enforcement (MAX_NODE_DEGREE constraint).
-*/
-function countEdgesForNode(db, nodeId) {
-	return db.prepare("SELECT COUNT(*) as cnt FROM graph_edges WHERE source_id = ? OR target_id = ?").get(nodeId, nodeId).cnt;
-}
-/**
-* Inserts or updates a node by name+type composite key.
-*
-* If a node with the same name and type already exists, updates its metadata
-* and merges observation_ids. Otherwise, inserts a new node with a generated UUID.
-*
-* @returns The upserted GraphNode
-*/
-function upsertNode(db, node) {
-	const existing = getNodeByNameAndType(db, node.name, node.type);
-	if (existing) {
-		const mergedObsIds = [...new Set([...existing.observation_ids, ...node.observation_ids])];
-		const mergedMetadata = {
-			...existing.metadata,
-			...node.metadata
-		};
-		db.prepare(`UPDATE graph_nodes
-       SET metadata = ?, observation_ids = ?, updated_at = datetime('now')
-       WHERE id = ?`).run(JSON.stringify(mergedMetadata), JSON.stringify(mergedObsIds), existing.id);
-		return rowToNode(db.prepare("SELECT * FROM graph_nodes WHERE id = ?").get(existing.id));
-	}
-	const id = node.id ?? randomBytes(16).toString("hex");
-	db.prepare(`INSERT INTO graph_nodes (id, type, name, metadata, observation_ids, project_hash)
-     VALUES (?, ?, ?, ?, ?, ?)`).run(id, node.type, node.name, JSON.stringify(node.metadata), JSON.stringify(node.observation_ids), node.project_hash ?? null);
-	return rowToNode(db.prepare("SELECT * FROM graph_nodes WHERE id = ?").get(id));
-}
-/**
-* Inserts an edge. On conflict (same source_id, target_id, type),
-* updates the weight to the maximum of existing and new values.
-*
-* @returns The inserted or updated GraphEdge
-*/
-function insertEdge(db, edge) {
-	const id = edge.id ?? randomBytes(16).toString("hex");
-	db.prepare(`INSERT INTO graph_edges (id, source_id, target_id, type, weight, metadata, project_hash)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (source_id, target_id, type) DO UPDATE SET
-       weight = MAX(graph_edges.weight, excluded.weight),
-       metadata = excluded.metadata`).run(id, edge.source_id, edge.target_id, edge.type, edge.weight, JSON.stringify(edge.metadata), edge.project_hash ?? null);
-	return rowToEdge(db.prepare("SELECT * FROM graph_edges WHERE source_id = ? AND target_id = ? AND type = ?").get(edge.source_id, edge.target_id, edge.type));
-}
 
 //#endregion
 //#region src/mcp/tools/query-graph.ts
@@ -2338,7 +1943,8 @@ var TopicShiftHandler = class {
 		if (result.shifted) {
 			const previousObservations = this.observationStore.list({
 				sessionId,
-				limit: 20
+				limit: 20,
+				includeUnclassified: true
 			}).filter((obs) => obs.createdAt < observation.createdAt);
 			if (previousObservations.length === 0) {
 				debug("hook", "TopicShiftHandler: no previous observations to stash, skipping");
@@ -2933,556 +2539,248 @@ function loadGraphExtractionConfig() {
 }
 
 //#endregion
-//#region src/graph/signal-classifier.ts
-const DEFAULT_HIGH_SIGNAL_SOURCES = new Set([
-	"manual",
-	"hook:Write",
-	"hook:Edit",
-	"hook:WebFetch",
-	"hook:WebSearch"
-]);
-const DEFAULT_MEDIUM_SIGNAL_SOURCES = new Set(["hook:Bash", "curation:merge"]);
-const DEFAULT_SKIP_SOURCES = new Set([
-	"hook:TaskUpdate",
-	"hook:TaskCreate",
-	"hook:EnterPlanMode",
-	"hook:ExitPlanMode",
-	"hook:Read",
-	"hook:Glob",
-	"hook:Grep"
-]);
+//#region src/graph/observation-merger.ts
 /**
-* Patterns that indicate high-value content regardless of source.
-* Observations containing decision/problem/solution language get
-* promoted to high signal.
+* Computes cosine similarity between two number arrays.
+* Returns 0 for zero-length or zero-norm vectors.
 */
-const CONTENT_BOOST_PATTERNS = [
-	/\b(?:decided\s+to|chose\s+to|went\s+with|selected|opted\s+for|decision:)\b/i,
-	/\b(?:bug\s+in|issue\s+with|problem:|error:|broken|doesn't\s+work|can't)\b/i,
-	/\b(?:fixed\s+by|solved\s+by|solution:|resolved\s+by|workaround:)\b/i
-];
-/**
-* Checks if observation content contains high-value language
-* (decisions, problems, solutions) that warrants full extraction.
-*/
-function hasContentBoost(text) {
-	return CONTENT_BOOST_PATTERNS.some((pattern) => pattern.test(text));
+function cosineSimilarity(a, b) {
+	if (a.length !== b.length || a.length === 0) return 0;
+	let dot = 0;
+	let normA = 0;
+	let normB = 0;
+	for (let i = 0; i < a.length; i++) {
+		dot += a[i] * b[i];
+		normA += a[i] * a[i];
+		normB += b[i] * b[i];
+	}
+	const denom = Math.sqrt(normA) * Math.sqrt(normB);
+	if (denom === 0) return 0;
+	return dot / denom;
 }
-const DEFAULT_MIN_CONTENT_LENGTH = 30;
 /**
-* Classifies an observation's signal level for graph extraction.
-*
-* Classification logic:
-*   1. If content is below minimum length, SKIP
-*   2. If source is in skip list, check for content boost -> HIGH or SKIP
-*   3. If source is in high list, HIGH
-*   4. If source is in medium list, check for content boost -> HIGH or MEDIUM
-*   5. Unknown sources default to MEDIUM (with content boost -> HIGH)
+* Converts a Buffer of Float32 values to a number array.
 */
-function classifySignal(source, content, config) {
-	const minLength = config?.signalClassifier?.minContentLength ?? DEFAULT_MIN_CONTENT_LENGTH;
-	const highSources = config?.signalClassifier?.highSignalSources ? new Set(config.signalClassifier.highSignalSources) : DEFAULT_HIGH_SIGNAL_SOURCES;
-	const mediumSources = config?.signalClassifier?.mediumSignalSources ? new Set(config.signalClassifier.mediumSignalSources) : DEFAULT_MEDIUM_SIGNAL_SOURCES;
-	const skipSources = config?.signalClassifier?.skipSources ? new Set(config.signalClassifier.skipSources) : DEFAULT_SKIP_SOURCES;
-	if (content.length < minLength) return {
-		level: "skip",
-		reason: `Content too short (${content.length} < ${minLength})`
-	};
-	const boosted = hasContentBoost(content);
-	if (skipSources.has(source)) {
-		if (boosted) return {
-			level: "high",
-			reason: `Skip source "${source}" boosted by decision/problem/solution content`
-		};
-		return {
-			level: "skip",
-			reason: `Low-signal source: ${source}`
-		};
-	}
-	if (highSources.has(source)) return {
-		level: "high",
-		reason: `High-signal source: ${source}`
-	};
-	if (mediumSources.has(source)) {
-		if (boosted) return {
-			level: "high",
-			reason: `Medium source "${source}" boosted by decision/problem/solution content`
-		};
-		return {
-			level: "medium",
-			reason: `Medium-signal source: ${source}`
-		};
-	}
-	if (boosted) return {
-		level: "high",
-		reason: `Unknown source "${source}" boosted by decision/problem/solution content`
-	};
-	return {
-		level: "medium",
-		reason: `Unknown source "${source}" defaults to medium`
-	};
+function bufferToNumbers(buf) {
+	const floats = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
+	return Array.from(floats);
 }
-
-//#endregion
-//#region src/graph/extraction-rules.ts
 /**
-* Matches file paths like src/foo/bar.ts, ./config.json, /absolute/path.ext, package.json
+* Generates a consolidated summary from a cluster of observations.
 *
-* Regex: paths with at least one dot-extension, allowing /, ., -, _ in path segments.
-* Confidence: 0.95 (file paths are very reliable)
+* Strategy:
+*   1. Take the longest observation as the base
+*   2. Find unique keywords in shorter observations
+*   3. Append unique info in parentheses
+*   4. Prepend "[Consolidated from N observations]"
 */
-const filePathRule = (text) => {
-	const matches = [];
-	const regex = /(?<![a-zA-Z0-9@#])(?:\.\/|\/)?(?:[a-zA-Z0-9_-]+\/)+[a-zA-Z0-9_.-]+\.[a-zA-Z0-9]+(?![a-zA-Z0-9/])/g;
-	const standaloneRegex = /(?<![a-zA-Z0-9@#/])(?:[a-zA-Z0-9_-]+\.(?:ts|tsx|js|jsx|json|md|yml|yaml|toml|css|scss|html|sql|sh|py|rs|go|java|rb|php|c|cpp|h|hpp|vue|svelte|astro|prisma|graphql|gql|env|lock|config|xml|csv|txt|log|gitignore|dockerignore|editorconfig))(?![a-zA-Z0-9/])/g;
-	let match;
-	while ((match = regex.exec(text)) !== null) {
-		let name = match[0];
-		if (name.startsWith("./")) name = name.slice(2);
-		name = name.replace(/\/\//g, "/");
-		matches.push({
-			name,
-			type: "File",
-			confidence: .95,
-			span: [match.index, match.index + match[0].length]
-		});
+function generateSummary(observations) {
+	if (observations.length === 0) return "";
+	if (observations.length === 1) return observations[0].text;
+	const sorted = [...observations].sort((a, b) => b.text.length - a.text.length);
+	const base = sorted[0];
+	const baseWords = new Set(base.text.toLowerCase().split(/\s+/).filter((w) => w.length > 2));
+	const uniqueKeywords = [];
+	for (let i = 1; i < sorted.length; i++) {
+		const words = sorted[i].text.split(/\s+/).filter((w) => w.length > 2);
+		for (const word of words) if (!baseWords.has(word.toLowerCase()) && !uniqueKeywords.includes(word.toLowerCase())) uniqueKeywords.push(word.toLowerCase());
 	}
-	while ((match = standaloneRegex.exec(text)) !== null) {
-		const name = match[0];
-		if (!matches.some((m) => match.index >= m.span[0] && match.index < m.span[1])) matches.push({
-			name,
-			type: "File",
-			confidence: .95,
-			span: [match.index, match.index + match[0].length]
-		});
+	let summary = base.text;
+	if (uniqueKeywords.length > 0) {
+		const extras = uniqueKeywords.slice(0, 10).join(", ");
+		summary += ` (also: ${extras})`;
 	}
-	return matches;
-};
+	return `[Consolidated from ${observations.length} observations] ${summary}`;
+}
 /**
-* Matches phrases following decision indicators: "decided to", "chose", "went with",
-* "selected", "opted for", "choosing between", "decision:", "the decision was".
+* Finds clusters of similar observations for the same entity.
 *
-* Extracts the clause following the indicator (up to period, comma, or end of sentence).
-* Confidence: 0.7 (decision language can be ambiguous)
+* For each entity with 3+ observations:
+*   1. Compute pairwise similarities (cosine on embeddings, Jaccard on text)
+*   2. Cluster observations where ALL pairwise similarities exceed threshold
+*   3. Generate suggested summaries for each cluster
+*
+* Only clusters with 2+ observations are returned, sorted by size DESC.
+*
+* @param db - better-sqlite3 Database handle
+* @param opts - threshold (default 0.95 cosine / 0.85 Jaccard), entityId filter
+* @returns Mergeable observation clusters sorted by size descending
 */
-const decisionRule = (text) => {
-	const matches = [];
-	for (const pattern of [
-		/\bdecided\s+to\s+/gi,
-		/\bchose\s+(?:to\s+)?/gi,
-		/\bwent\s+with\s+/gi,
-		/\bselected\s+/gi,
-		/\bopted\s+for\s+/gi,
-		/\bchoosing\s+between\s+/gi,
-		/\bdecision:\s*/gi,
-		/\bthe\s+decision\s+was\s+(?:to\s+)?/gi
-	]) {
-		let match;
-		while ((match = pattern.exec(text)) !== null) {
-			const clauseStart = match.index + match[0].length;
-			const remaining = text.slice(clauseStart);
-			const clauseEnd = remaining.search(/[.;\n]|,\s+(?:and|but|so|which|because|since)/);
-			let clause = clauseEnd >= 0 ? remaining.slice(0, clauseEnd) : remaining;
-			clause = clause.trim();
-			if (clause.length > 100) clause = clause.slice(0, 100).trim();
-			if (clause.length < 3) continue;
-			matches.push({
-				name: clause,
-				type: "Decision",
-				confidence: .7,
-				span: [match.index, clauseStart + (clauseEnd >= 0 ? clauseEnd : remaining.length)]
-			});
+function findMergeableClusters(db, opts) {
+	const embeddingThreshold = opts?.threshold ?? .95;
+	const textThreshold = .85;
+	let nodes;
+	if (opts?.entityId) {
+		const row = db.prepare("SELECT id, observation_ids FROM graph_nodes WHERE id = ?").get(opts.entityId);
+		nodes = row ? [row] : [];
+	} else nodes = db.prepare("SELECT id, observation_ids FROM graph_nodes").all();
+	const clusters = [];
+	for (const node of nodes) {
+		const obsIds = JSON.parse(node.observation_ids);
+		if (obsIds.length < 3) continue;
+		const placeholders = obsIds.map(() => "?").join(", ");
+		const rows = db.prepare(`SELECT id, content, embedding, created_at, source, deleted_at
+         FROM observations
+         WHERE id IN (${placeholders}) AND deleted_at IS NULL`).all(...obsIds);
+		if (rows.length < 2) continue;
+		const observations = rows.map((r) => ({
+			id: r.id,
+			text: r.content,
+			embedding: r.embedding ? bufferToNumbers(r.embedding) : null,
+			created_at: r.created_at
+		}));
+		const used = /* @__PURE__ */ new Set();
+		for (let i = 0; i < observations.length; i++) {
+			if (used.has(observations[i].id)) continue;
+			const cluster = [observations[i]];
+			let totalSim = 0;
+			let pairCount = 0;
+			for (let j = i + 1; j < observations.length; j++) {
+				if (used.has(observations[j].id)) continue;
+				let allSimilar = true;
+				let candidateSim = 0;
+				let candidatePairs = 0;
+				for (const member of cluster) {
+					const sim = computeSimilarity(member, observations[j], embeddingThreshold, textThreshold);
+					if (sim === null) {
+						allSimilar = false;
+						break;
+					}
+					candidateSim += sim;
+					candidatePairs++;
+				}
+				if (allSimilar && candidatePairs > 0) {
+					cluster.push(observations[j]);
+					totalSim += candidateSim;
+					pairCount += candidatePairs;
+				}
+			}
+			if (cluster.length >= 2) {
+				for (const obs of cluster) used.add(obs.id);
+				const avgSim = pairCount > 0 ? totalSim / pairCount : 0;
+				clusters.push({
+					entityId: node.id,
+					observations: cluster,
+					similarity: avgSim,
+					suggestedSummary: generateSummary(cluster)
+				});
+			}
 		}
 	}
-	return matches;
-};
+	clusters.sort((a, b) => b.observations.length - a.observations.length);
+	return clusters;
+}
 /**
-* Matches URLs as Reference entities.
-* Captures http/https URLs from observation text.
-* Confidence: 0.9
+* Computes similarity between two observations.
+* Returns the similarity score if it exceeds the threshold, or null if not.
 */
-const referenceRule = (text) => {
-	const matches = [];
-	const seen = /* @__PURE__ */ new Set();
-	const urlRegex = /https?:\/\/[^\s"'<>\])}]+/g;
-	let match;
-	while ((match = urlRegex.exec(text)) !== null) {
-		let url = match[0];
-		url = url.replace(/[.,;:!?)]+$/, "");
-		if (seen.has(url)) continue;
-		seen.add(url);
-		matches.push({
-			name: url,
-			type: "Reference",
-			confidence: .9,
-			span: [match.index, match.index + url.length]
-		});
+function computeSimilarity(a, b, embeddingThreshold, textThreshold) {
+	if (a.embedding && b.embedding) {
+		const sim = cosineSimilarity(a.embedding, b.embedding);
+		return sim >= embeddingThreshold ? sim : null;
 	}
-	return matches;
-};
+	const sim = jaccardSimilarity$1(a.text, b.text);
+	return sim >= textThreshold ? sim : null;
+}
 /**
-* Matches phrases following problem indicators: "bug in", "issue with",
-* "problem:", "error:", "failing", "broken", "doesn't work", "can't", etc.
-* Confidence: 0.65
-*/
-const problemRule = (text) => {
-	const matches = [];
-	for (const pattern of [
-		/\bbug\s+in\s+/gi,
-		/\bissue\s+with\s+/gi,
-		/\bproblem:\s*/gi,
-		/\berror:\s*/gi,
-		/\bfailing\s+(?:to\s+)?/gi,
-		/\bbroken\s+/gi,
-		/\bdoesn'?t\s+work\s*/gi,
-		/\bcan'?t\s+/gi,
-		/\bunable\s+to\s+/gi,
-		/\bcrash(?:es|ing|ed)?\s+(?:in|on|when|during)\s+/gi
-	]) {
-		let match;
-		while ((match = pattern.exec(text)) !== null) {
-			const clauseStart = match.index + match[0].length;
-			const remaining = text.slice(clauseStart);
-			const clauseEnd = remaining.search(/[.;\n]|,\s+(?:and|but|so|which|because|since)/);
-			let clause = clauseEnd >= 0 ? remaining.slice(0, clauseEnd) : remaining;
-			clause = clause.trim();
-			if (clause.length > 100) clause = clause.slice(0, 100).trim();
-			if (clause.length < 3) continue;
-			matches.push({
-				name: clause,
-				type: "Problem",
-				confidence: .65,
-				span: [match.index, clauseStart + (clauseEnd >= 0 ? clauseEnd : remaining.length)]
-			});
-		}
-	}
-	return matches;
-};
-/**
-* Matches phrases following solution indicators: "fixed by", "solved by",
-* "the fix was", "solution:", "resolved by", "workaround:".
-* Confidence: 0.65
-*/
-const solutionRule = (text) => {
-	const matches = [];
-	for (const pattern of [
-		/\bfixed\s+by\s+/gi,
-		/\bsolved\s+by\s+/gi,
-		/\bthe\s+fix\s+was\s+/gi,
-		/\bsolution:\s*/gi,
-		/\bresolved\s+by\s+/gi,
-		/\bworkaround:\s*/gi
-	]) {
-		let match;
-		while ((match = pattern.exec(text)) !== null) {
-			const clauseStart = match.index + match[0].length;
-			const remaining = text.slice(clauseStart);
-			const clauseEnd = remaining.search(/[.;\n]|,\s+(?:and|but|so|which|because|since)/);
-			let clause = clauseEnd >= 0 ? remaining.slice(0, clauseEnd) : remaining;
-			clause = clause.trim();
-			if (clause.length > 100) clause = clause.slice(0, 100).trim();
-			if (clause.length < 3) continue;
-			matches.push({
-				name: clause,
-				type: "Solution",
-				confidence: .65,
-				span: [match.index, clauseStart + (clauseEnd >= 0 ? clauseEnd : remaining.length)]
-			});
-		}
-	}
-	return matches;
-};
-/**
-* Matches repository-style names (org/repo), project names in quotes after "project" keyword,
-* and package.json name references.
-* Confidence: 0.8
-*/
-const projectRule = (text) => {
-	const matches = [];
-	const seen = /* @__PURE__ */ new Set();
-	const orgRepoRegex = /(?<![@a-zA-Z0-9])\b([a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+)(?!\.[a-zA-Z]{1,4}(?:\b|\/))(?!\/)/g;
-	let match;
-	while ((match = orgRepoRegex.exec(text)) !== null) {
-		const candidate = match[1];
-		if (/\.[a-zA-Z]{1,6}$/.test(candidate) && !/\.js$/.test(candidate)) continue;
-		if (/^(src|dist|lib|test|tests|node_modules|build|public)\//.test(candidate)) continue;
-		const lower = candidate.toLowerCase();
-		if (seen.has(lower)) continue;
-		seen.add(lower);
-		matches.push({
-			name: candidate,
-			type: "Project",
-			confidence: .8,
-			span: [match.index, match.index + match[0].length]
-		});
-	}
-	const projectNameRegex = /\bproject\s*[:]\s*["']([^"']+)["']/gi;
-	while ((match = projectNameRegex.exec(text)) !== null) {
-		const name = match[1].trim();
-		const lower = name.toLowerCase();
-		if (seen.has(lower)) continue;
-		seen.add(lower);
-		matches.push({
-			name,
-			type: "Project",
-			confidence: .8,
-			span: [match.index, match.index + match[0].length]
-		});
-	}
-	const scopedRegex = /@([a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+)\b/g;
-	while ((match = scopedRegex.exec(text)) !== null) {
-		const name = `@${match[1]}`;
-		const lower = name.toLowerCase();
-		if (seen.has(lower)) continue;
-		seen.add(lower);
-		matches.push({
-			name,
-			type: "Project",
-			confidence: .8,
-			span: [match.index, match.index + match[0].length]
-		});
-	}
-	return matches;
-};
-/**
-* All extraction rules in priority order (higher confidence first).
-* Use this for iteration in the extraction pipeline.
-*/
-const ALL_RULES = [
-	filePathRule,
-	projectRule,
-	referenceRule,
-	decisionRule,
-	problemRule,
-	solutionRule
-];
-
-//#endregion
-//#region src/graph/write-quality-gate.ts
-const DEFAULT_MIN_NAME_LENGTH = 3;
-const DEFAULT_MAX_NAME_LENGTH = 200;
-const DEFAULT_MAX_FILES_PER_OBSERVATION = 5;
-/**
-* Vague name prefixes that indicate low-quality entity names.
-* Case-insensitive match against the start of the entity name.
-*/
-const VAGUE_PREFIXES = [
-	"the ",
-	"this ",
-	"that ",
-	"it ",
-	"some ",
-	"a ",
-	"an ",
-	"here ",
-	"there ",
-	"now ",
-	"just ",
-	"ok ",
-	"yes ",
-	"no ",
-	"maybe ",
-	"done ",
-	"tmp "
-];
-/**
-* Per-type minimum confidence thresholds.
-* High-signal types (Decision, Problem, Solution) have lower thresholds
-* to capture more of the valuable knowledge. File has the highest
-* threshold to reduce noise.
-*/
-const DEFAULT_TYPE_CONFIDENCE = {
-	File: .95,
-	Project: .8,
-	Reference: .85,
-	Decision: .65,
-	Problem: .6,
-	Solution: .6
-};
-/**
-* Context-aware confidence multiplier for File paths from non-change
-* observations. Reduces 0.95 -> ~0.70, below the 0.95 File threshold.
-*/
-const DEFAULT_FILE_NON_CHANGE_MULTIPLIER = .74;
-/**
-* Applies quality gate filters to a list of extracted entities.
+* Merges a cluster of similar observations into a consolidated observation.
 *
 * Steps:
-*   1. Apply context-aware confidence adjustment (File paths in non-change obs)
-*   2. Reject entities with names outside length bounds
-*   3. Reject entities with vague/filler name prefixes
-*   4. Apply per-type confidence thresholds
-*   5. Cap File nodes to max per observation (keep highest confidence)
+*   1. Create new consolidated observation with suggestedSummary text
+*   2. Store merge metadata (merged_from, merged_at, original_count)
+*   3. Update entity's observation_ids: remove old, add new merged ID
+*   4. Soft-delete originals (set deleted_at, do NOT hard delete)
+*   5. Compute mean embedding if originals have embeddings
 *
-* @param entities - Extracted entities to filter
-* @param isChangeObservation - Whether the source observation is a change/write
-* @param config - Optional configuration overrides
-* @returns Entities that passed the gate, plus rejected entities with reasons
+* Runs in a transaction for atomicity.
+*
+* @param db - better-sqlite3 Database handle
+* @param cluster - The cluster to merge
+* @returns The new merged observation ID and removed IDs
 */
-function applyQualityGate(entities, isChangeObservation, config) {
-	const minNameLen = config?.qualityGate?.minNameLength ?? DEFAULT_MIN_NAME_LENGTH;
-	const maxNameLen = config?.qualityGate?.maxNameLength ?? DEFAULT_MAX_NAME_LENGTH;
-	const maxFiles = config?.qualityGate?.maxFilesPerObservation ?? DEFAULT_MAX_FILES_PER_OBSERVATION;
-	const typeConfidence = config?.qualityGate?.typeConfidenceThresholds ?? DEFAULT_TYPE_CONFIDENCE;
-	const fileMultiplier = config?.qualityGate?.fileNonChangeMultiplier ?? DEFAULT_FILE_NON_CHANGE_MULTIPLIER;
-	const passed = [];
-	const rejected = [];
-	for (const entity of entities) {
-		let adjustedConfidence = entity.confidence;
-		if (entity.type === "File" && !isChangeObservation) adjustedConfidence = entity.confidence * fileMultiplier;
-		const adjusted = {
-			...entity,
-			confidence: adjustedConfidence
-		};
-		if (adjusted.name.length < minNameLen) {
-			rejected.push({
-				entity: adjusted,
-				reason: `Name too short (${adjusted.name.length} < ${minNameLen})`
-			});
-			continue;
-		}
-		if (adjusted.name.length > maxNameLen) {
-			rejected.push({
-				entity: adjusted,
-				reason: `Name too long (${adjusted.name.length} > ${maxNameLen})`
-			});
-			continue;
-		}
-		const lowerName = adjusted.name.toLowerCase();
-		if (VAGUE_PREFIXES.some((prefix) => lowerName.startsWith(prefix))) {
-			rejected.push({
-				entity: adjusted,
-				reason: `Vague name prefix: "${adjusted.name}"`
-			});
-			continue;
-		}
-		const threshold = typeConfidence[adjusted.type] ?? DEFAULT_TYPE_CONFIDENCE[adjusted.type] ?? .5;
-		if (adjusted.confidence < threshold) {
-			rejected.push({
-				entity: adjusted,
-				reason: `Below ${adjusted.type} confidence threshold (${adjusted.confidence.toFixed(2)} < ${threshold})`
-			});
-			continue;
-		}
-		passed.push(adjusted);
-	}
-	const fileEntities = passed.filter((e) => e.type === "File");
-	if (fileEntities.length > maxFiles) {
-		fileEntities.sort((a, b) => b.confidence - a.confidence);
-		const toRemove = new Set(fileEntities.slice(maxFiles).map((e) => e.name));
-		const finalPassed = [];
-		for (const e of passed) if (e.type === "File" && toRemove.has(e.name)) rejected.push({
-			entity: e,
-			reason: `File cap exceeded (max ${maxFiles} per observation)`
+function mergeObservationCluster(db, cluster) {
+	return db.transaction(() => {
+		const mergedId = randomBytes(16).toString("hex");
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const removedIds = cluster.observations.map((o) => o.id);
+		const metadata = JSON.stringify({
+			merged_from: removedIds,
+			merged_at: now,
+			original_count: cluster.observations.length
 		});
-		else finalPassed.push(e);
-		return {
-			passed: finalPassed,
-			rejected
-		};
-	}
-	return {
-		passed,
-		rejected
-	};
-}
-
-//#endregion
-//#region src/graph/entity-extractor.ts
-const DEFAULT_MIN_CONFIDENCE = .5;
-/**
-* Extracts entities from observation text using all registered rules.
-*
-* - Runs every rule against the text
-* - Deduplicates: same name from multiple rules keeps highest confidence
-* - Resolves overlapping spans: higher confidence wins
-* - Filters by minimum confidence threshold
-* - Returns sorted by confidence descending
-*/
-function extractEntities(text, observationId, opts) {
-	const minConfidence = opts?.minConfidence ?? DEFAULT_MIN_CONFIDENCE;
-	const allMatches = [];
-	for (const rule of ALL_RULES) try {
-		const results = rule(text);
-		allMatches.push(...results);
-	} catch {
-		continue;
-	}
-	const filtered = deduplicateByName(resolveOverlaps(allMatches)).filter((m) => m.confidence >= minConfidence);
-	filtered.sort((a, b) => b.confidence - a.confidence);
-	return {
-		entities: filtered.map((m) => ({
-			name: m.name,
-			type: m.type,
-			confidence: m.confidence
-		})),
-		observationId,
-		extractedAt: (/* @__PURE__ */ new Date()).toISOString()
-	};
-}
-/**
-* Extracts entities from text and persists them as graph nodes.
-*
-* For each extracted entity:
-*   - Calls upsertNode (creates or merges with existing node)
-*   - Appends observationId to the node's observation_ids array
-*
-* Wrapped in a transaction for atomicity. Individual entity failures
-* are logged and skipped (never fail the whole batch).
-*
-* @returns Array of persisted GraphNode objects
-*/
-function extractAndPersist(db, text, observationId, opts) {
-	const result = extractEntities(text, observationId, opts);
-	const persisted = [];
-	const isChange = opts?.isChangeObservation ?? false;
-	const gateResult = applyQualityGate(result.entities, isChange, opts?.graphConfig);
-	db.transaction(() => {
-		for (const entity of gateResult.passed) try {
-			const node = upsertNode(db, {
-				type: entity.type,
-				name: entity.name,
-				metadata: { confidence: entity.confidence },
-				observation_ids: [observationId],
-				project_hash: opts?.projectHash
-			});
-			persisted.push(node);
-		} catch {
-			continue;
+		let meanEmbedding = null;
+		const embeddingsWithValues = cluster.observations.filter((o) => o.embedding !== null);
+		if (embeddingsWithValues.length > 0) {
+			const dim = embeddingsWithValues[0].embedding.length;
+			const mean = new Float32Array(dim);
+			for (const obs of embeddingsWithValues) {
+				const emb = obs.embedding;
+				for (let i = 0; i < dim; i++) mean[i] += emb[i];
+			}
+			for (let i = 0; i < dim; i++) mean[i] /= embeddingsWithValues.length;
+			meanEmbedding = Buffer.from(mean.buffer);
 		}
+		const projectHash = db.prepare("SELECT project_hash, source FROM observations WHERE id = ?").get(cluster.observations[0].id)?.project_hash ?? "unknown";
+		db.prepare(`INSERT INTO observations (id, project_hash, content, title, source, session_id, embedding, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(mergedId, projectHash, cluster.suggestedSummary, `[Merged] ${metadata}`, "curation:merge", null, meanEmbedding, now, now);
+		const nodeRow = db.prepare("SELECT observation_ids FROM graph_nodes WHERE id = ?").get(cluster.entityId);
+		if (nodeRow) {
+			const currentIds = JSON.parse(nodeRow.observation_ids);
+			const removedSet = new Set(removedIds);
+			const updatedIds = currentIds.filter((id) => !removedSet.has(id));
+			updatedIds.push(mergedId);
+			db.prepare(`UPDATE graph_nodes SET observation_ids = ?, updated_at = datetime('now') WHERE id = ?`).run(JSON.stringify(updatedIds), cluster.entityId);
+		}
+		const softDeleteStmt = db.prepare(`UPDATE observations SET deleted_at = ? WHERE id = ?`);
+		for (const obsId of removedIds) softDeleteStmt.run(now, obsId);
+		return {
+			mergedId,
+			removedIds
+		};
 	})();
-	return persisted;
 }
 /**
-* Resolves overlapping spans between same-type entities.
+* Prunes low-value observations using conservative AND-logic.
 *
-* Only removes overlapping matches when they share the same entity type
-* (e.g., two Tool entities on overlapping text). Different types are
-* allowed to overlap since they represent different semantic information
-* (e.g., a Decision span can contain a Tool name within it).
+* An observation is pruned ONLY if ALL of:
+*   a. Very short (< minTextLength characters, default 20)
+*   b. No linked entities (not in any graph_node's observation_ids)
+*   c. Older than maxAge days (default 90)
+*   d. Auto-captured (source is NOT 'mcp:save_memory' or 'slash:remember')
+*   e. Not already deleted
 *
-* When same-type spans overlap, the one with higher confidence wins.
+* Pruning is soft-delete only -- sets deleted_at, never hard deletes.
+*
+* @param db - better-sqlite3 Database handle
+* @param opts - Configurable thresholds
+* @returns Count of pruned observations
 */
-function resolveOverlaps(matches) {
-	if (matches.length <= 1) return [...matches];
-	const sorted = [...matches].sort((a, b) => b.confidence - a.confidence);
-	const result = [];
-	for (const match of sorted) if (result.findIndex((kept) => kept.type === match.type && match.span[0] < kept.span[1] && match.span[1] > kept.span[0]) === -1) result.push(match);
-	return result;
-}
-/**
-* Deduplicates matches by name+type. When the same entity name appears
-* multiple times (possibly from different rules), keeps the one with
-* the highest confidence score.
-*/
-function deduplicateByName(matches) {
-	const byKey = /* @__PURE__ */ new Map();
-	for (const match of matches) {
-		const key = `${match.type}:${match.name.toLowerCase()}`;
-		const existing = byKey.get(key);
-		if (!existing || match.confidence > existing.confidence) byKey.set(key, match);
+function pruneLowValue(db, opts) {
+	const minTextLength = opts?.minTextLength ?? 20;
+	const maxAgeDays = opts?.maxAge ?? 90;
+	const now = /* @__PURE__ */ new Date();
+	const cutoffISO = (/* @__PURE__ */ new Date(now.getTime() - maxAgeDays * 24 * 60 * 60 * 1e3)).toISOString();
+	const candidates = db.prepare(`SELECT id, content, source, created_at
+       FROM observations
+       WHERE deleted_at IS NULL
+         AND LENGTH(content) < ?
+         AND created_at < ?
+         AND source NOT IN ('mcp:save_memory', 'slash:remember')`).all(minTextLength, cutoffISO);
+	if (candidates.length === 0) return { pruned: 0 };
+	const allNodeObsIds = /* @__PURE__ */ new Set();
+	const nodes = db.prepare("SELECT observation_ids FROM graph_nodes").all();
+	for (const node of nodes) {
+		const ids = JSON.parse(node.observation_ids);
+		for (const id of ids) allNodeObsIds.add(id);
 	}
-	return [...byKey.values()];
+	const toPrune = candidates.filter((c) => !allNodeObsIds.has(c.id));
+	if (toPrune.length === 0) return { pruned: 0 };
+	const nowISO = now.toISOString();
+	const softDeleteStmt = db.prepare("UPDATE observations SET deleted_at = ? WHERE id = ?");
+	return { pruned: db.transaction(() => {
+		for (const obs of toPrune) softDeleteStmt.run(nowISO, obs.id);
+		return toPrune.length;
+	})() };
 }
 
 //#endregion
@@ -3819,409 +3117,6 @@ function findDuplicateEntities(db, opts) {
 }
 
 //#endregion
-//#region src/graph/relationship-detector.ts
-/**
-* Provenance-oriented context signals. Ordered by specificity.
-* First match wins.
-*/
-const CONTEXT_SIGNALS = [
-	{
-		pattern: /\b(?:modified|changed|edited|created|wrote|updated)\b/i,
-		type: "modifies"
-	},
-	{
-		pattern: /\b(?:informed|consulted|read|referenced|looked\s+at|checked)\b/i,
-		type: "informed_by"
-	},
-	{
-		pattern: /\b(?:verified|tested|confirmed|passed|failed|ran\s+tests?)\b/i,
-		type: "verified_by"
-	},
-	{
-		pattern: /\b(?:caused\s+by|because\s+of|due\s+to)\b/i,
-		type: "caused_by"
-	},
-	{
-		pattern: /\b(?:solved\s+by|fixed\s+by|resolved\s+by)\b/i,
-		type: "solved_by"
-	}
-];
-/**
-* Default relationship type based on entity type pair.
-* Key format: "SourceType->TargetType"
-*
-* Provenance-oriented: tracks how entities informed, modified,
-* or verified each other.
-*/
-const TYPE_PAIR_DEFAULTS = {
-	"File->Reference": "references",
-	"Reference->File": "references",
-	"Problem->Solution": "solved_by",
-	"Solution->Problem": "solved_by",
-	"Problem->File": "modifies",
-	"File->Problem": "modifies",
-	"Decision->File": "modifies",
-	"File->Decision": "modifies",
-	"Project->File": "references",
-	"File->Project": "references"
-};
-/**
-* Detects typed relationships between co-occurring entities in observation text.
-*
-* For each unique entity pair:
-*   1. Determine base relationship type from type-pair rules
-*   2. Check text context signals to refine relationship type
-*   3. Apply proximity boost (+0.1 for entities within 50 chars)
-*   4. Apply sentence co-occurrence boost (+0.15 for same sentence)
-*   5. Filter out self-relationships
-*
-* @param text - The observation text containing the entities
-* @param entities - Already-extracted entities with name and type
-* @returns Array of relationship candidates with confidence scores
-*/
-function detectRelationships(text, entities) {
-	if (entities.length < 2) return [];
-	const candidates = [];
-	for (let i = 0; i < entities.length; i++) for (let j = i + 1; j < entities.length; j++) {
-		const source = entities[i];
-		const target = entities[j];
-		if (source.name === target.name && source.type === target.type) continue;
-		const sourcePos = text.toLowerCase().indexOf(source.name.toLowerCase());
-		const targetPos = text.toLowerCase().indexOf(target.name.toLowerCase());
-		if (sourcePos === -1 || targetPos === -1) continue;
-		const minPos = Math.min(sourcePos, targetPos);
-		const maxPos = Math.max(sourcePos + source.name.length, targetPos + target.name.length);
-		const contextStart = Math.max(0, minPos - 50);
-		const contextEnd = Math.min(text.length, maxPos + 50);
-		const contextText = text.slice(contextStart, contextEnd);
-		let relationshipType = TYPE_PAIR_DEFAULTS[`${source.type}->${target.type}`] ?? null;
-		for (const signal of CONTEXT_SIGNALS) if (signal.pattern.test(contextText)) {
-			relationshipType = signal.type;
-			break;
-		}
-		if (source.type === "File" && target.type === "File") {
-			if (/\b(?:imports?|requires?|from)\b/i.test(contextText)) relationshipType = "references";
-		}
-		if (relationshipType === null) continue;
-		let confidence = .5;
-		if (Math.abs(sourcePos - targetPos) <= 50) confidence += .1;
-		if (areInSameSentence(text, sourcePos, targetPos)) confidence += .15;
-		confidence = Math.min(confidence, 1);
-		candidates.push({
-			sourceEntity: {
-				name: source.name,
-				type: source.type
-			},
-			targetEntity: {
-				name: target.name,
-				type: target.type
-			},
-			relationshipType,
-			confidence,
-			evidence: contextText.slice(0, 200)
-		});
-	}
-	return candidates;
-}
-/**
-* Detects relationships, resolves entity names to node IDs, and persists edges.
-*
-* - Calls detectRelationships to find candidates
-* - Resolves each entity to a graph node via getNodeByNameAndType
-* - Inserts edges for candidates with confidence > 0.3
-* - Enforces max degree on affected nodes after insertion
-*
-* @returns Array of persisted GraphEdge objects
-*/
-function detectAndPersist(db, text, entities, opts) {
-	const candidates = detectRelationships(text, entities);
-	const persisted = [];
-	const affectedNodeIds = /* @__PURE__ */ new Set();
-	const minConfidence = opts?.minConfidence ?? .45;
-	db.transaction(() => {
-		for (const candidate of candidates) {
-			if (candidate.confidence <= minConfidence) continue;
-			const sourceNode = getNodeByNameAndType(db, candidate.sourceEntity.name, candidate.sourceEntity.type);
-			const targetNode = getNodeByNameAndType(db, candidate.targetEntity.name, candidate.targetEntity.type);
-			if (!sourceNode || !targetNode) continue;
-			try {
-				const edge = insertEdge(db, {
-					source_id: sourceNode.id,
-					target_id: targetNode.id,
-					type: candidate.relationshipType,
-					weight: candidate.confidence,
-					metadata: { evidence: candidate.evidence },
-					project_hash: opts?.projectHash
-				});
-				persisted.push(edge);
-				affectedNodeIds.add(sourceNode.id);
-				affectedNodeIds.add(targetNode.id);
-			} catch {
-				continue;
-			}
-		}
-		for (const nodeId of affectedNodeIds) enforceMaxDegree(db, nodeId);
-	})();
-	return persisted;
-}
-/**
-* Checks if two positions in the text are within the same sentence.
-* A sentence boundary is defined by '.', '!', '?', or newline followed by
-* optional whitespace.
-*/
-function areInSameSentence(text, pos1, pos2) {
-	const start = Math.min(pos1, pos2);
-	const end = Math.max(pos1, pos2);
-	const between = text.slice(start, end);
-	return !/[.!?\n]/.test(between);
-}
-
-//#endregion
-//#region src/graph/observation-merger.ts
-/**
-* Computes cosine similarity between two number arrays.
-* Returns 0 for zero-length or zero-norm vectors.
-*/
-function cosineSimilarity(a, b) {
-	if (a.length !== b.length || a.length === 0) return 0;
-	let dot = 0;
-	let normA = 0;
-	let normB = 0;
-	for (let i = 0; i < a.length; i++) {
-		dot += a[i] * b[i];
-		normA += a[i] * a[i];
-		normB += b[i] * b[i];
-	}
-	const denom = Math.sqrt(normA) * Math.sqrt(normB);
-	if (denom === 0) return 0;
-	return dot / denom;
-}
-/**
-* Converts a Buffer of Float32 values to a number array.
-*/
-function bufferToNumbers(buf) {
-	const floats = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
-	return Array.from(floats);
-}
-/**
-* Generates a consolidated summary from a cluster of observations.
-*
-* Strategy:
-*   1. Take the longest observation as the base
-*   2. Find unique keywords in shorter observations
-*   3. Append unique info in parentheses
-*   4. Prepend "[Consolidated from N observations]"
-*/
-function generateSummary(observations) {
-	if (observations.length === 0) return "";
-	if (observations.length === 1) return observations[0].text;
-	const sorted = [...observations].sort((a, b) => b.text.length - a.text.length);
-	const base = sorted[0];
-	const baseWords = new Set(base.text.toLowerCase().split(/\s+/).filter((w) => w.length > 2));
-	const uniqueKeywords = [];
-	for (let i = 1; i < sorted.length; i++) {
-		const words = sorted[i].text.split(/\s+/).filter((w) => w.length > 2);
-		for (const word of words) if (!baseWords.has(word.toLowerCase()) && !uniqueKeywords.includes(word.toLowerCase())) uniqueKeywords.push(word.toLowerCase());
-	}
-	let summary = base.text;
-	if (uniqueKeywords.length > 0) {
-		const extras = uniqueKeywords.slice(0, 10).join(", ");
-		summary += ` (also: ${extras})`;
-	}
-	return `[Consolidated from ${observations.length} observations] ${summary}`;
-}
-/**
-* Finds clusters of similar observations for the same entity.
-*
-* For each entity with 3+ observations:
-*   1. Compute pairwise similarities (cosine on embeddings, Jaccard on text)
-*   2. Cluster observations where ALL pairwise similarities exceed threshold
-*   3. Generate suggested summaries for each cluster
-*
-* Only clusters with 2+ observations are returned, sorted by size DESC.
-*
-* @param db - better-sqlite3 Database handle
-* @param opts - threshold (default 0.95 cosine / 0.85 Jaccard), entityId filter
-* @returns Mergeable observation clusters sorted by size descending
-*/
-function findMergeableClusters(db, opts) {
-	const embeddingThreshold = opts?.threshold ?? .95;
-	const textThreshold = .85;
-	let nodes;
-	if (opts?.entityId) {
-		const row = db.prepare("SELECT id, observation_ids FROM graph_nodes WHERE id = ?").get(opts.entityId);
-		nodes = row ? [row] : [];
-	} else nodes = db.prepare("SELECT id, observation_ids FROM graph_nodes").all();
-	const clusters = [];
-	for (const node of nodes) {
-		const obsIds = JSON.parse(node.observation_ids);
-		if (obsIds.length < 3) continue;
-		const placeholders = obsIds.map(() => "?").join(", ");
-		const rows = db.prepare(`SELECT id, content, embedding, created_at, source, deleted_at
-         FROM observations
-         WHERE id IN (${placeholders}) AND deleted_at IS NULL`).all(...obsIds);
-		if (rows.length < 2) continue;
-		const observations = rows.map((r) => ({
-			id: r.id,
-			text: r.content,
-			embedding: r.embedding ? bufferToNumbers(r.embedding) : null,
-			created_at: r.created_at
-		}));
-		const used = /* @__PURE__ */ new Set();
-		for (let i = 0; i < observations.length; i++) {
-			if (used.has(observations[i].id)) continue;
-			const cluster = [observations[i]];
-			let totalSim = 0;
-			let pairCount = 0;
-			for (let j = i + 1; j < observations.length; j++) {
-				if (used.has(observations[j].id)) continue;
-				let allSimilar = true;
-				let candidateSim = 0;
-				let candidatePairs = 0;
-				for (const member of cluster) {
-					const sim = computeSimilarity(member, observations[j], embeddingThreshold, textThreshold);
-					if (sim === null) {
-						allSimilar = false;
-						break;
-					}
-					candidateSim += sim;
-					candidatePairs++;
-				}
-				if (allSimilar && candidatePairs > 0) {
-					cluster.push(observations[j]);
-					totalSim += candidateSim;
-					pairCount += candidatePairs;
-				}
-			}
-			if (cluster.length >= 2) {
-				for (const obs of cluster) used.add(obs.id);
-				const avgSim = pairCount > 0 ? totalSim / pairCount : 0;
-				clusters.push({
-					entityId: node.id,
-					observations: cluster,
-					similarity: avgSim,
-					suggestedSummary: generateSummary(cluster)
-				});
-			}
-		}
-	}
-	clusters.sort((a, b) => b.observations.length - a.observations.length);
-	return clusters;
-}
-/**
-* Computes similarity between two observations.
-* Returns the similarity score if it exceeds the threshold, or null if not.
-*/
-function computeSimilarity(a, b, embeddingThreshold, textThreshold) {
-	if (a.embedding && b.embedding) {
-		const sim = cosineSimilarity(a.embedding, b.embedding);
-		return sim >= embeddingThreshold ? sim : null;
-	}
-	const sim = jaccardSimilarity$1(a.text, b.text);
-	return sim >= textThreshold ? sim : null;
-}
-/**
-* Merges a cluster of similar observations into a consolidated observation.
-*
-* Steps:
-*   1. Create new consolidated observation with suggestedSummary text
-*   2. Store merge metadata (merged_from, merged_at, original_count)
-*   3. Update entity's observation_ids: remove old, add new merged ID
-*   4. Soft-delete originals (set deleted_at, do NOT hard delete)
-*   5. Compute mean embedding if originals have embeddings
-*
-* Runs in a transaction for atomicity.
-*
-* @param db - better-sqlite3 Database handle
-* @param cluster - The cluster to merge
-* @returns The new merged observation ID and removed IDs
-*/
-function mergeObservationCluster(db, cluster) {
-	return db.transaction(() => {
-		const mergedId = randomBytes(16).toString("hex");
-		const now = (/* @__PURE__ */ new Date()).toISOString();
-		const removedIds = cluster.observations.map((o) => o.id);
-		const metadata = JSON.stringify({
-			merged_from: removedIds,
-			merged_at: now,
-			original_count: cluster.observations.length
-		});
-		let meanEmbedding = null;
-		const embeddingsWithValues = cluster.observations.filter((o) => o.embedding !== null);
-		if (embeddingsWithValues.length > 0) {
-			const dim = embeddingsWithValues[0].embedding.length;
-			const mean = new Float32Array(dim);
-			for (const obs of embeddingsWithValues) {
-				const emb = obs.embedding;
-				for (let i = 0; i < dim; i++) mean[i] += emb[i];
-			}
-			for (let i = 0; i < dim; i++) mean[i] /= embeddingsWithValues.length;
-			meanEmbedding = Buffer.from(mean.buffer);
-		}
-		const projectHash = db.prepare("SELECT project_hash, source FROM observations WHERE id = ?").get(cluster.observations[0].id)?.project_hash ?? "unknown";
-		db.prepare(`INSERT INTO observations (id, project_hash, content, title, source, session_id, embedding, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(mergedId, projectHash, cluster.suggestedSummary, `[Merged] ${metadata}`, "curation:merge", null, meanEmbedding, now, now);
-		const nodeRow = db.prepare("SELECT observation_ids FROM graph_nodes WHERE id = ?").get(cluster.entityId);
-		if (nodeRow) {
-			const currentIds = JSON.parse(nodeRow.observation_ids);
-			const removedSet = new Set(removedIds);
-			const updatedIds = currentIds.filter((id) => !removedSet.has(id));
-			updatedIds.push(mergedId);
-			db.prepare(`UPDATE graph_nodes SET observation_ids = ?, updated_at = datetime('now') WHERE id = ?`).run(JSON.stringify(updatedIds), cluster.entityId);
-		}
-		const softDeleteStmt = db.prepare(`UPDATE observations SET deleted_at = ? WHERE id = ?`);
-		for (const obsId of removedIds) softDeleteStmt.run(now, obsId);
-		return {
-			mergedId,
-			removedIds
-		};
-	})();
-}
-/**
-* Prunes low-value observations using conservative AND-logic.
-*
-* An observation is pruned ONLY if ALL of:
-*   a. Very short (< minTextLength characters, default 20)
-*   b. No linked entities (not in any graph_node's observation_ids)
-*   c. Older than maxAge days (default 90)
-*   d. Auto-captured (source is NOT 'mcp:save_memory' or 'slash:remember')
-*   e. Not already deleted
-*
-* Pruning is soft-delete only -- sets deleted_at, never hard deletes.
-*
-* @param db - better-sqlite3 Database handle
-* @param opts - Configurable thresholds
-* @returns Count of pruned observations
-*/
-function pruneLowValue(db, opts) {
-	const minTextLength = opts?.minTextLength ?? 20;
-	const maxAgeDays = opts?.maxAge ?? 90;
-	const now = /* @__PURE__ */ new Date();
-	const cutoffISO = (/* @__PURE__ */ new Date(now.getTime() - maxAgeDays * 24 * 60 * 60 * 1e3)).toISOString();
-	const candidates = db.prepare(`SELECT id, content, source, created_at
-       FROM observations
-       WHERE deleted_at IS NULL
-         AND LENGTH(content) < ?
-         AND created_at < ?
-         AND source NOT IN ('mcp:save_memory', 'slash:remember')`).all(minTextLength, cutoffISO);
-	if (candidates.length === 0) return { pruned: 0 };
-	const allNodeObsIds = /* @__PURE__ */ new Set();
-	const nodes = db.prepare("SELECT observation_ids FROM graph_nodes").all();
-	for (const node of nodes) {
-		const ids = JSON.parse(node.observation_ids);
-		for (const id of ids) allNodeObsIds.add(id);
-	}
-	const toPrune = candidates.filter((c) => !allNodeObsIds.has(c.id));
-	if (toPrune.length === 0) return { pruned: 0 };
-	const nowISO = now.toISOString();
-	const softDeleteStmt = db.prepare("UPDATE observations SET deleted_at = ? WHERE id = ?");
-	return { pruned: db.transaction(() => {
-		for (const obs of toPrune) softDeleteStmt.run(nowISO, obs.id);
-		return toPrune.length;
-	})() };
-}
-
-//#endregion
 //#region src/graph/temporal-decay.ts
 const DEFAULTS = {
 	halfLifeDays: 30,
@@ -4437,6 +3332,7 @@ var CurationAgent = class {
 	onComplete;
 	graphConfig;
 	running = false;
+	cycling = false;
 	lastRun = null;
 	timer = null;
 	constructor(db, opts) {
@@ -4471,10 +3367,26 @@ var CurationAgent = class {
 	* Execute one curation cycle. This is the main entry point.
 	*/
 	async runOnce() {
-		const report = await runCuration(this.db, this.graphConfig);
-		this.lastRun = report.completedAt;
-		if (this.onComplete) this.onComplete(report);
-		return report;
+		if (this.cycling) return {
+			startedAt: "",
+			completedAt: "",
+			observationsMerged: 0,
+			entitiesDeduplicated: 0,
+			stalenessFlagsAdded: 0,
+			lowValuePruned: 0,
+			temporalDecayUpdated: 0,
+			temporalDecayDeleted: 0,
+			errors: ["skipped: previous cycle still running"]
+		};
+		this.cycling = true;
+		try {
+			const report = await runCuration(this.db, this.graphConfig);
+			this.lastRun = report.completedAt;
+			if (this.onComplete) this.onComplete(report);
+			return report;
+		} finally {
+			this.cycling = false;
+		}
 	}
 	/**
 	* Whether the agent is currently running.
@@ -4491,176 +3403,370 @@ var CurationAgent = class {
 };
 
 //#endregion
-//#region src/curation/observation-classifier.ts
-const CLASSIFICATION_PROMPT = `You are a knowledge curator for a developer's memory system. Below is a chronological sequence of observations captured during a coding session.
+//#region src/config/haiku-config.ts
+function loadHaikuConfig() {
+	return {
+		model: "claude-haiku-4-5-20251001",
+		maxTokensPerCall: 1024
+	};
+}
 
-Each observation marked [PENDING] needs classification. The surrounding observations (marked [context]) provide narrative context — what happened before and after.
-
-Classify each [PENDING] observation as exactly one of:
-- discovery: New understanding, finding, or insight about the codebase or problem
-- problem: Error, bug, failure, or obstacle encountered
-- solution: Fix, resolution, workaround, or decision that resolved something
-- noise: Routine investigation step, redundant info, or working memory with no long-term value
-
-Return ONLY a JSON array, no other text: [{"id": "...", "classification": "...", "reason": "..."}]`;
-const VALID_CLASSIFICATIONS = new Set([
-	"discovery",
-	"problem",
-	"solution",
-	"noise"
-]);
-var ObservationClassifier = class {
-	db;
-	projectHash;
-	mcpServer;
-	intervalMs;
-	contextWindow;
-	batchSize;
-	fallbackTimeoutMs;
-	timer = null;
-	constructor(db, projectHash, mcpServer, opts) {
-		this.db = db;
-		this.projectHash = projectHash;
-		this.mcpServer = mcpServer;
-		this.intervalMs = opts?.intervalMs ?? 45e3;
-		this.contextWindow = opts?.contextWindow ?? 5;
-		this.batchSize = opts?.batchSize ?? 20;
-		this.fallbackTimeoutMs = opts?.fallbackTimeoutMs ?? 300 * 1e3;
-	}
-	start() {
-		if (this.timer) return;
-		debug("classify", "Classifier started", {
-			intervalMs: this.intervalMs,
-			batchSize: this.batchSize
-		});
-		this.timer = setInterval(() => {
-			this.runOnce().catch((err) => {
-				debug("classify", "Classification cycle error", { error: err instanceof Error ? err.message : String(err) });
-			});
-		}, this.intervalMs);
-	}
-	stop() {
-		if (this.timer) {
-			clearInterval(this.timer);
-			this.timer = null;
-			debug("classify", "Classifier stopped");
+//#endregion
+//#region src/intelligence/haiku-client.ts
+/**
+* Shared Haiku client using Claude Agent SDK V2 session.
+*
+* Routes Haiku calls through the user's Claude Code subscription
+* instead of requiring a separate API key. Uses a persistent session
+* to avoid 12s cold-start overhead on sequential calls.
+*
+* Provides the core infrastructure for all Haiku agent modules:
+* - callHaiku() helper for structured prompt/response calls
+* - extractJsonFromResponse() for defensive JSON parsing
+* - Session reuse across batch processing cycles
+*/
+let _session = null;
+function getOrCreateSession() {
+	if (!_session) _session = unstable_v2_createSession({
+		model: loadHaikuConfig().model,
+		permissionMode: "bypassPermissions",
+		allowedTools: []
+	});
+	return _session;
+}
+/**
+* Returns whether Haiku enrichment is available.
+* Always true with subscription auth -- no API key check needed.
+*/
+function isHaikuEnabled() {
+	return true;
+}
+/**
+* Calls Haiku with a system prompt and user content.
+* Returns the text content from the response.
+*
+* Uses a persistent V2 session to avoid cold-start overhead on sequential calls.
+* System prompt is embedded in the user message since session-level systemPrompt
+* is set at creation time and we need different prompts per agent.
+*
+* @param systemPrompt - Instructions for the model
+* @param userContent - The content to process
+* @param _maxTokens - Kept for signature compatibility (unused -- Agent SDK constrains output via prompts)
+* @throws Error if the Haiku call fails or session expires
+*/
+async function callHaiku(systemPrompt, userContent, _maxTokens) {
+	const session = getOrCreateSession();
+	const fullPrompt = `<instructions>\n${systemPrompt}\n</instructions>\n\n${userContent}`;
+	try {
+		await session.send(fullPrompt);
+		for await (const msg of session.stream()) if (msg.type === "result") {
+			if (msg.subtype === "success") return msg.result;
+			const errorMsg = ("errors" in msg ? msg.errors : void 0)?.join(", ") ?? msg.subtype;
+			throw new Error(`Haiku call failed: ${errorMsg}`);
 		}
-	}
-	async runOnce() {
-		const repo = new ObservationRepository(this.db, this.projectHash);
-		const unclassified = repo.listUnclassified(this.batchSize);
-		if (unclassified.length === 0) {
-			debug("classify", "No unclassified observations");
-			return [];
-		}
-		debug("classify", "Processing unclassified observations", { count: unclassified.length });
-		const now = Date.now();
-		const stale = [];
-		const pending = [];
-		for (const obs of unclassified) {
-			const createdAtUtc = obs.createdAt.endsWith("Z") ? obs.createdAt : obs.createdAt + "Z";
-			if (now - new Date(createdAtUtc).getTime() > this.fallbackTimeoutMs) stale.push(obs);
-			else pending.push(obs);
-		}
-		const results = [];
-		for (const obs of stale) {
-			repo.updateClassification(obs.id, "discovery");
-			results.push({
-				observationId: obs.id,
-				classification: "discovery",
-				reason: "fallback: unclassified for >5min"
-			});
-			debug("classify", "Auto-promoted stale observation", { id: obs.id });
-		}
-		if (pending.length === 0) return results;
-		const prompt = this.buildPrompt(pending, repo);
+		return "";
+	} catch (error) {
 		try {
-			const llmResults = await this.classify(prompt, pending);
-			for (const result of llmResults) {
-				repo.updateClassification(result.observationId, result.classification);
-				if (result.classification === "noise") repo.softDelete(result.observationId);
-				results.push(result);
-				debug("classify", "Classified observation", {
-					id: result.observationId,
-					classification: result.classification
-				});
-			}
-		} catch (err) {
-			debug("classify", "LLM classification failed, will retry next cycle", {
-				error: err instanceof Error ? err.message : String(err),
-				pendingCount: pending.length
-			});
-		}
-		return results;
+			_session?.close();
+		} catch {}
+		_session = null;
+		throw error;
 	}
-	buildPrompt(pending, repo) {
-		const contextMap = /* @__PURE__ */ new Map();
-		const pendingIds = new Set(pending.map((o) => o.id));
-		for (const obs of pending) {
-			const context = repo.listContext(obs.createdAt, this.contextWindow);
-			for (const ctx of context) if (!contextMap.has(ctx.id)) contextMap.set(ctx.id, ctx);
-		}
-		const allObs = Array.from(contextMap.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.rowid - b.rowid);
-		const lines = [];
-		for (const obs of allObs) {
-			const tag = pendingIds.has(obs.id) ? `[PENDING] ${obs.id}` : "[context]";
-			const content = obs.content.length > 300 ? obs.content.substring(0, 300) + "..." : obs.content;
-			lines.push(`${tag} | ${obs.createdAt} | ${content}`);
-		}
-		return `${CLASSIFICATION_PROMPT}\n\nObservations (chronological):\n${lines.join("\n")}`;
-	}
-	async classify(prompt, pending) {
-		const content = (await this.mcpServer.server.createMessage({
-			messages: [{
-				role: "user",
-				content: {
-					type: "text",
-					text: prompt
-				}
-			}],
-			maxTokens: 2048,
-			modelPreferences: {
-				costPriority: .8,
-				speedPriority: .8,
-				intelligencePriority: .3
-			}
-		})).content;
-		let text;
-		if (typeof content === "string") text = content;
-		else if (Array.isArray(content)) text = content.filter((c) => c.type === "text").map((c) => c.text).join("");
-		else if (content && "type" in content && content.type === "text") text = content.text;
-		else throw new Error("Unexpected response format from createMessage");
-		return this.parseResponse(text, pending);
-	}
-	parseResponse(text, pending) {
-		const jsonMatch = text.match(/\[[\s\S]*\]/);
-		if (!jsonMatch) {
-			debug("classify", "Failed to parse JSON from LLM response", { responseLength: text.length });
-			throw new Error("No JSON array found in LLM response");
-		}
-		let parsed;
-		try {
-			parsed = JSON.parse(jsonMatch[0]);
-		} catch {
-			throw new Error("Invalid JSON in LLM response");
-		}
-		if (!Array.isArray(parsed)) throw new Error("Expected JSON array from LLM");
-		const pendingIds = new Set(pending.map((o) => o.id));
-		const results = [];
-		for (const item of parsed) {
-			if (typeof item !== "object" || item === null || typeof item.id !== "string" || typeof item.classification !== "string") continue;
-			if (!pendingIds.has(item.id)) continue;
-			if (!VALID_CLASSIFICATIONS.has(item.classification)) continue;
-			results.push({
-				observationId: item.id,
-				classification: item.classification,
-				reason: typeof item.reason === "string" ? item.reason : ""
-			});
-			pendingIds.delete(item.id);
-		}
-		return results;
-	}
+}
+/**
+* Defensive JSON extraction from Haiku response text.
+*
+* Handles common LLM response quirks:
+* - Markdown code fences (```json ... ```)
+* - Explanatory text before/after JSON
+* - Both array and object JSON shapes
+*
+* @throws Error if no JSON structure found in text
+*/
+function extractJsonFromResponse(text) {
+	const cleaned = text.replace(/```json\s*/g, "").replace(/```\s*/g, "");
+	const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+	if (arrayMatch) return JSON.parse(arrayMatch[0]);
+	const objMatch = cleaned.match(/\{[\s\S]*\}/);
+	if (objMatch) return JSON.parse(objMatch[0]);
+	throw new Error("No JSON found in Haiku response");
+}
+
+//#endregion
+//#region src/intelligence/haiku-classifier-agent.ts
+/**
+* Combined noise/signal and observation classification agent.
+*
+* Uses a single Haiku call to determine:
+* 1. Whether an observation is noise or signal
+* 2. If signal, what kind of observation it is (discovery/problem/solution)
+*
+* Replaces both the regex-based noise-patterns.ts/signal-classifier.ts and the
+* broken MCP sampling observation-classifier.ts with a single focused LLM call.
+*/
+const ClassificationSchema = z.object({
+	signal: z.enum(["noise", "signal"]),
+	classification: z.enum([
+		"discovery",
+		"problem",
+		"solution"
+	]).nullable(),
+	reason: z.string()
+});
+const SYSTEM_PROMPT$2 = `You classify developer observations for a knowledge management system.
+
+For each observation, determine:
+1. signal: Is this noise or signal?
+   - "noise": build output, linter spam, package install logs, empty/trivial content, routine navigation, repeated boilerplate, test runner output with no failures
+   - "signal": meaningful findings, decisions, problems, solutions, reference material, architectural insights
+
+2. classification (only if signal): What kind of observation is this?
+   - "discovery": new understanding, finding, insight, or reference material
+   - "problem": error, bug, failure, or obstacle encountered
+   - "solution": fix, resolution, workaround, or decision that resolved something
+
+Return JSON: {"signal": "noise"|"signal", "classification": "discovery"|"problem"|"solution"|null, "reason": "brief explanation"}
+If noise, classification must be null.
+No markdown, no explanation, ONLY the JSON object.`;
+/**
+* Classifies an observation as noise/signal and determines its kind using Haiku.
+*
+* @param text - The observation content to classify
+* @param source - Optional source context (e.g., "PostToolUse:Read", "UserMessage")
+* @returns Classification result with signal/noise determination and observation kind
+*/
+async function classifyWithHaiku(text, source) {
+	let userContent = text;
+	if (source) userContent = `Source: ${source}\n\nObservation:\n${text}`;
+	const parsed = extractJsonFromResponse(await callHaiku(SYSTEM_PROMPT$2, userContent, 256));
+	return ClassificationSchema.parse(parsed);
+}
+
+//#endregion
+//#region src/intelligence/haiku-entity-agent.ts
+/**
+* Entity extraction agent.
+*
+* Uses Haiku to extract typed entities from observation text.
+* Replaces the regex-based extraction-rules.ts with LLM-powered analysis.
+* Returns entities validated against the fixed 6-type taxonomy from graph/types.ts.
+*/
+const EntitySchema = z.object({
+	name: z.string().min(1),
+	type: z.enum(ENTITY_TYPES),
+	confidence: z.number().min(0).max(1)
+});
+const EntityArraySchema = z.array(EntitySchema);
+const SYSTEM_PROMPT$1 = `You extract structured entities from developer observations.
+
+Entity types (use ONLY these exact strings):
+- File: file paths (src/foo/bar.ts, package.json, ./config.yml)
+- Project: repository names (org/repo), npm packages (@scope/pkg)
+- Reference: URLs (https://...)
+- Decision: explicit choices made ("decided to use X", "chose Y over Z")
+- Problem: bugs, errors, failures, obstacles encountered
+- Solution: fixes, resolutions, workarounds applied
+
+Rules:
+- Extract ALL entities present in the text
+- For Decision/Problem/Solution, extract the descriptive phrase (not just the keyword)
+- Confidence: 0.9+ for unambiguous (file paths, URLs), 0.7-0.8 for clear context, 0.5-0.6 for inferred
+- Return a JSON array: [{"name": "...", "type": "...", "confidence": 0.0-1.0}]
+- Return [] if no entities found
+- No markdown, no explanation, ONLY the JSON array`;
+/**
+* Extracts entities from observation text using Haiku.
+*
+* @param text - The observation content to analyze
+* @returns Validated array of extracted entities with type and confidence
+*/
+async function extractEntitiesWithHaiku(text) {
+	const parsed = extractJsonFromResponse(await callHaiku(SYSTEM_PROMPT$1, text, 512));
+	return EntityArraySchema.parse(parsed);
+}
+
+//#endregion
+//#region src/intelligence/haiku-relationship-agent.ts
+/**
+* Relationship inference agent.
+*
+* Uses Haiku to infer typed relationships between entities extracted from
+* observation text. Replaces the regex-based relationship-detector.ts with
+* LLM-powered contextual inference.
+* Returns relationships validated against the fixed 8-type taxonomy from graph/types.ts.
+*/
+const RelationshipSchema = z.object({
+	source: z.string(),
+	target: z.string(),
+	type: z.enum(RELATIONSHIP_TYPES),
+	confidence: z.number().min(0).max(1)
+});
+const RelationshipArraySchema = z.array(RelationshipSchema);
+const SYSTEM_PROMPT = `You infer relationships between entities extracted from a developer observation.
+
+Given observation text and a list of entities, determine which entities are related and how.
+
+Relationship types (use ONLY these exact strings):
+- modifies: entity A changed/edited/created entity B
+- informed_by: entity A was researched/consulted using entity B
+- verified_by: entity A was tested/confirmed by entity B
+- caused_by: entity A was caused by entity B
+- solved_by: entity A was resolved by entity B
+- references: entity A references/links to entity B
+- preceded_by: entity A came after entity B temporally
+- related_to: generic relationship (use sparingly, prefer specific types)
+
+Rules:
+- Only infer relationships with clear textual evidence
+- Source and target must both be in the provided entity list
+- Confidence: 0.8+ for explicit language, 0.5-0.7 for implied
+- Return JSON array: [{"source": "entity name", "target": "entity name", "type": "...", "confidence": 0.0-1.0}]
+- Return [] if no relationships found
+- No markdown, no explanation, ONLY the JSON array`;
+/**
+* Infers relationships between entities using Haiku.
+*
+* @param text - The observation content providing context
+* @param entities - Array of entities extracted from the same observation
+* @returns Validated array of inferred relationships with type and confidence
+*/
+async function inferRelationshipsWithHaiku(text, entities) {
+	const parsed = extractJsonFromResponse(await callHaiku(SYSTEM_PROMPT, `Observation:\n${text}\n\nEntities found:\n${JSON.stringify(entities.map((e) => ({
+		name: e.name,
+		type: e.type
+	})))}`, 512));
+	return RelationshipArraySchema.parse(parsed);
+}
+
+//#endregion
+//#region src/graph/write-quality-gate.ts
+const DEFAULT_MIN_NAME_LENGTH = 3;
+const DEFAULT_MAX_NAME_LENGTH = 200;
+const DEFAULT_MAX_FILES_PER_OBSERVATION = 5;
+/**
+* Vague name prefixes that indicate low-quality entity names.
+* Case-insensitive match against the start of the entity name.
+*/
+const VAGUE_PREFIXES = [
+	"the ",
+	"this ",
+	"that ",
+	"it ",
+	"some ",
+	"a ",
+	"an ",
+	"here ",
+	"there ",
+	"now ",
+	"just ",
+	"ok ",
+	"yes ",
+	"no ",
+	"maybe ",
+	"done ",
+	"tmp "
+];
+/**
+* Per-type minimum confidence thresholds.
+* High-signal types (Decision, Problem, Solution) have lower thresholds
+* to capture more of the valuable knowledge. File has the highest
+* threshold to reduce noise.
+*/
+const DEFAULT_TYPE_CONFIDENCE = {
+	File: .95,
+	Project: .8,
+	Reference: .85,
+	Decision: .65,
+	Problem: .6,
+	Solution: .6
 };
+/**
+* Context-aware confidence multiplier for File paths from non-change
+* observations. Reduces 0.95 -> ~0.70, below the 0.95 File threshold.
+*/
+const DEFAULT_FILE_NON_CHANGE_MULTIPLIER = .74;
+/**
+* Applies quality gate filters to a list of extracted entities.
+*
+* Steps:
+*   1. Apply context-aware confidence adjustment (File paths in non-change obs)
+*   2. Reject entities with names outside length bounds
+*   3. Reject entities with vague/filler name prefixes
+*   4. Apply per-type confidence thresholds
+*   5. Cap File nodes to max per observation (keep highest confidence)
+*
+* @param entities - Extracted entities to filter
+* @param isChangeObservation - Whether the source observation is a change/write
+* @param config - Optional configuration overrides
+* @returns Entities that passed the gate, plus rejected entities with reasons
+*/
+function applyQualityGate(entities, isChangeObservation, config) {
+	const minNameLen = config?.qualityGate?.minNameLength ?? DEFAULT_MIN_NAME_LENGTH;
+	const maxNameLen = config?.qualityGate?.maxNameLength ?? DEFAULT_MAX_NAME_LENGTH;
+	const maxFiles = config?.qualityGate?.maxFilesPerObservation ?? DEFAULT_MAX_FILES_PER_OBSERVATION;
+	const typeConfidence = config?.qualityGate?.typeConfidenceThresholds ?? DEFAULT_TYPE_CONFIDENCE;
+	const fileMultiplier = config?.qualityGate?.fileNonChangeMultiplier ?? DEFAULT_FILE_NON_CHANGE_MULTIPLIER;
+	const passed = [];
+	const rejected = [];
+	for (const entity of entities) {
+		let adjustedConfidence = entity.confidence;
+		if (entity.type === "File" && !isChangeObservation) adjustedConfidence = entity.confidence * fileMultiplier;
+		const adjusted = {
+			...entity,
+			confidence: adjustedConfidence
+		};
+		if (adjusted.name.length < minNameLen) {
+			rejected.push({
+				entity: adjusted,
+				reason: `Name too short (${adjusted.name.length} < ${minNameLen})`
+			});
+			continue;
+		}
+		if (adjusted.name.length > maxNameLen) {
+			rejected.push({
+				entity: adjusted,
+				reason: `Name too long (${adjusted.name.length} > ${maxNameLen})`
+			});
+			continue;
+		}
+		const lowerName = adjusted.name.toLowerCase();
+		if (VAGUE_PREFIXES.some((prefix) => lowerName.startsWith(prefix))) {
+			rejected.push({
+				entity: adjusted,
+				reason: `Vague name prefix: "${adjusted.name}"`
+			});
+			continue;
+		}
+		const threshold = typeConfidence[adjusted.type] ?? DEFAULT_TYPE_CONFIDENCE[adjusted.type] ?? .5;
+		if (adjusted.confidence < threshold) {
+			rejected.push({
+				entity: adjusted,
+				reason: `Below ${adjusted.type} confidence threshold (${adjusted.confidence.toFixed(2)} < ${threshold})`
+			});
+			continue;
+		}
+		passed.push(adjusted);
+	}
+	const fileEntities = passed.filter((e) => e.type === "File");
+	if (fileEntities.length > maxFiles) {
+		fileEntities.sort((a, b) => b.confidence - a.confidence);
+		const toRemove = new Set(fileEntities.slice(maxFiles).map((e) => e.name));
+		const finalPassed = [];
+		for (const e of passed) if (e.type === "File" && toRemove.has(e.name)) rejected.push({
+			entity: e,
+			reason: `File cap exceeded (max ${maxFiles} per observation)`
+		});
+		else finalPassed.push(e);
+		return {
+			passed: finalPassed,
+			rejected
+		};
+	}
+	return {
+		passed,
+		rejected
+	};
+}
 
 //#endregion
 //#region src/web/routes/sse.ts
@@ -4814,6 +3920,164 @@ function broadcast(event, data) {
 		remaining: clients.size
 	});
 }
+
+//#endregion
+//#region src/intelligence/haiku-processor.ts
+var HaikuProcessor = class {
+	db;
+	projectHash;
+	intervalMs;
+	batchSize;
+	concurrency;
+	timer = null;
+	constructor(db, projectHash, opts) {
+		this.db = db;
+		this.projectHash = projectHash;
+		this.intervalMs = opts?.intervalMs ?? 3e4;
+		this.batchSize = opts?.batchSize ?? 10;
+		this.concurrency = opts?.concurrency ?? 3;
+	}
+	start() {
+		if (this.timer) return;
+		debug("haiku", "HaikuProcessor started", {
+			intervalMs: this.intervalMs,
+			batchSize: this.batchSize,
+			concurrency: this.concurrency
+		});
+		this.timer = setInterval(() => {
+			this.processOnce().catch((err) => {
+				debug("haiku", "HaikuProcessor cycle error", { error: err instanceof Error ? err.message : String(err) });
+			});
+		}, this.intervalMs);
+	}
+	stop() {
+		if (this.timer) {
+			clearInterval(this.timer);
+			this.timer = null;
+			debug("haiku", "HaikuProcessor stopped");
+		}
+	}
+	async processOnce() {
+		if (!isHaikuEnabled()) return;
+		const repo = new ObservationRepository(this.db, this.projectHash);
+		const unclassified = repo.listUnclassified(this.batchSize);
+		if (unclassified.length === 0) return;
+		debug("haiku", "Processing unclassified observations", { count: unclassified.length });
+		for (let i = 0; i < unclassified.length; i += this.concurrency) {
+			const batch = unclassified.slice(i, i + this.concurrency);
+			await Promise.all(batch.map((obs) => this.processOne(obs, repo)));
+		}
+	}
+	async processOne(obs, repo) {
+		try {
+			let classification;
+			try {
+				const result = await classifyWithHaiku(obs.content, obs.source);
+				if (result.signal === "noise") {
+					repo.updateClassification(obs.id, "noise");
+					repo.softDelete(obs.id);
+					debug("haiku", "Observation classified as noise, soft-deleted", { id: obs.id });
+					return;
+				}
+				classification = result.classification ?? "discovery";
+				repo.updateClassification(obs.id, classification);
+				debug("haiku", "Observation classified", {
+					id: obs.id,
+					classification
+				});
+			} catch (classifyErr) {
+				const msg = classifyErr instanceof Error ? classifyErr.message : String(classifyErr);
+				debug("haiku", "Classification failed, will retry next cycle", {
+					id: obs.id,
+					error: msg
+				});
+				return;
+			}
+			let entities = [];
+			try {
+				entities = await extractEntitiesWithHaiku(obs.content);
+			} catch (entityErr) {
+				const msg = entityErr instanceof Error ? entityErr.message : String(entityErr);
+				debug("haiku", "Entity extraction failed (non-fatal)", {
+					id: obs.id,
+					error: msg
+				});
+				return;
+			}
+			if (entities.length === 0) return;
+			const isChange = obs.source === "hook:Write" || obs.source === "hook:Edit";
+			const gateResult = applyQualityGate(entities, isChange);
+			const persistedNodes = [];
+			for (const entity of gateResult.passed) try {
+				const node = upsertNode(this.db, {
+					type: entity.type,
+					name: entity.name,
+					metadata: { confidence: entity.confidence },
+					observation_ids: [String(obs.id)],
+					project_hash: this.projectHash
+				});
+				persistedNodes.push(node);
+			} catch {
+				continue;
+			}
+			if (persistedNodes.length > 0) {
+				for (const node of persistedNodes) broadcast("entity_updated", {
+					id: node.name,
+					label: node.name,
+					type: node.type,
+					observationCount: 1,
+					createdAt: (/* @__PURE__ */ new Date()).toISOString()
+				});
+				debug("haiku", "Entities persisted", {
+					id: obs.id,
+					count: persistedNodes.length
+				});
+			}
+			if (persistedNodes.length >= 2) try {
+				const entityPairs = persistedNodes.map((n) => ({
+					name: n.name,
+					type: n.type
+				}));
+				const relationships = await inferRelationshipsWithHaiku(obs.content, entityPairs);
+				const affectedNodeIds = /* @__PURE__ */ new Set();
+				for (const rel of relationships) {
+					const sourceNode = getNodeByNameAndType(this.db, rel.source, entityPairs.find((e) => e.name === rel.source)?.type ?? "File");
+					const targetNode = getNodeByNameAndType(this.db, rel.target, entityPairs.find((e) => e.name === rel.target)?.type ?? "File");
+					if (!sourceNode || !targetNode) continue;
+					try {
+						insertEdge(this.db, {
+							source_id: sourceNode.id,
+							target_id: targetNode.id,
+							type: rel.type,
+							weight: rel.confidence,
+							metadata: { source: "haiku" },
+							project_hash: this.projectHash
+						});
+						affectedNodeIds.add(sourceNode.id);
+						affectedNodeIds.add(targetNode.id);
+					} catch {}
+				}
+				for (const nodeId of affectedNodeIds) enforceMaxDegree(this.db, nodeId);
+				debug("haiku", "Relationships persisted", {
+					id: obs.id,
+					count: relationships.length
+				});
+			} catch (relErr) {
+				const msg = relErr instanceof Error ? relErr.message : String(relErr);
+				debug("haiku", "Relationship inference failed (non-fatal)", {
+					id: obs.id,
+					error: msg
+				});
+			}
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			debug("haiku", "processOne failed (non-fatal)", {
+				id: obs.id,
+				error: msg
+			});
+		}
+	}
+};
 
 //#endregion
 //#region src/web/routes/api.ts
@@ -5344,63 +4608,13 @@ apiRoutes.get("/graph/analysis", (c) => {
 	} catch {}
 	let components = [];
 	try {
-		let nodesSql = "SELECT id, name FROM graph_nodes";
-		const nodesParams = [];
-		if (projectFilter) {
-			nodesSql += " WHERE project_hash = ?";
-			nodesParams.push(projectFilter);
-		}
-		const allNodes = db.prepare(nodesSql).all(...nodesParams);
-		const nodeNameMap = new Map(allNodes.map((n) => [n.id, n.name]));
-		let edgesSql = "SELECT source_id, target_id FROM graph_edges";
-		const edgesParams = [];
-		if (projectFilter) {
-			edgesSql += " WHERE project_hash = ?";
-			edgesParams.push(projectFilter);
-		}
-		const allEdges = db.prepare(edgesSql).all(...edgesParams);
-		const adj = /* @__PURE__ */ new Map();
-		for (const node of allNodes) adj.set(node.id, /* @__PURE__ */ new Set());
-		for (const edge of allEdges) {
-			if (adj.has(edge.source_id)) adj.get(edge.source_id).add(edge.target_id);
-			if (adj.has(edge.target_id)) adj.get(edge.target_id).add(edge.source_id);
-		}
-		const visited = /* @__PURE__ */ new Set();
-		let componentId = 0;
-		for (const nodeId of adj.keys()) {
-			if (visited.has(nodeId)) continue;
-			const queue = [nodeId];
-			visited.add(nodeId);
-			const compNodes = [];
-			while (queue.length > 0) {
-				const current = queue.shift();
-				compNodes.push(current);
-				for (const neighbor of adj.get(current) || []) if (!visited.has(neighbor)) {
-					visited.add(neighbor);
-					queue.push(neighbor);
-				}
-			}
-			const compSet = new Set(compNodes);
-			let edgeCount = 0;
-			for (const edge of allEdges) if (compSet.has(edge.source_id) && compSet.has(edge.target_id)) edgeCount++;
-			let maxDeg = -1;
-			let labelNodeId = compNodes[0];
-			for (const nid of compNodes) {
-				const deg = (adj.get(nid) || /* @__PURE__ */ new Set()).size;
-				if (deg > maxDeg) {
-					maxDeg = deg;
-					labelNodeId = nid;
-				}
-			}
-			components.push({
-				id: componentId++,
-				label: nodeNameMap.get(labelNodeId) || labelNodeId,
-				nodeIds: compNodes,
-				nodeCount: compNodes.length,
-				edgeCount
-			});
-		}
-		components.sort((a, b) => b.nodeCount - a.nodeCount);
+		components = findConnectedComponents(db, projectFilter).components.map((comp, i) => ({
+			id: i,
+			label: comp.label,
+			nodeIds: comp.nodeIds,
+			nodeCount: comp.nodeIds.length,
+			edgeCount: comp.edgeCount
+		}));
 	} catch {}
 	let recentActivity = {
 		lastDay: 0,
@@ -5462,72 +4676,96 @@ apiRoutes.get("/graph/communities", (c) => {
 		"#a5d6ff"
 	];
 	const communities = [];
-	const isolatedNodes = [];
+	let isolatedNodes = [];
 	try {
-		let nodesSql = "SELECT id, name FROM graph_nodes";
-		const nodesParams = [];
-		if (projectFilter) {
-			nodesSql += " WHERE project_hash = ?";
-			nodesParams.push(projectFilter);
-		}
-		const allNodes = db.prepare(nodesSql).all(...nodesParams);
-		const nodeNameMap = new Map(allNodes.map((n) => [n.id, n.name]));
-		let edgesSql = "SELECT source_id, target_id FROM graph_edges";
-		const edgesParams = [];
-		if (projectFilter) {
-			edgesSql += " WHERE project_hash = ?";
-			edgesParams.push(projectFilter);
-		}
-		const allEdges = db.prepare(edgesSql).all(...edgesParams);
-		const adj = /* @__PURE__ */ new Map();
-		for (const node of allNodes) adj.set(node.id, /* @__PURE__ */ new Set());
-		for (const edge of allEdges) {
-			if (adj.has(edge.source_id)) adj.get(edge.source_id).add(edge.target_id);
-			if (adj.has(edge.target_id)) adj.get(edge.target_id).add(edge.source_id);
-		}
-		const visited = /* @__PURE__ */ new Set();
-		let communityId = 0;
-		for (const nodeId of adj.keys()) {
-			if (visited.has(nodeId)) continue;
-			const queue = [nodeId];
-			visited.add(nodeId);
-			const compNodes = [];
-			while (queue.length > 0) {
-				const current = queue.shift();
-				compNodes.push(current);
-				for (const neighbor of adj.get(current) || []) if (!visited.has(neighbor)) {
-					visited.add(neighbor);
-					queue.push(neighbor);
-				}
-			}
-			if (compNodes.length === 1 && (adj.get(compNodes[0])?.size ?? 0) === 0) {
-				isolatedNodes.push(compNodes[0]);
-				continue;
-			}
-			let maxDeg = -1;
-			let labelNodeId = compNodes[0];
-			for (const nid of compNodes) {
-				const deg = (adj.get(nid) || /* @__PURE__ */ new Set()).size;
-				if (deg > maxDeg) {
-					maxDeg = deg;
-					labelNodeId = nid;
-				}
-			}
+		const bfs = findConnectedComponents(db, projectFilter);
+		isolatedNodes = bfs.isolatedNodes;
+		for (let i = 0; i < bfs.components.length; i++) {
+			const comp = bfs.components[i];
 			communities.push({
-				id: communityId,
-				label: nodeNameMap.get(labelNodeId) || labelNodeId,
-				color: COMMUNITY_COLORS[communityId % COMMUNITY_COLORS.length],
-				nodeIds: compNodes
+				id: i,
+				label: comp.label,
+				color: COMMUNITY_COLORS[i % COMMUNITY_COLORS.length],
+				nodeIds: comp.nodeIds
 			});
-			communityId++;
 		}
-		communities.sort((a, b) => b.nodeIds.length - a.nodeIds.length);
 	} catch {}
 	return c.json({
 		communities,
 		isolatedNodes
 	});
 });
+/**
+* Finds connected components in the graph via BFS.
+* Shared by /api/graph/analysis and /api/graph/communities.
+*/
+function findConnectedComponents(db, projectFilter) {
+	let nodesSql = "SELECT id, name FROM graph_nodes";
+	const nodesParams = [];
+	if (projectFilter) {
+		nodesSql += " WHERE project_hash = ?";
+		nodesParams.push(projectFilter);
+	}
+	const allNodes = db.prepare(nodesSql).all(...nodesParams);
+	const nodeNameMap = new Map(allNodes.map((n) => [n.id, n.name]));
+	let edgesSql = "SELECT source_id, target_id FROM graph_edges";
+	const edgesParams = [];
+	if (projectFilter) {
+		edgesSql += " WHERE project_hash = ?";
+		edgesParams.push(projectFilter);
+	}
+	const allEdges = db.prepare(edgesSql).all(...edgesParams);
+	const adj = /* @__PURE__ */ new Map();
+	for (const node of allNodes) adj.set(node.id, /* @__PURE__ */ new Set());
+	for (const edge of allEdges) {
+		if (adj.has(edge.source_id)) adj.get(edge.source_id).add(edge.target_id);
+		if (adj.has(edge.target_id)) adj.get(edge.target_id).add(edge.source_id);
+	}
+	const visited = /* @__PURE__ */ new Set();
+	const components = [];
+	const isolatedNodes = [];
+	for (const nodeId of adj.keys()) {
+		if (visited.has(nodeId)) continue;
+		const queue = [nodeId];
+		visited.add(nodeId);
+		const compNodes = [];
+		while (queue.length > 0) {
+			const current = queue.shift();
+			compNodes.push(current);
+			for (const neighbor of adj.get(current) || []) if (!visited.has(neighbor)) {
+				visited.add(neighbor);
+				queue.push(neighbor);
+			}
+		}
+		if (compNodes.length === 1 && (adj.get(compNodes[0])?.size ?? 0) === 0) {
+			isolatedNodes.push(compNodes[0]);
+			continue;
+		}
+		const compSet = new Set(compNodes);
+		let edgeCount = 0;
+		for (const edge of allEdges) if (compSet.has(edge.source_id) && compSet.has(edge.target_id)) edgeCount++;
+		let maxDeg = -1;
+		let labelNodeId = compNodes[0];
+		for (const nid of compNodes) {
+			const deg = (adj.get(nid) || /* @__PURE__ */ new Set()).size;
+			if (deg > maxDeg) {
+				maxDeg = deg;
+				labelNodeId = nid;
+			}
+		}
+		components.push({
+			nodeIds: compNodes,
+			label: nodeNameMap.get(labelNodeId) || labelNodeId,
+			edgeCount
+		});
+	}
+	components.sort((a, b) => b.nodeIds.length - a.nodeIds.length);
+	return {
+		components,
+		isolatedNodes,
+		adj
+	};
+}
 function safeParseJsonArray(json) {
 	try {
 		const parsed = JSON.parse(json);
@@ -5557,7 +4795,26 @@ function getDb(c) {
 function getProjectHash$1(c) {
 	return c.req.query("project") || c.get("defaultProject") || null;
 }
+const ALLOWED_TABLES = new Set([
+	"observations",
+	"observations_fts",
+	"observation_embeddings",
+	"staleness_flags",
+	"graph_nodes",
+	"graph_edges",
+	"sessions",
+	"context_stashes",
+	"threshold_history",
+	"shift_decisions",
+	"pending_notifications",
+	"project_metadata",
+	"_migrations",
+	"tool_registry",
+	"tool_usage_events",
+	"research_buffer"
+]);
 function tableCount(db, table, where, params) {
+	if (!ALLOWED_TABLES.has(table)) return 0;
 	try {
 		const sql = where ? `SELECT COUNT(*) AS cnt FROM ${table} WHERE ${where}` : `SELECT COUNT(*) AS cnt FROM ${table}`;
 		return db.prepare(sql).get(...params || [])?.cnt ?? 0;
@@ -5710,6 +4967,44 @@ adminRoutes.post("/reset", async (c) => {
 		scope: scoped ? "project" : "all"
 	});
 });
+adminRoutes.get("/config/topic-detection", (c) => {
+	return c.json(loadTopicDetectionConfig());
+});
+adminRoutes.put("/config/topic-detection", async (c) => {
+	const body = await c.req.json();
+	const configPath = join(getConfigDir(), "topic-detection.json");
+	if (body && body.__reset === true) {
+		try {
+			if (existsSync(configPath)) unlinkSync(configPath);
+		} catch {}
+		return c.json(loadTopicDetectionConfig());
+	}
+	if (typeof body !== "object" || body === null || Array.isArray(body)) return c.json({ error: "Request body must be a JSON object" }, 400);
+	const { __reset: _, ...data } = body;
+	writeFileSync(configPath, JSON.stringify(data, null, 2), "utf-8");
+	const validated = loadTopicDetectionConfig();
+	writeFileSync(configPath, JSON.stringify(validated, null, 2), "utf-8");
+	return c.json(validated);
+});
+adminRoutes.get("/config/graph-extraction", (c) => {
+	return c.json(loadGraphExtractionConfig());
+});
+adminRoutes.put("/config/graph-extraction", async (c) => {
+	const body = await c.req.json();
+	const configPath = join(getConfigDir(), "graph-extraction.json");
+	if (body && body.__reset === true) {
+		try {
+			if (existsSync(configPath)) unlinkSync(configPath);
+		} catch {}
+		return c.json(loadGraphExtractionConfig());
+	}
+	if (typeof body !== "object" || body === null || Array.isArray(body)) return c.json({ error: "Request body must be a JSON object" }, 400);
+	const { __reset: _, ...data } = body;
+	writeFileSync(configPath, JSON.stringify(data, null, 2), "utf-8");
+	const validated = loadGraphExtractionConfig();
+	writeFileSync(configPath, JSON.stringify(validated, null, 2), "utf-8");
+	return c.json(validated);
+});
 
 //#endregion
 //#region src/web/server.ts
@@ -5783,46 +5078,33 @@ function createWebServer(db, uiRoot, defaultProjectHash) {
 	return app;
 }
 /**
-* Maximum number of alternate ports to try when the primary port is in use.
-*/
-const MAX_PORT_RETRIES = 10;
-/**
 * Starts the Hono web server on the specified port.
 *
-* If the port is already in use (EADDRINUSE), tries incrementing ports up to
-* MAX_PORT_RETRIES times. If all ports fail, logs a warning and continues
-* without the web server -- the MCP server is the primary function and must
-* not be killed by a web server port conflict.
+* If the port is already in use (EADDRINUSE), skips starting — the first
+* MCP instance owns the web server and all instances share the same SQLite
+* database via WAL mode, so a single web server suffices.
 *
 * @param app - Configured Hono app from createWebServer()
 * @param port - Port number (default: 37820)
-* @returns The Node.js HTTP server instance, or null if all ports failed
+* @returns The Node.js HTTP server instance, or null if port is already taken
 */
 function startWebServer(app, port = 37820) {
 	debug("db", `Starting web server on port ${port}`);
-	function tryListen(attemptPort, retries) {
-		const server = serve({
-			fetch: app.fetch,
-			port: attemptPort
-		});
-		server.on("error", (err) => {
-			if (err.code === "EADDRINUSE" && retries > 0) {
-				server.close();
-				const nextPort = attemptPort + 1;
-				debug("db", `Port ${attemptPort} in use, trying ${nextPort}`);
-				tryListen(nextPort, retries - 1);
-			} else if (err.code === "EADDRINUSE") {
-				server.close();
-				debug("db", `Web server disabled: all ports ${port}-${attemptPort} in use`);
-			} else debug("db", `Web server error: ${err.message}`);
-		});
-		server.on("listening", () => {
-			const addr = server.address();
-			debug("db", `Web server listening on http://localhost:${typeof addr === "object" && addr ? addr.port : attemptPort}`);
-		});
-		return server;
-	}
-	return tryListen(port, MAX_PORT_RETRIES);
+	const server = serve({
+		fetch: app.fetch,
+		port
+	});
+	server.on("error", (err) => {
+		if (err.code === "EADDRINUSE") {
+			server.close();
+			debug("db", `Web server already running on port ${port}, skipping`);
+		} else debug("db", `Web server error: ${err.message}`);
+	});
+	server.on("listening", () => {
+		const addr = server.address();
+		debug("db", `Web server listening on http://localhost:${typeof addr === "object" && addr ? addr.port : port}`);
+	});
+	return server;
 }
 
 //#endregion
@@ -5916,100 +5198,6 @@ async function processUnembedded() {
 			} catch (topicErr) {
 				debug("embed", "Topic shift detection error (non-fatal)", { error: topicErr instanceof Error ? topicErr.message : String(topicErr) });
 			}
-			const signal = graphConfig.enabled ? classifySignal(obs.source, text, graphConfig) : {
-				level: "skip",
-				reason: "Graph extraction disabled"
-			};
-			if (signal.level !== "skip") try {
-				const isChangeObs = obs.kind === "change" || obs.source === "hook:Write" || obs.source === "hook:Edit";
-				const nodes = extractAndPersist(db.db, text, String(id), {
-					projectHash,
-					isChangeObservation: isChangeObs,
-					graphConfig
-				});
-				if (nodes.length > 0) {
-					const entityPairs = nodes.map((n) => ({
-						name: n.name,
-						type: n.type
-					}));
-					if (signal.level === "high") detectAndPersist(db.db, text, entityPairs, {
-						projectHash,
-						minConfidence: graphConfig.relationshipDetector.minEdgeConfidence
-					});
-					if (obs.kind === "change" && obs.content.includes("Research context:")) try {
-						const researchSection = obs.content.split("Research context:\n")[1];
-						if (researchSection) {
-							const researchPaths = researchSection.split("\n").map((line) => {
-								const match = line.match(/\[(?:Read|Glob|Grep)\]\s+(.+)/);
-								return match ? match[1].trim() : null;
-							}).filter((p) => p !== null);
-							const changeFileNodes = nodes.filter((n) => n.type === "File");
-							for (const changeNode of changeFileNodes) for (const researchPath of researchPaths) {
-								const researchNode = upsertNode(db.db, {
-									type: "File",
-									name: researchPath,
-									metadata: {},
-									observation_ids: [String(id)],
-									project_hash: projectHash
-								});
-								try {
-									insertEdge(db.db, {
-										source_id: changeNode.id,
-										target_id: researchNode.id,
-										type: "informed_by",
-										weight: .7,
-										metadata: { source: "research_buffer" },
-										project_hash: projectHash
-									});
-								} catch {}
-							}
-						}
-					} catch (provErr) {
-						debug("embed", "Provenance edge error (non-fatal)", { error: provErr instanceof Error ? provErr.message : String(provErr) });
-					}
-					if (obs.kind === "change" && obs.sessionId) try {
-						const priorChange = db.db.prepare(`
-                SELECT id, content FROM observations
-                WHERE project_hash = ? AND session_id = ? AND kind = 'change'
-                  AND deleted_at IS NULL AND id != ?
-                ORDER BY created_at DESC, rowid DESC LIMIT 1
-              `).get(projectHash, obs.sessionId, obs.id);
-						if (priorChange) {
-							const changeFileNodes = nodes.filter((n) => n.type === "File");
-							const priorFileMatch = priorChange.content.match(/\[(?:Write|Edit)\]\s+(?:Created|Modified)\s+(\S+)/);
-							if (priorFileMatch && changeFileNodes.length > 0) {
-								const priorNode = getNodeByNameAndType(db.db, priorFileMatch[1], "File");
-								if (priorNode) try {
-									insertEdge(db.db, {
-										source_id: changeFileNodes[0].id,
-										target_id: priorNode.id,
-										type: "preceded_by",
-										weight: .6,
-										metadata: { source: "temporal" },
-										project_hash: projectHash
-									});
-								} catch {}
-							}
-						}
-					} catch (tempErr) {
-						debug("embed", "Temporal ordering error (non-fatal)", { error: tempErr instanceof Error ? tempErr.message : String(tempErr) });
-					}
-					debug("embed", "Graph updated", {
-						id,
-						entities: nodes.length
-					});
-					statusCache.markDirty();
-					for (const node of nodes) broadcast("entity_updated", {
-						id: node.name,
-						label: node.name,
-						type: node.type,
-						observationCount: 1,
-						createdAt: (/* @__PURE__ */ new Date()).toISOString()
-					});
-				}
-			} catch (graphErr) {
-				debug("embed", "Graph extraction error (non-fatal)", { error: graphErr instanceof Error ? graphErr.message : String(graphErr) });
-			}
 		}
 	}
 }
@@ -6054,13 +5242,13 @@ if (toolRegistry) {
 	registerDiscoverTools(server, toolRegistry, worker, db.hasVectorSupport, notificationStore, projectHash);
 	registerReportTools(server, toolRegistry, projectHash);
 }
-const classifier = new ObservationClassifier(db.db, projectHash, server, {
-	intervalMs: 45e3,
-	contextWindow: 5,
-	batchSize: 20
+const haikuProcessor = new HaikuProcessor(db.db, projectHash, {
+	intervalMs: 3e4,
+	batchSize: 10,
+	concurrency: 3
 });
 startServer(server).then(() => {
-	classifier.start();
+	haikuProcessor.start();
 }).catch((err) => {
 	debug("mcp", "Fatal: failed to start server", { error: err.message });
 	clearInterval(embedTimer);
@@ -6090,30 +5278,19 @@ const curationAgent = new CurationAgent(db.db, {
 	}
 });
 curationAgent.start();
-process.on("SIGINT", () => {
+function shutdown(code) {
 	clearInterval(embedTimer);
-	classifier.stop();
+	haikuProcessor.stop();
 	curationAgent.stop();
 	worker.shutdown().catch(() => {});
 	db.close();
-	process.exit(0);
-});
-process.on("SIGTERM", () => {
-	clearInterval(embedTimer);
-	classifier.stop();
-	curationAgent.stop();
-	worker.shutdown().catch(() => {});
-	db.close();
-	process.exit(0);
-});
+	process.exit(code);
+}
+process.on("SIGINT", () => shutdown(0));
+process.on("SIGTERM", () => shutdown(0));
 process.on("uncaughtException", (err) => {
 	debug("mcp", "Uncaught exception", { error: err.message });
-	clearInterval(embedTimer);
-	classifier.stop();
-	curationAgent.stop();
-	worker.shutdown().catch(() => {});
-	db.close();
-	process.exit(1);
+	shutdown(1);
 });
 
 //#endregion

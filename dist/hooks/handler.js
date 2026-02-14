@@ -1,5 +1,5 @@
 import { i as getProjectHash, n as getDatabaseConfig } from "../config-t8LZeB-u.mjs";
-import { a as inferScope, d as ObservationRepository, f as rowToObservation, g as debug, i as extractServerName, n as NotificationStore, o as inferToolType, p as openDatabase, r as ResearchBufferRepository, s as SaveGuard, t as ToolRegistryRepository, u as SessionRepository } from "../tool-registry-BWSzC89L.mjs";
+import { S as openDatabase, T as debug, a as inferScope, b as ObservationRepository, h as SaveGuard, i as extractServerName, l as getNodeByNameAndType, n as NotificationStore, o as inferToolType, p as traverseFrom, r as ResearchBufferRepository, t as ToolRegistryRepository, v as SearchEngine, x as rowToObservation, y as SessionRepository } from "../tool-registry-BIjd5Evf.mjs";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
@@ -37,7 +37,7 @@ function isLaminarksOwnTool(toolName) {
 /**
 * Truncates a string to maxLength, appending '...' if truncated.
 */
-function truncate$1(text, maxLength) {
+function truncate$2(text, maxLength) {
 	if (text.length <= maxLength) return text;
 	return text.slice(0, maxLength) + "...";
 }
@@ -51,15 +51,15 @@ function truncate$1(text, maxLength) {
 function extractObservation(payload) {
 	const { tool_name, tool_input, tool_response } = payload;
 	switch (tool_name) {
-		case "Write": return `[Write] Created ${tool_input.file_path}\n${truncate$1(String(tool_input.content ?? ""), 200)}`;
-		case "Edit": return `[Edit] Modified ${tool_input.file_path}: replaced "${truncate$1(String(tool_input.old_string ?? ""), 80)}" with "${truncate$1(String(tool_input.new_string ?? ""), 80)}"`;
-		case "Bash": return `[Bash] $ ${truncate$1(String(tool_input.command ?? ""), 100)}\n${truncate$1(JSON.stringify(tool_response ?? ""), 200)}`;
+		case "Write": return `[Write] Created ${tool_input.file_path}\n${truncate$2(String(tool_input.content ?? ""), 200)}`;
+		case "Edit": return `[Edit] Modified ${tool_input.file_path}: replaced "${truncate$2(String(tool_input.old_string ?? ""), 80)}" with "${truncate$2(String(tool_input.new_string ?? ""), 80)}"`;
+		case "Bash": return `[Bash] $ ${truncate$2(String(tool_input.command ?? ""), 100)}\n${truncate$2(JSON.stringify(tool_response ?? ""), 200)}`;
 		case "Read":
 		case "Glob":
 		case "Grep": return null;
-		case "WebFetch": return `[WebFetch] ${String(tool_input.url ?? "")}\nPrompt: ${truncate$1(String(tool_input.prompt ?? ""), 100)}\n${truncate$1(JSON.stringify(tool_response ?? ""), 300)}`;
-		case "WebSearch": return `[WebSearch] "${String(tool_input.query ?? "")}"\n${truncate$1(JSON.stringify(tool_response ?? ""), 300)}`;
-		default: return `[${tool_name}] ${truncate$1(JSON.stringify(tool_input), 200)}`;
+		case "WebFetch": return `[WebFetch] ${String(tool_input.url ?? "")}\nPrompt: ${truncate$2(String(tool_input.prompt ?? ""), 100)}\n${truncate$2(JSON.stringify(tool_response ?? ""), 300)}`;
+		case "WebSearch": return `[WebSearch] "${String(tool_input.query ?? "")}"\n${truncate$2(JSON.stringify(tool_response ?? ""), 300)}`;
+		default: return `[${tool_name}] ${truncate$2(JSON.stringify(tool_input), 200)}`;
 	}
 }
 
@@ -251,7 +251,7 @@ function formatRelativeTime(isoDate) {
 /**
 * Truncates a string to `maxLen` characters, appending "..." if truncated.
 */
-function truncate(text, maxLen) {
+function truncate$1(text, maxLen) {
 	const normalized = text.replace(/\s+/g, " ").trim();
 	if (normalized.length <= maxLen) return normalized;
 	return normalized.slice(0, maxLen) + "...";
@@ -288,7 +288,7 @@ function formatContextIndex(lastSession, sections) {
 	if (sections.changes.length > 0) {
 		lines.push("## Recent Changes");
 		for (const obs of sections.changes) {
-			const content = truncate(obs.content, OBSERVATION_CONTENT_LIMIT);
+			const content = truncate$1(obs.content, OBSERVATION_CONTENT_LIMIT);
 			const relTime = formatRelativeTime(obs.createdAt);
 			lines.push(`- ${content} (${relTime})`);
 		}
@@ -297,7 +297,7 @@ function formatContextIndex(lastSession, sections) {
 	if (sections.decisions.length > 0) {
 		lines.push("## Active Decisions");
 		for (const obs of sections.decisions) {
-			const content = truncate(obs.content, OBSERVATION_CONTENT_LIMIT);
+			const content = truncate$1(obs.content, OBSERVATION_CONTENT_LIMIT);
 			lines.push(`- ${content}`);
 		}
 		lines.push("");
@@ -305,7 +305,7 @@ function formatContextIndex(lastSession, sections) {
 	if (sections.references.length > 0) {
 		lines.push("## Reference Docs");
 		for (const obs of sections.references) {
-			const content = truncate(obs.content, OBSERVATION_CONTENT_LIMIT);
+			const content = truncate$1(obs.content, OBSERVATION_CONTENT_LIMIT);
 			lines.push(`- ${content}`);
 		}
 		lines.push("");
@@ -314,7 +314,7 @@ function formatContextIndex(lastSession, sections) {
 		lines.push("## Recent Findings");
 		for (const obs of sections.findings) {
 			const shortId = obs.id.slice(0, 8);
-			const content = truncate(obs.content, OBSERVATION_CONTENT_LIMIT);
+			const content = truncate$1(obs.content, OBSERVATION_CONTENT_LIMIT);
 			lines.push(`- [${shortId}] ${content}`);
 		}
 	}
@@ -1182,67 +1182,6 @@ function redactSensitiveContent(text, filePath) {
 }
 
 //#endregion
-//#region src/hooks/noise-patterns.ts
-/**
-* Noise pattern definitions by category.
-*
-* These patterns identify low-signal content that should be rejected
-* by the admission filter before database storage.
-*/
-/**
-* Noise pattern categories with detection regexes.
-*
-* Each category groups patterns for a specific type of noise.
-* Patterns are case-insensitive where appropriate.
-*/
-const NOISE_PATTERNS = {
-	BUILD_OUTPUT: [
-		/npm WARN/i,
-		/npm ERR/i,
-		/Successfully compiled/i,
-		/webpack compiled/i,
-		/error TS\d+/i,
-		/Build completed/i,
-		/Compiling\b/i,
-		/Module not found/i
-	],
-	PACKAGE_INSTALL: [
-		/added \d+ packages?/i,
-		/npm install/i,
-		/up to date/i,
-		/removed \d+ packages?/i,
-		/audited \d+ packages?/i
-	],
-	LINTER_WARNING: [
-		/eslint/i,
-		/prettier/i,
-		/\d+ problems?\s*\(/i,
-		/(?:.*\bwarning\b.*[\n]?){3,}/i
-	],
-	EMPTY_OUTPUT: [/^(OK|Success|Done|undefined|null)?\s*$/is]
-};
-/**
-* Checks whether the given content matches any noise pattern category.
-*
-* @param content - The text content to check
-* @returns Object with `isNoise` flag and optional `category` name
-*/
-function isNoise(content) {
-	for (const pattern of NOISE_PATTERNS.EMPTY_OUTPUT) if (pattern.test(content)) return {
-		isNoise: true,
-		category: "EMPTY_OUTPUT"
-	};
-	for (const [category, patterns] of Object.entries(NOISE_PATTERNS)) {
-		if (category === "EMPTY_OUTPUT") continue;
-		for (const pattern of patterns) if (pattern.test(content)) return {
-			isNoise: true,
-			category
-		};
-	}
-	return { isNoise: false };
-}
-
-//#endregion
 //#region src/hooks/admission-filter.ts
 /**
 * Tools that are always admitted regardless of content.
@@ -1396,15 +1335,6 @@ function shouldAdmit(toolName, content) {
 		return false;
 	}
 	if (HIGH_SIGNAL_TOOLS.has(toolName)) return true;
-	const noiseResult = isNoise(content);
-	if (noiseResult.isNoise) {
-		debug("hook", "Observation rejected", {
-			tool: toolName,
-			reason: "noise",
-			category: noiseResult.category
-		});
-		return false;
-	}
 	if (content.length > MAX_CONTENT_LENGTH) {
 		if (!DECISION_OR_ERROR_INDICATORS.some((pattern) => pattern.test(content))) {
 			debug("hook", "Observation rejected", {
@@ -1416,6 +1346,140 @@ function shouldAdmit(toolName, content) {
 		}
 	}
 	return true;
+}
+
+//#endregion
+//#region src/hooks/pre-tool-context.ts
+/** Tools where we skip context injection entirely. */
+const SKIP_TOOLS = new Set([
+	"Glob",
+	"Task",
+	"NotebookEdit",
+	"EnterPlanMode",
+	"ExitPlanMode",
+	"AskUserQuestion",
+	"TaskCreate",
+	"TaskUpdate",
+	"TaskGet",
+	"TaskList"
+]);
+/** Bash commands that are navigation/noise -- not worth searching for. */
+const NOISE_BASH_RE = /^\s*(cd|ls|pwd|echo|cat|head|tail|mkdir|rm|cp|mv|npm\s+(run|start|test|install)|yarn|pnpm|git\s+(status|log|diff|add|branch)|exit|clear)\b/;
+/**
+* Extracts a search query from tool input based on tool type.
+* Returns null if the tool should be skipped or has no meaningful target.
+*/
+function extractSearchQuery(toolName, toolInput) {
+	switch (toolName) {
+		case "Write":
+		case "Edit":
+		case "Read": {
+			const filePath = toolInput.file_path;
+			if (!filePath) return null;
+			const base = basename(filePath);
+			const stem = base.replace(/\.[^.]+$/, "");
+			return stem.length >= 2 ? stem : base;
+		}
+		case "Bash": {
+			const command = toolInput.command ?? "";
+			if (NOISE_BASH_RE.test(command)) return null;
+			const cleaned = command.replace(/^\s*(sudo|bash|sh|env)\s+/, "").replace(/[|><&;]+.*$/, "").trim();
+			if (!cleaned || cleaned.length < 3) return null;
+			const words = cleaned.split(/\s+/).slice(0, 3).join(" ");
+			return words.length >= 3 ? words : null;
+		}
+		case "Grep": {
+			const pattern = toolInput.pattern;
+			return pattern && pattern.length >= 2 ? pattern : null;
+		}
+		case "WebFetch": {
+			const url = toolInput.url;
+			if (!url) return null;
+			try {
+				return new URL(url).hostname;
+			} catch {
+				return null;
+			}
+		}
+		case "WebSearch": return toolInput.query ?? null;
+		default: return null;
+	}
+}
+/**
+* Formats age of an observation as a human-readable string.
+*/
+function formatAge(createdAt) {
+	const ageMs = Date.now() - new Date(createdAt).getTime();
+	const hours = Math.floor(ageMs / 36e5);
+	if (hours < 1) return "just now";
+	if (hours < 24) return `${hours}h ago`;
+	const days = Math.floor(hours / 24);
+	if (days === 1) return "1d ago";
+	return `${days}d ago`;
+}
+/**
+* Truncates text to a max length, adding ellipsis if needed.
+*/
+function truncate(text, max) {
+	if (text.length <= max) return text;
+	return text.slice(0, max - 3) + "...";
+}
+/**
+* Main PreToolUse handler. Searches observations and graph for context
+* relevant to the tool about to execute.
+*
+* Returns a formatted context string to inject via stdout, or null if
+* no relevant context was found.
+*/
+function handlePreToolUse(input, db, projectHash) {
+	const toolName = input.tool_name;
+	if (!toolName) return null;
+	if (isLaminarksOwnTool(toolName)) return null;
+	if (SKIP_TOOLS.has(toolName)) return null;
+	const toolInput = input.tool_input ?? {};
+	const query = extractSearchQuery(toolName, toolInput);
+	if (!query) return null;
+	debug("hook", "PreToolUse searching", {
+		tool: toolName,
+		query
+	});
+	const lines = [];
+	try {
+		const results = new SearchEngine(db, projectHash).searchKeyword(query, { limit: 3 });
+		for (const result of results) {
+			const snippet = result.snippet ? result.snippet.replace(/<\/?mark>/g, "") : truncate(result.observation.content, 120);
+			const age = formatAge(result.observation.created_at);
+			lines.push(`- ${truncate(snippet, 120)} (${result.observation.source}, ${age})`);
+		}
+	} catch {
+		debug("hook", "PreToolUse FTS5 search failed");
+	}
+	try {
+		if (toolName === "Write" || toolName === "Edit" || toolName === "Read") {
+			const filePath = toolInput.file_path;
+			if (filePath) {
+				const node = getNodeByNameAndType(db, filePath, "File");
+				if (node) {
+					const connected = traverseFrom(db, node.id, {
+						depth: 1,
+						direction: "both"
+					});
+					if (connected.length > 0) {
+						const names = connected.slice(0, 5).map((r) => `${r.node.name} (${r.node.type})`).join(", ");
+						lines.push(`Related: ${names}`);
+					}
+				}
+			}
+		}
+	} catch {
+		debug("hook", "PreToolUse graph lookup failed");
+	}
+	if (lines.length === 0) return null;
+	let target = query;
+	if ((toolName === "Write" || toolName === "Edit" || toolName === "Read") && toolInput.file_path) target = basename(toolInput.file_path);
+	const output = `[Laminark] Context for ${target}:\n${lines.join("\n")}\n`;
+	if (output.length > 500) return output.slice(0, 497) + "...\n";
+	return output;
 }
 
 //#endregion
@@ -1746,7 +1810,7 @@ var ConversationRouter = class {
 * dispatches to the appropriate handler based on hook_event_name, and exits 0.
 *
 * CRITICAL CONSTRAINTS:
-* - Only SessionStart writes to stdout (synchronous hook -- stdout is injected into Claude's context window)
+* - Only SessionStart and PreToolUse write to stdout (synchronous hooks -- stdout is injected into Claude's context window)
 * - All other hooks NEVER write to stdout (stdout output is interpreted by Claude Code)
 * - ALWAYS exits 0 (non-zero exit codes surface as errors to Claude)
 * - Opens its own database connection (WAL mode handles concurrent access with MCP server)
@@ -1929,6 +1993,11 @@ async function main() {
 			toolRegistry = new ToolRegistryRepository(laminarkDb.db);
 		} catch {}
 		switch (eventName) {
+			case "PreToolUse": {
+				const preContext = handlePreToolUse(input, laminarkDb.db, projectHash);
+				if (preContext) process.stdout.write(preContext);
+				break;
+			}
 			case "PostToolUse":
 			case "PostToolUseFailure":
 				processPostToolUseFiltered(input, obsRepo, researchBuffer, toolRegistry, projectHash, laminarkDb.db);

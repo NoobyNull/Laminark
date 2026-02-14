@@ -787,7 +787,7 @@ var ObservationRepository = class {
 		const includeUnclassified = options?.includeUnclassified ?? false;
 		let sql = "SELECT * FROM observations WHERE project_hash = ? AND deleted_at IS NULL";
 		const params = [this.projectHash];
-		if (!includeUnclassified) sql += " AND classification IS NOT NULL AND classification != 'noise'";
+		if (!includeUnclassified) sql += " AND ((classification IS NOT NULL AND classification != 'noise') OR created_at >= datetime('now', '-60 seconds'))";
 		if (options?.kind) {
 			sql += " AND kind = ?";
 			params.push(options.kind);
@@ -1086,6 +1086,138 @@ var SessionRepository = class {
 };
 
 //#endregion
+//#region src/storage/search.ts
+/**
+* FTS5 search engine with BM25 ranking, snippet extraction, and strict project scoping.
+*
+* All queries are scoped to the projectHash provided at construction time.
+* Queries are sanitized to prevent FTS5 syntax errors and injection.
+*/
+var SearchEngine = class {
+	db;
+	projectHash;
+	constructor(db, projectHash) {
+		this.db = db;
+		this.projectHash = projectHash;
+	}
+	/**
+	* Full-text search with BM25 ranking and snippet extraction.
+	*
+	* bm25() returns NEGATIVE values where more negative = more relevant.
+	* ORDER BY rank (ascending) puts best matches first.
+	*
+	* @param query - User's search query (sanitized for FTS5 safety)
+	* @param options - Optional limit and sessionId filter
+	* @returns SearchResult[] ordered by relevance (best match first)
+	*/
+	searchKeyword(query, options) {
+		const sanitized = this.sanitizeQuery(query);
+		if (!sanitized) return [];
+		const limit = options?.limit ?? 20;
+		let sql = `
+      SELECT
+        o.*,
+        bm25(observations_fts, 2.0, 1.0) AS rank,
+        snippet(observations_fts, 1, '<mark>', '</mark>', '...', 32) AS snippet
+      FROM observations_fts
+      JOIN observations o ON o.rowid = observations_fts.rowid
+      WHERE observations_fts MATCH ?
+        AND o.project_hash = ?
+        AND o.deleted_at IS NULL
+        AND (o.classification IS NULL OR o.classification != 'noise')
+    `;
+		const params = [sanitized, this.projectHash];
+		if (options?.sessionId) {
+			sql += " AND o.session_id = ?";
+			params.push(options.sessionId);
+		}
+		sql += " ORDER BY rank LIMIT ?";
+		params.push(limit);
+		const results = debugTimed("search", "FTS5 keyword search", () => {
+			return this.db.prepare(sql).all(...params).map((row) => ({
+				observation: rowToObservation(row),
+				score: Math.abs(row.rank),
+				matchType: "fts",
+				snippet: row.snippet
+			}));
+		});
+		debug("search", "Keyword search completed", {
+			query: sanitized,
+			resultCount: results.length
+		});
+		return results;
+	}
+	/**
+	* Prefix search for autocomplete-style matching.
+	* Appends `*` to each word for prefix matching.
+	*/
+	searchByPrefix(prefix, limit) {
+		const words = prefix.trim().split(/\s+/).filter(Boolean);
+		if (words.length === 0) return [];
+		const sanitizedWords = words.map((w) => this.sanitizeWord(w)).filter(Boolean);
+		if (sanitizedWords.length === 0) return [];
+		const ftsQuery = sanitizedWords.map((w) => `${w}*`).join(" ");
+		const effectiveLimit = limit ?? 20;
+		const sql = `
+      SELECT
+        o.*,
+        bm25(observations_fts, 2.0, 1.0) AS rank,
+        snippet(observations_fts, 1, '<mark>', '</mark>', '...', 32) AS snippet
+      FROM observations_fts
+      JOIN observations o ON o.rowid = observations_fts.rowid
+      WHERE observations_fts MATCH ?
+        AND o.project_hash = ?
+        AND o.deleted_at IS NULL
+        AND (o.classification IS NULL OR o.classification != 'noise')
+      ORDER BY rank
+      LIMIT ?
+    `;
+		const results = debugTimed("search", "FTS5 prefix search", () => {
+			return this.db.prepare(sql).all(ftsQuery, this.projectHash, effectiveLimit).map((row) => ({
+				observation: rowToObservation(row),
+				score: Math.abs(row.rank),
+				matchType: "fts",
+				snippet: row.snippet
+			}));
+		});
+		debug("search", "Prefix search completed", {
+			prefix,
+			resultCount: results.length
+		});
+		return results;
+	}
+	/**
+	* Rebuild the FTS5 index if it gets out of sync.
+	*/
+	rebuildIndex() {
+		debug("search", "Rebuilding FTS5 index");
+		this.db.exec("INSERT INTO observations_fts(observations_fts) VALUES('rebuild')");
+	}
+	/**
+	* Sanitizes a user query for safe FTS5 MATCH usage.
+	* Removes FTS5 operators and special characters.
+	* Returns null if the query is empty after sanitization.
+	*/
+	sanitizeQuery(query) {
+		const words = query.trim().split(/\s+/).filter(Boolean);
+		if (words.length === 0) return null;
+		const sanitizedWords = words.map((w) => this.sanitizeWord(w)).filter(Boolean);
+		if (sanitizedWords.length === 0) return null;
+		return sanitizedWords.join(" ");
+	}
+	/**
+	* Sanitizes a single word for FTS5 safety.
+	* Removes quotes, parentheses, asterisks, and FTS5 operator keywords.
+	*/
+	sanitizeWord(word) {
+		let cleaned = word.replace(/["*()^{}[\]]/g, "");
+		if (/^(NEAR|OR|AND|NOT)$/i.test(cleaned)) return "";
+		cleaned = cleaned.replace(/[^\w\-]/g, "");
+		return cleaned;
+	}
+};
+
+//#endregion
 //#region src/search/hybrid.ts
 /**
 * Hybrid search combining FTS5 keyword results and vec0 vector results
@@ -1312,6 +1444,270 @@ var SaveGuard = class {
 		return null;
 	}
 };
+
+//#endregion
+//#region src/graph/migrations/001-graph-tables.ts
+/**
+* Migration 001: Create graph_nodes and graph_edges tables.
+*
+* Graph tables are managed separately from the main observation/session tables
+* because the knowledge graph is a distinct subsystem that operates
+* on extracted entities rather than raw observations.
+*
+* Tables:
+*   - graph_nodes: entities with type-checked taxonomy (6 types)
+*   - graph_edges: directed relationships with type-checked taxonomy (8 types),
+*     weight confidence, and unique constraint on (source_id, target_id, type)
+*
+* Indexes:
+*   - Nodes: type, name
+*   - Edges: source_id, target_id, type, unique(source_id, target_id, type)
+*/
+const up = `
+  CREATE TABLE IF NOT EXISTS graph_nodes (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL CHECK(type IN ('Project','File','Decision','Problem','Solution','Reference')),
+    name TEXT NOT NULL,
+    metadata TEXT DEFAULT '{}',
+    observation_ids TEXT DEFAULT '[]',
+    project_hash TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS graph_edges (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
+    target_id TEXT NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
+    type TEXT NOT NULL CHECK(type IN ('related_to','solved_by','caused_by','modifies','informed_by','references','verified_by','preceded_by')),
+    weight REAL NOT NULL DEFAULT 1.0 CHECK(weight >= 0.0 AND weight <= 1.0),
+    metadata TEXT DEFAULT '{}',
+    project_hash TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(type);
+  CREATE INDEX IF NOT EXISTS idx_graph_nodes_name ON graph_nodes(name);
+  CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_id);
+  CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(target_id);
+  CREATE INDEX IF NOT EXISTS idx_graph_edges_type ON graph_edges(type);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_edges_unique ON graph_edges(source_id, target_id, type);
+`;
+
+//#endregion
+//#region src/graph/schema.ts
+function rowToNode(row) {
+	return {
+		id: row.id,
+		type: row.type,
+		name: row.name,
+		metadata: JSON.parse(row.metadata),
+		observation_ids: JSON.parse(row.observation_ids),
+		created_at: row.created_at,
+		updated_at: row.updated_at
+	};
+}
+function rowToEdge(row) {
+	return {
+		id: row.id,
+		source_id: row.source_id,
+		target_id: row.target_id,
+		type: row.type,
+		weight: row.weight,
+		metadata: JSON.parse(row.metadata),
+		created_at: row.created_at
+	};
+}
+/**
+* Initializes graph tables if they do not exist.
+* Uses CREATE TABLE IF NOT EXISTS so it is safe to call multiple times.
+*/
+function initGraphSchema(db) {
+	db.exec(up);
+}
+/**
+* Traverses the graph from a starting node using a recursive CTE.
+*
+* Supports directional traversal:
+*   - 'outgoing': follows edges where source_id matches (default)
+*   - 'incoming': follows edges where target_id matches
+*   - 'both': follows edges in either direction
+*
+* Returns nodes and the edges that connect them, up to the specified depth.
+* The starting node itself is NOT included in results (depth > 0 filter).
+*
+* @param db - better-sqlite3 Database handle
+* @param nodeId - starting node ID
+* @param opts - traversal options (depth, edgeTypes, direction)
+* @returns Array of { node, edge, depth } for each reachable node
+*/
+function traverseFrom(db, nodeId, opts = {}) {
+	const maxDepth = opts.depth ?? 2;
+	const direction = opts.direction ?? "outgoing";
+	let edgeTypeFilter = "";
+	if (opts.edgeTypes && opts.edgeTypes.length > 0) edgeTypeFilter = `AND e.type IN (${opts.edgeTypes.map(() => "?").join(", ")})`;
+	let recursiveStep;
+	if (direction === "outgoing") recursiveStep = `
+      SELECT e.target_id, t.depth + 1, e.id
+      FROM graph_edges e
+      JOIN traverse t ON e.source_id = t.node_id
+      WHERE t.depth < ?
+      ${edgeTypeFilter}
+    `;
+	else if (direction === "incoming") recursiveStep = `
+      SELECT e.source_id, t.depth + 1, e.id
+      FROM graph_edges e
+      JOIN traverse t ON e.target_id = t.node_id
+      WHERE t.depth < ?
+      ${edgeTypeFilter}
+    `;
+	else recursiveStep = `
+      SELECT e.target_id, t.depth + 1, e.id
+      FROM graph_edges e
+      JOIN traverse t ON e.source_id = t.node_id
+      WHERE t.depth < ?
+      ${edgeTypeFilter}
+      UNION ALL
+      SELECT e.source_id, t.depth + 1, e.id
+      FROM graph_edges e
+      JOIN traverse t ON e.target_id = t.node_id
+      WHERE t.depth < ?
+      ${edgeTypeFilter}
+    `;
+	const sql = `
+    WITH RECURSIVE traverse(node_id, depth, edge_id) AS (
+      SELECT ?, 0, NULL
+      UNION ALL
+      ${recursiveStep}
+    )
+    SELECT DISTINCT
+      n.id AS n_id, n.type AS n_type, n.name AS n_name,
+      n.metadata AS n_metadata, n.observation_ids AS n_observation_ids,
+      n.created_at AS n_created_at, n.updated_at AS n_updated_at,
+      e.id AS e_id, e.source_id AS e_source_id, e.target_id AS e_target_id,
+      e.type AS e_type, e.weight AS e_weight, e.metadata AS e_metadata,
+      e.created_at AS e_created_at,
+      t.depth
+    FROM traverse t
+    JOIN graph_nodes n ON n.id = t.node_id
+    LEFT JOIN graph_edges e ON e.id = t.edge_id
+    WHERE t.depth > 0
+  `;
+	const queryParams = [nodeId];
+	if (direction === "both") {
+		queryParams.push(maxDepth);
+		if (opts.edgeTypes) queryParams.push(...opts.edgeTypes);
+		queryParams.push(maxDepth);
+		if (opts.edgeTypes) queryParams.push(...opts.edgeTypes);
+	} else {
+		queryParams.push(maxDepth);
+		if (opts.edgeTypes) queryParams.push(...opts.edgeTypes);
+	}
+	return db.prepare(sql).all(...queryParams).map((row) => ({
+		node: {
+			id: row.n_id,
+			type: row.n_type,
+			name: row.n_name,
+			metadata: JSON.parse(row.n_metadata),
+			observation_ids: JSON.parse(row.n_observation_ids),
+			created_at: row.n_created_at,
+			updated_at: row.n_updated_at
+		},
+		edge: row.e_id ? {
+			id: row.e_id,
+			source_id: row.e_source_id,
+			target_id: row.e_target_id,
+			type: row.e_type,
+			weight: row.e_weight,
+			metadata: JSON.parse(row.e_metadata),
+			created_at: row.e_created_at
+		} : null,
+		depth: row.depth
+	}));
+}
+/**
+* Returns all nodes of a given entity type.
+*/
+function getNodesByType(db, type) {
+	return db.prepare("SELECT * FROM graph_nodes WHERE type = ?").all(type).map(rowToNode);
+}
+/**
+* Looks up a node by name and type (composite natural key).
+* Returns null if no matching node exists.
+*/
+function getNodeByNameAndType(db, name, type) {
+	const row = db.prepare("SELECT * FROM graph_nodes WHERE name = ? AND type = ?").get(name, type);
+	return row ? rowToNode(row) : null;
+}
+/**
+* Returns edges connected to a node, filtered by direction.
+*
+* @param direction - 'outgoing' (source), 'incoming' (target), or 'both' (default: 'both')
+*/
+function getEdgesForNode(db, nodeId, opts) {
+	const direction = opts?.direction ?? "both";
+	let sql;
+	let params;
+	if (direction === "outgoing") {
+		sql = "SELECT * FROM graph_edges WHERE source_id = ?";
+		params = [nodeId];
+	} else if (direction === "incoming") {
+		sql = "SELECT * FROM graph_edges WHERE target_id = ?";
+		params = [nodeId];
+	} else {
+		sql = "SELECT * FROM graph_edges WHERE source_id = ? OR target_id = ?";
+		params = [nodeId, nodeId];
+	}
+	return db.prepare(sql).all(...params).map(rowToEdge);
+}
+/**
+* Returns the total number of edges connected to a node (both directions).
+* Used for degree enforcement (MAX_NODE_DEGREE constraint).
+*/
+function countEdgesForNode(db, nodeId) {
+	return db.prepare("SELECT COUNT(*) as cnt FROM graph_edges WHERE source_id = ? OR target_id = ?").get(nodeId, nodeId).cnt;
+}
+/**
+* Inserts or updates a node by name+type composite key.
+*
+* If a node with the same name and type already exists, updates its metadata
+* and merges observation_ids. Otherwise, inserts a new node with a generated UUID.
+*
+* @returns The upserted GraphNode
+*/
+function upsertNode(db, node) {
+	const existing = getNodeByNameAndType(db, node.name, node.type);
+	if (existing) {
+		const mergedObsIds = [...new Set([...existing.observation_ids, ...node.observation_ids])];
+		const mergedMetadata = {
+			...existing.metadata,
+			...node.metadata
+		};
+		db.prepare(`UPDATE graph_nodes
+       SET metadata = ?, observation_ids = ?, updated_at = datetime('now')
+       WHERE id = ?`).run(JSON.stringify(mergedMetadata), JSON.stringify(mergedObsIds), existing.id);
+		return rowToNode(db.prepare("SELECT * FROM graph_nodes WHERE id = ?").get(existing.id));
+	}
+	const id = node.id ?? randomBytes(16).toString("hex");
+	db.prepare(`INSERT INTO graph_nodes (id, type, name, metadata, observation_ids, project_hash)
+     VALUES (?, ?, ?, ?, ?, ?)`).run(id, node.type, node.name, JSON.stringify(node.metadata), JSON.stringify(node.observation_ids), node.project_hash ?? null);
+	return rowToNode(db.prepare("SELECT * FROM graph_nodes WHERE id = ?").get(id));
+}
+/**
+* Inserts an edge. On conflict (same source_id, target_id, type),
+* updates the weight to the maximum of existing and new values.
+*
+* @returns The inserted or updated GraphEdge
+*/
+function insertEdge(db, edge) {
+	const id = edge.id ?? randomBytes(16).toString("hex");
+	db.prepare(`INSERT INTO graph_edges (id, source_id, target_id, type, weight, metadata, project_hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (source_id, target_id, type) DO UPDATE SET
+       weight = MAX(graph_edges.weight, excluded.weight),
+       metadata = excluded.metadata`).run(id, edge.source_id, edge.target_id, edge.type, edge.weight, JSON.stringify(edge.metadata), edge.project_hash ?? null);
+	return rowToEdge(db.prepare("SELECT * FROM graph_edges WHERE source_id = ? AND target_id = ? AND type = ?").get(edge.source_id, edge.target_id, edge.type));
+}
 
 //#endregion
 //#region src/hooks/tool-name-parser.ts
@@ -1976,5 +2372,5 @@ var ToolRegistryRepository = class {
 };
 
 //#endregion
-export { debugTimed as _, inferScope as a, jaccardSimilarity as c, ObservationRepository as d, rowToObservation as f, debug as g, runMigrations as h, extractServerName as i, hybridSearch as l, MIGRATIONS as m, NotificationStore as n, inferToolType as o, openDatabase as p, ResearchBufferRepository as r, SaveGuard as s, ToolRegistryRepository as t, SessionRepository as u };
-//# sourceMappingURL=tool-registry-BWSzC89L.mjs.map
+export { MIGRATIONS as C, debugTimed as E, openDatabase as S, debug as T, hybridSearch as _, inferScope as a, ObservationRepository as b, getEdgesForNode as c, initGraphSchema as d, insertEdge as f, jaccardSimilarity as g, SaveGuard as h, extractServerName as i, getNodeByNameAndType as l, upsertNode as m, NotificationStore as n, inferToolType as o, traverseFrom as p, ResearchBufferRepository as r, countEdgesForNode as s, ToolRegistryRepository as t, getNodesByType as u, SearchEngine as v, runMigrations as w, rowToObservation as x, SessionRepository as y };
+//# sourceMappingURL=tool-registry-BIjd5Evf.mjs.map

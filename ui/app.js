@@ -916,6 +916,10 @@ function initAnalysis() {
         window.laminarkGraph.clearSearchHighlight();
       }
     }
+    // Let CSS transition finish, then refit graph to new width
+    setTimeout(function () {
+      if (window.laminarkGraph) window.laminarkGraph.fitToView();
+    }, 350);
   });
 
   if (closeBtn) {
@@ -926,6 +930,9 @@ function initAnalysis() {
       if (window.laminarkGraph) {
         window.laminarkGraph.clearSearchHighlight();
       }
+      setTimeout(function () {
+        if (window.laminarkGraph) window.laminarkGraph.fitToView();
+      }, 350);
     });
   }
 }
