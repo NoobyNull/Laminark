@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-02-14)
 ## Current Position
 
 Phase: 21 of 21 (Graph Visualization)
-Plan: —
-Status: Ready to plan
-Last activity: 2026-02-14 — Phase 20 complete (Intelligence & MCP Tools, 3/3 plans, verified)
+Plan: 1 of 3
+Status: Executing
+Last activity: 2026-02-14 — Plan 21-01 complete (Path API & SSE Wiring, 2/2 tasks)
 
 ## Performance Metrics
 
@@ -55,6 +55,7 @@ Last activity: 2026-02-14 — Phase 20 complete (Intelligence & MCP Tools, 3/3 p
 |-------|-------|-------|----------|
 | 19-path-detection-and-storage | 3/3 | 5min | 2min |
 | 20-intelligence-and-mcp-tools | 3/3 | 7min | 2min |
+| 21-graph-visualization | 1/3 | 2min | 2min |
 
 ## Accumulated Context
 
@@ -79,6 +80,8 @@ Recent decisions affecting current work:
 - [V2.2]: KISS generation is fire-and-forget (non-blocking) to avoid slowing path resolution
 - [V2.2]: Full KissSummary stored as JSON string in kiss_summary TEXT column
 - [V2.2]: Waypoints pre-filtered to key types and capped at 10 for Haiku prompt efficiency
+- [V2.2]: Path API route order /paths, /paths/active, /paths/:id avoids Hono param matching conflicts
+- [V2.2]: kiss_summary parsed from JSON string to object in GET /paths/:id for frontend convenience
 
 ### Pending Todos
 
@@ -92,5 +95,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Phase 20 verified and complete, ready to plan Phase 21
+Stopped at: Completed 21-01-PLAN.md (Path API & SSE Wiring)
 Resume file: None
