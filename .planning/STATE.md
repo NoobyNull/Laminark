@@ -130,6 +130,7 @@ Recent decisions affecting current work:
 - ~~[v2] Conversation-driven routing~~ COMPLETE (Phase 14: types, heuristic, learned patterns, router, handler + session integration)
 - ~~[v2] Tool search and discovery~~ COMPLETE (Phase 15: FTS5+vec0 search foundation + discover_tools MCP tool + background embedding)
 - [ ] Add PreToolUse hook for proactive context injection (surfaces relevant memories/graph before tool use)
+- [ ] Add toggle to hide edge type labels on graph (reduce visual clutter from related_to, modifies, etc.)
 
 ### Quick Tasks Completed
 
