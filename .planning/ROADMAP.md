@@ -327,3 +327,14 @@ Note: Phases 15 and 16 depend on Phases 10+12 (not on each other or on 13/14), s
 | 14. Conversation Routing | v2.0 | 2/2 | Complete | 2026-02-10 |
 | 15. Tool Search | v2.0 | 2/2 | Complete | 2026-02-10 |
 | 16. Staleness Management | v2.0 | 2/2 | Complete | 2026-02-10 |
+
+### Phase 17: Replace Decisionmaking Regexes and Broken Haiku with Agent-SDK Haiku
+
+**Goal:** All observation enrichment (entity extraction, relationship inference, noise filtering, observation classification) flows through direct Haiku API calls instead of regex patterns and the broken MCP sampling classifier
+**Depends on:** Phase 16
+**Plans:** 3 plans
+
+Plans:
+- [ ] 17-01-PLAN.md -- SDK installation, API key config, Haiku client singleton, and 3 focused agent modules (entity, relationship, classifier)
+- [ ] 17-02-PLAN.md -- HaikuProcessor background orchestrator, admission filter simplification, index.ts rewiring, delete obsolete regex/classifier files
+- [ ] 17-03-PLAN.md -- Test suite: new Haiku module tests (mocked API), updated tests for modified modules, removed tests for deleted modules
