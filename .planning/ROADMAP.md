@@ -50,6 +50,13 @@
 - [x] Phase 20: Intelligence & MCP Tools (3/3 plans) — completed 2026-02-14
 
 ### Phase 21: Graph Visualization
+**Goal**: Debug paths are visually explorable as animated breadcrumb trails overlaid on the knowledge graph
+**Plans:** 3 plans
+
+Plans:
+- [ ] 21-01-PLAN.md — Path REST API endpoints and SSE event wiring
+- [ ] 21-02-PLAN.md — D3 path overlay with animated trails and toggle control
+- [ ] 21-03-PLAN.md — Path detail panel with waypoint timeline and KISS summary
 
 ## Progress
 
@@ -75,4 +82,4 @@
 | 18. Agent SDK Migration | v2.1 | 2/2 | Complete | 2026-02-14 |
 | 19. Path Detection & Storage | v2.2 | 3/3 | Complete | 2026-02-14 |
 | 20. Intelligence & MCP Tools | v2.2 | 3/3 | Complete | 2026-02-14 |
-| 21. Graph Visualization | v2.2 | 0/TBD | Not started | - |
+| 21. Graph Visualization | v2.2 | 0/3 | Planning | - |
