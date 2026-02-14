@@ -2849,3 +2849,62 @@ g.node-group.search-match path.node-shape {
   padding-bottom: 4px;
   border-bottom: 1px solid var(--border);
 }
+
+/* ====================================================================
+   Path Overlay Styles
+   ==================================================================== */
+
+.paths-toggle-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 4px 6px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+}
+
+.paths-toggle-btn:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.paths-toggle-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.1);
+}
+
+/* Animated dashed line for active paths */
+.path-line-active {
+  animation: path-dash-flow 1.5s linear infinite;
+}
+
+@keyframes path-dash-flow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+/* Waypoint markers */
+.waypoint-marker circle {
+  transition: r 0.15s ease;
+}
+
+.waypoint-marker:hover circle {
+  filter: brightness(1.3);
+}
+
+/* Path label */
+.path-label {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  pointer-events: none;
+}
+
+/* Path trail group */
+.path-trail {
+  pointer-events: all;
+}
