@@ -35,6 +35,7 @@ export interface Migration {
  * Migration 017: Tool usage events table for per-event temporal tracking.
  * Migration 018: Tool registry FTS5 + vec0 tables for hybrid search on tool descriptions.
  * Migration 019: Add status column (active/stale/demoted) to tool_registry for staleness management.
+ * Migration 020: Debug path tables (debug_paths + path_waypoints) for resolution path tracking.
  */
 export const MIGRATIONS: Migration[] = [
   {
@@ -536,6 +537,41 @@ export const MIGRATIONS: Migration[] = [
     up: `
       ALTER TABLE tool_registry ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
       CREATE INDEX idx_tool_registry_status ON tool_registry(status);
+    `,
+  },
+  {
+    version: 20,
+    name: 'create_debug_path_tables',
+    up: `
+      CREATE TABLE IF NOT EXISTS debug_paths (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'resolved', 'abandoned')),
+        trigger_summary TEXT NOT NULL,
+        resolution_summary TEXT,
+        kiss_summary TEXT,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        resolved_at TEXT,
+        project_hash TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS path_waypoints (
+        id TEXT PRIMARY KEY,
+        path_id TEXT NOT NULL REFERENCES debug_paths(id) ON DELETE CASCADE,
+        observation_id TEXT,
+        waypoint_type TEXT NOT NULL CHECK(waypoint_type IN ('error', 'attempt', 'failure', 'success', 'pivot', 'revert', 'discovery', 'resolution')),
+        sequence_order INTEGER NOT NULL,
+        summary TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_debug_paths_project_status
+        ON debug_paths(project_hash, status);
+
+      CREATE INDEX IF NOT EXISTS idx_debug_paths_started
+        ON debug_paths(started_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_path_waypoints_path_order
+        ON path_waypoints(path_id, sequence_order);
     `,
   },
 ];
