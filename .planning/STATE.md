@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-02-14)
 ## Current Position
 
 Phase: 19 of 21 (Path Detection & Storage)
-Plan: —
-Status: Ready to plan
-Last activity: 2026-02-14 — Roadmap created for v2.2 Debug Resolution Paths (3 phases, 16 requirements)
+Plan: 2 of 3
+Status: Executing
+Last activity: 2026-02-14 — Completed 19-02 (Haiku debug signal detection)
 
 ## Performance Metrics
 
@@ -49,6 +49,12 @@ Last activity: 2026-02-14 — Roadmap created for v2.2 Debug Resolution Paths (3
 | 17-haiku-intelligence | 3/3 | 14min | 5min |
 | 18-agent-sdk-migration | 2/2 | 3min | 1.5min |
 
+**V2.2 Velocity:**
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 19-path-detection-and-storage | 1/3 | 1min | 1min |
+
 ## Accumulated Context
 
 ### Decisions
@@ -62,6 +68,8 @@ Recent decisions affecting current work:
 - [V2.2]: Path detection extends existing classifier prompt (no separate Haiku call) — prevents API volume explosion
 - [V2.2]: Paths stored in dedicated SQLite tables (not embedded in graph_nodes) — prevents graph pollution
 - [V2.2]: PathTracker in MCP server process (not hook handler) — hooks are ephemeral subprocesses
+- [V2.2]: Zod .default(null) for debug_signal backward compatibility — graceful degradation if Haiku omits field
+- [V2.2]: debug_signal evaluated for noise and signal observations — build failures are noise but debug-relevant
 
 ### Pending Todos
 
@@ -75,5 +83,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: v2.2 roadmap created, ready to plan Phase 19
+Stopped at: Completed 19-02-PLAN.md (debug signal detection)
 Resume file: None
