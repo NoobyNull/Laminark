@@ -31,6 +31,18 @@ const ENTITY_STYLES = {
   Reference: { color: '#f0883e', shape: 'hexagon' },
 };
 
+// Waypoint type colors for path overlay
+var WAYPOINT_TYPE_COLORS = {
+  error: '#f85149',
+  attempt: '#d29922',
+  failure: '#f0883e',
+  success: '#3fb950',
+  pivot: '#a371f7',
+  revert: '#79c0ff',
+  discovery: '#58a6ff',
+  resolution: '#3fb950',
+};
+
 // Relationship type colors for edge coloring
 var EDGE_TYPE_COLORS = {
   related_to: '#8b949e',
@@ -185,6 +197,11 @@ var hiddenEdgeLabelTypes = new Set(
   JSON.parse(localStorage.getItem('laminark-hidden-edge-types') || '[]')
 );
 
+// Path overlay state
+var pathOverlayGroup = null;
+var pathOverlayVisible = localStorage.getItem('laminark-path-overlay') !== 'false';
+var pathData = []; // Array of { id, status, triggerSummary, waypoints: [{id, type, summary, nodeId?}] }
+
 // ---------------------------------------------------------------------------
 // initGraph
 // ---------------------------------------------------------------------------
@@ -235,6 +252,7 @@ function initGraph(containerId) {
   // Layer groups in paint order (back to front)
   edgesGroup = svgG.append('g').attr('class', 'edges-group');
   edgeLabelsGroup = svgG.append('g').attr('class', 'edge-labels-group');
+  pathOverlayGroup = svgG.append('g').attr('class', 'path-overlay-group');
   nodesGroup = svgG.append('g').attr('class', 'nodes-group');
   nodeLabelsGroup = svgG.append('g').attr('class', 'node-labels-group');
 
@@ -245,6 +263,7 @@ function initGraph(containerId) {
       svgG.attr('transform', event.transform);
       currentZoom = event.transform.k;
       updateLevelOfDetail();
+      renderPathOverlay();
     });
   svg.call(zoomBehavior);
 
@@ -286,6 +305,7 @@ function initGraph(containerId) {
 
   initContextMenu();
   initEdgeLabelToggle();
+  initPathOverlayToggle();
 
   // Create tooltip element
   tooltipEl = document.createElement('div');
@@ -705,6 +725,11 @@ async function loadGraphData(filters) {
     renderGraph();
     // Fit to view after simulation settles a bit
     setTimeout(function () { fitToView(); }, 800);
+  }
+
+  // Load path overlay after graph data
+  if (pathOverlayVisible) {
+    setTimeout(function () { loadPathOverlay(); }, 1000);
   }
 
   var counts = { nodeCount: data.nodes.length, edgeCount: data.edges.length };
@@ -2073,6 +2098,185 @@ if (document.readyState === 'loading') {
 }
 
 // ---------------------------------------------------------------------------
+// Path overlay
+// ---------------------------------------------------------------------------
+
+async function loadPathOverlay() {
+  if (!svg || !pathOverlayVisible) return;
+
+  try {
+    var params = new URLSearchParams();
+    if (window.laminarkState && window.laminarkState.currentProject) {
+      params.set('project', window.laminarkState.currentProject);
+    }
+    params.set('limit', '10');
+    var url = '/api/paths' + (params.toString() ? '?' + params.toString() : '');
+    var res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var data = await res.json();
+    pathData = (data.paths || []).filter(function(p) { return p.status === 'active' || p.status === 'resolved'; });
+
+    // For each path, fetch waypoints
+    for (var i = 0; i < pathData.length; i++) {
+      try {
+        var detailRes = await fetch('/api/paths/' + encodeURIComponent(pathData[i].id));
+        if (detailRes.ok) {
+          var detail = await detailRes.json();
+          pathData[i].waypoints = detail.waypoints || [];
+        }
+      } catch (e) { pathData[i].waypoints = []; }
+    }
+
+    renderPathOverlay();
+  } catch (err) {
+    console.error('[laminark:graph] Failed to load path overlay:', err);
+  }
+}
+
+function renderPathOverlay() {
+  if (!pathOverlayGroup || !pathOverlayVisible) {
+    if (pathOverlayGroup) pathOverlayGroup.style('display', 'none');
+    return;
+  }
+  pathOverlayGroup.style('display', null);
+  pathOverlayGroup.selectAll('*').remove();
+
+  if (pathData.length === 0) return;
+
+  var width = containerEl ? containerEl.clientWidth : 800;
+  var height = containerEl ? containerEl.clientHeight : 600;
+
+  // Get current transform to position in screen space
+  var transform = d3.zoomTransform(svg.node());
+
+  pathData.forEach(function(path, pathIndex) {
+    if (!path.waypoints || path.waypoints.length === 0) return;
+
+    var pathGroup = pathOverlayGroup.append('g')
+      .attr('class', 'path-trail')
+      .attr('data-path-id', path.id);
+
+    // Position waypoints evenly spaced along a line
+    var waypoints = path.waypoints;
+    var margin = 80;
+    var yBase = (height - 60) / transform.k - transform.y / transform.k;
+    var xStart = (-transform.x / transform.k) + margin / transform.k;
+    var xEnd = (-transform.x / transform.k) + (width - margin) / transform.k;
+    var spacing = waypoints.length > 1 ? (xEnd - xStart) / (waypoints.length - 1) : 0;
+
+    var points = waypoints.map(function(wp, i) {
+      return { x: xStart + i * spacing, y: yBase + pathIndex * 40 / transform.k };
+    });
+
+    // Draw connecting line (animated dashed)
+    if (points.length > 1) {
+      var lineGen = d3.line()
+        .x(function(d) { return d.x; })
+        .y(function(d) { return d.y; })
+        .curve(d3.curveCatmullRom.alpha(0.5));
+
+      pathGroup.append('path')
+        .attr('class', 'path-line' + (path.status === 'active' ? ' path-line-active' : ''))
+        .attr('d', lineGen(points))
+        .attr('fill', 'none')
+        .attr('stroke', path.status === 'resolved' ? '#3fb950' : '#d29922')
+        .attr('stroke-width', 2.5 / transform.k)
+        .attr('stroke-dasharray', (6 / transform.k) + ' ' + (4 / transform.k))
+        .attr('opacity', 0.8);
+    }
+
+    // Draw waypoint markers
+    points.forEach(function(pt, i) {
+      var wp = waypoints[i];
+      var color = WAYPOINT_TYPE_COLORS[wp.waypoint_type] || '#8b949e';
+      var radius = 6 / transform.k;
+
+      var marker = pathGroup.append('g')
+        .attr('class', 'waypoint-marker')
+        .attr('transform', 'translate(' + pt.x + ',' + pt.y + ')')
+        .style('cursor', 'pointer');
+
+      marker.append('circle')
+        .attr('r', radius)
+        .attr('fill', color)
+        .attr('stroke', '#0d1117')
+        .attr('stroke-width', 1.5 / transform.k);
+
+      // Sequence number
+      marker.append('text')
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'central')
+        .attr('font-size', (8 / transform.k) + 'px')
+        .attr('fill', '#fff')
+        .attr('font-weight', '700')
+        .attr('pointer-events', 'none')
+        .text(wp.sequence_order);
+
+      // Tooltip on hover
+      marker.append('title')
+        .text(wp.waypoint_type + ': ' + (wp.summary || '').substring(0, 80));
+
+      // Click to show path detail
+      marker.on('click', function(event) {
+        event.stopPropagation();
+        if (window.laminarkApp && window.laminarkApp.fetchPathDetail) {
+          window.laminarkApp.fetchPathDetail(path.id).then(function(detail) {
+            if (detail) {
+              document.dispatchEvent(new CustomEvent('laminark:show_path_detail', { detail: detail }));
+            }
+          });
+        }
+      });
+    });
+
+    // Path label
+    if (points.length > 0) {
+      var labelX = points[0].x;
+      var labelY = points[0].y - 12 / transform.k;
+      pathGroup.append('text')
+        .attr('class', 'path-label')
+        .attr('x', labelX)
+        .attr('y', labelY)
+        .attr('font-size', (10 / transform.k) + 'px')
+        .attr('fill', path.status === 'resolved' ? '#3fb950' : '#d29922')
+        .attr('opacity', 0.9)
+        .text((path.trigger_summary || 'Debug Path').substring(0, 40));
+    }
+  });
+}
+
+function addPathOverlay(pathEvent) {
+  loadPathOverlay();
+}
+
+function updatePathOverlay(waypointEvent) {
+  loadPathOverlay();
+}
+
+function resolvePathOverlay(resolveEvent) {
+  loadPathOverlay();
+}
+
+function initPathOverlayToggle() {
+  var btn = document.getElementById('paths-toggle-btn');
+  if (!btn) return;
+
+  btn.classList.toggle('active', pathOverlayVisible);
+
+  btn.addEventListener('click', function() {
+    pathOverlayVisible = !pathOverlayVisible;
+    localStorage.setItem('laminark-path-overlay', pathOverlayVisible ? 'true' : 'false');
+    btn.classList.toggle('active', pathOverlayVisible);
+
+    if (pathOverlayVisible) {
+      loadPathOverlay();
+    } else {
+      if (pathOverlayGroup) pathOverlayGroup.style('display', 'none');
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -2108,6 +2312,11 @@ window.laminarkGraph = {
   clearCommunityColors: clearCommunityColors,
   showLinkedNodesOfType: showLinkedNodesOfType,
   hideContextMenu: hideContextMenu,
+  addPathOverlay: addPathOverlay,
+  updatePathOverlay: updatePathOverlay,
+  resolvePathOverlay: resolvePathOverlay,
+  loadPathOverlay: loadPathOverlay,
+  isPathOverlayVisible: function() { return pathOverlayVisible; },
   toggleEdgeLabels: function (type) {
     if (type) {
       if (hiddenEdgeLabelTypes.has(type)) hiddenEdgeLabelTypes.delete(type);
