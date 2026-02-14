@@ -1,11 +1,10 @@
 /**
- * Laminark Knowledge Graph Visualization
+ * Laminark Knowledge Graph Visualization (D3.js)
  *
- * Renders the knowledge graph as an interactive Cytoscape.js force-directed
- * layout. Entities appear as colored/shaped nodes by type. Relationships
- * render as labeled directed edges. Viewport culling hides off-screen nodes
- * for smooth performance at 500+ nodes. Level-of-detail reduces visual
- * complexity at low zoom levels.
+ * Renders the knowledge graph as an interactive D3.js force-directed SVG.
+ * Entities appear as colored/shaped nodes by type. Relationships render as
+ * labeled directed edges. Level-of-detail reduces visual complexity at low
+ * zoom levels. Force-collide prevents the hairball problem.
  *
  * @module graph
  */
@@ -25,53 +24,14 @@ function debounce(fn, ms) {
 
 const ENTITY_STYLES = {
   Project:   { color: '#58a6ff', shape: 'round-rectangle' },
-  File:      { color: '#7ee787', shape: 'rectangle' },
-  Decision:  { color: '#d2a8ff', shape: 'diamond' },
+  File:      { color: '#3fb950', shape: 'rectangle' },
+  Decision:  { color: '#d29922', shape: 'diamond' },
   Problem:   { color: '#f85149', shape: 'triangle' },
-  Solution:  { color: '#3fb950', shape: 'star' },
+  Solution:  { color: '#a371f7', shape: 'star' },
   Reference: { color: '#f0883e', shape: 'hexagon' },
 };
 
-// ---------------------------------------------------------------------------
-// Layout settings
-// ---------------------------------------------------------------------------
-
-const COSE_DEFAULTS = {
-  name: 'cose',
-  animate: true,
-  animationDuration: 500,
-  nodeRepulsion: function () { return 500000; },
-  idealEdgeLength: function () { return 130; },
-  gravity: 0.4,
-  numIter: 1000,
-  nodeDimensionsIncludeLabels: true,
-};
-
-const LAYOUT_CONFIGS = {
-  clustered: Object.assign({}, COSE_DEFAULTS),
-  hierarchical: {
-    name: 'breadthfirst',
-    animate: true,
-    animationDuration: 500,
-    directed: true,
-    spacingFactor: 1.5,
-    nodeDimensionsIncludeLabels: true,
-  },
-  concentric: {
-    name: 'concentric',
-    animate: true,
-    animationDuration: 500,
-    nodeDimensionsIncludeLabels: true,
-    concentric: function (node) {
-      var typeOrder = { Project: 5, File: 4, Reference: 3, Decision: 2, Problem: 1, Solution: 1 };
-      return typeOrder[node.data('type')] || 1;
-    },
-    levelWidth: function () { return 2; },
-    minNodeSpacing: 50,
-  },
-};
-
-// Relationship type colors for focus mode edges
+// Relationship type colors for edge coloring
 var EDGE_TYPE_COLORS = {
   related_to: '#8b949e',
   solved_by: '#3fb950',
@@ -84,18 +44,100 @@ var EDGE_TYPE_COLORS = {
 };
 
 // ---------------------------------------------------------------------------
+// D3 symbol generators per entity type
+// ---------------------------------------------------------------------------
+
+var nodeSizeScale = d3.scaleSqrt().domain([0, 50]).range([15, 40]).clamp(true);
+var degreeSizeScale = d3.scaleSqrt().domain([0, 20]).range([0, 20]).clamp(true);
+
+function getNodeSize(d) {
+  var base = nodeSizeScale(d.observationCount || 0);
+  var degreeBonus = degreeSizeScale(d._degree || 0);
+  return base + degreeBonus;
+}
+
+// Custom hexagon symbol
+var hexagonSymbol = {
+  draw: function (context, size) {
+    var r = Math.sqrt(size / (1.5 * Math.sqrt(3)));
+    for (var i = 0; i < 6; i++) {
+      var angle = (Math.PI / 3) * i - Math.PI / 2;
+      var x = r * Math.cos(angle);
+      var y = r * Math.sin(angle);
+      if (i === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    }
+    context.closePath();
+  }
+};
+
+// Custom rounded rectangle symbol
+var roundRectSymbol = {
+  draw: function (context, size) {
+    var s = Math.sqrt(size) * 0.9;
+    var r = s * 0.2;
+    var hs = s / 2;
+    context.moveTo(-hs + r, -hs);
+    context.lineTo(hs - r, -hs);
+    context.quadraticCurveTo(hs, -hs, hs, -hs + r);
+    context.lineTo(hs, hs - r);
+    context.quadraticCurveTo(hs, hs, hs - r, hs);
+    context.lineTo(-hs + r, hs);
+    context.quadraticCurveTo(-hs, hs, -hs, hs - r);
+    context.lineTo(-hs, -hs + r);
+    context.quadraticCurveTo(-hs, -hs, -hs + r, -hs);
+    context.closePath();
+  }
+};
+
+function getSymbolType(type) {
+  switch (type) {
+    case 'Project': return roundRectSymbol;
+    case 'File': return d3.symbolSquare;
+    case 'Decision': return d3.symbolDiamond;
+    case 'Problem': return d3.symbolTriangle;
+    case 'Solution': return d3.symbolStar;
+    case 'Reference': return hexagonSymbol;
+    default: return d3.symbolCircle;
+  }
+}
+
+function getSymbolPath(type, size) {
+  var area = size * size * 2.5;
+  return d3.symbol().type(getSymbolType(type)).size(area)();
+}
+
+// ---------------------------------------------------------------------------
 // Module state
 // ---------------------------------------------------------------------------
 
-let cy = null;
-var activeEntityTypes = new Set(Object.keys(ENTITY_STYLES)); // All types active initially
+var svg = null;
+var svgG = null; // Main group that receives zoom transforms
+var simulation = null;
+var zoomBehavior = null;
+var containerEl = null;
 
-// Viewport culling state
-var cullingEnabled = true;
-var isLayoutAnimating = false;
+// Data arrays (the simulation operates on these directly)
+var nodeData = [];
+var edgeData = [];
+
+// D3 selections
+var edgeSelection = null;
+var edgeLabelSelection = null;
+var nodeGroupSelection = null;
+var nodeLabelSelection = null;
+
+// Layer groups
+var edgesGroup = null;
+var edgeLabelsGroup = null;
+var nodesGroup = null;
+var nodeLabelsGroup = null;
+
+var activeEntityTypes = new Set(Object.keys(ENTITY_STYLES));
 
 // Level-of-detail state
-var currentLodLevel = 0; // 0 = full, 1 = no labels (zoom < 0.5), 2 = no edges (zoom < 0.3)
+var currentLodLevel = 0;
+var currentZoom = 1;
 
 // Performance stats overlay state
 var perfOverlayVisible = false;
@@ -106,12 +148,13 @@ var perfFps = 0;
 var perfRafId = null;
 
 // Focus mode state
-var focusStack = []; // Array of { nodeId, label }
+var focusStack = [];
 var isFocusMode = false;
-var cachedFullElements = null; // Stashed full graph elements for restoration
+var cachedFullData = null;
 
 // Current layout setting
 var currentLayout = localStorage.getItem('laminark-layout') || 'clustered';
+var isStaticLayout = false; // True when using hierarchical/concentric (no simulation)
 
 // Batch update queue for SSE events
 var batchQueue = [];
@@ -123,134 +166,99 @@ var contextMenuEl = null;
 var contextMenuVisible = false;
 var contextMenuTargetNode = null;
 
+// Time range state
+var activeTimeRange = { from: null, to: null };
+
+// Selected node
+var selectedNodeId = null;
+
+// Tooltip element
+var tooltipEl = null;
+
+// Community data
+var communityNodeMap = {};
+var communityColorMap = {};
+
 // ---------------------------------------------------------------------------
 // initGraph
 // ---------------------------------------------------------------------------
 
-/**
- * Creates a Cytoscape instance targeting the given container.
- * @param {string} containerId - DOM element ID for the graph container
- * @returns {object} The Cytoscape instance
- */
 function initGraph(containerId) {
-  const container = document.getElementById(containerId);
-  if (!container) {
+  containerEl = document.getElementById(containerId);
+  if (!containerEl) {
     console.error('[laminark:graph] Container not found:', containerId);
     return null;
   }
 
-  cy = cytoscape({
-    container: container,
-    style: buildCytoscapeStyles(),
-    layout: { name: 'preset' }, // No layout until data loads
-    boxSelectionEnabled: false,
-    panningEnabled: true,
-    userPanningEnabled: true,
-    zoomingEnabled: true,
-    userZoomingEnabled: true,
-    minZoom: 0.1,
-    maxZoom: 3.0,
-    autoungrabify: false, // Allow node dragging
+  // Clear any previous content
+  containerEl.innerHTML = '';
+
+  var width = containerEl.clientWidth || 800;
+  var height = containerEl.clientHeight || 600;
+
+  svg = d3.select(containerEl)
+    .append('svg')
+    .attr('width', '100%')
+    .attr('height', '100%')
+    .attr('viewBox', [0, 0, width, height].join(' '))
+    .attr('class', 'graph-svg');
+
+  // Arrow marker definitions (one per edge type color)
+  var defs = svg.append('defs');
+  var markerColors = {};
+  Object.keys(EDGE_TYPE_COLORS).forEach(function (k) { markerColors[k] = EDGE_TYPE_COLORS[k]; });
+  markerColors['default'] = '#8b949e';
+
+  Object.keys(markerColors).forEach(function (key) {
+    defs.append('marker')
+      .attr('id', 'arrow-' + key)
+      .attr('viewBox', '0 -5 10 10')
+      .attr('refX', 10)
+      .attr('refY', 0)
+      .attr('markerWidth', 8)
+      .attr('markerHeight', 8)
+      .attr('orient', 'auto')
+      .append('path')
+      .attr('d', 'M0,-4L10,0L0,4')
+      .attr('fill', markerColors[key]);
   });
 
-  // Node click handler -- show detail panel and highlight selected node
-  cy.on('tap', 'node', async function (evt) {
-    var node = evt.target;
-    var nodeId = node.data('id');
+  // Main zoom group
+  svgG = svg.append('g').attr('class', 'graph-zoom-group');
 
-    // Highlight the selected node
-    cy.$(':selected').unselect();
-    node.select();
+  // Layer groups in paint order (back to front)
+  edgesGroup = svgG.append('g').attr('class', 'edges-group');
+  edgeLabelsGroup = svgG.append('g').attr('class', 'edge-labels-group');
+  nodesGroup = svgG.append('g').attr('class', 'nodes-group');
+  nodeLabelsGroup = svgG.append('g').attr('class', 'node-labels-group');
 
-    if (window.laminarkApp && window.laminarkApp.fetchNodeDetails) {
-      var details = await window.laminarkApp.fetchNodeDetails(nodeId);
-      if (details && window.laminarkApp.showNodeDetails) {
-        window.laminarkApp.showNodeDetails(details);
-      }
-    }
-  });
-
-  // Double-click node to enter focus mode
-  cy.on('dbltap', 'node', function (evt) {
-    var node = evt.target;
-    enterFocusMode(node.data('id'), node.data('label'));
-  });
-
-  // Click on background closes detail panel and deselects all
-  cy.on('tap', function (evt) {
-    if (evt.target === cy) {
-      hideDetailPanel();
-    }
-  });
-
-  // Viewport culling: hide off-screen nodes for performance
-  var debouncedCull = debounce(cullOffscreen, 100);
-  cy.on('viewport', debouncedCull);
-  cy.on('pan', debouncedCull);
-  cy.on('zoom', debouncedCull);
-
-  // Level-of-detail: simplify rendering at low zoom levels
-  var debouncedLod = debounce(updateLevelOfDetail, 100);
-  cy.on('zoom', debouncedLod);
-
-  // Track layout animation state to disable culling during animation
-  cy.on('layoutstart', function () { isLayoutAnimating = true; });
-  cy.on('layoutstop', function () {
-    isLayoutAnimating = false;
-    cullOffscreen(); // Re-cull after layout settles
-  });
-
-  // Right-click on node: context menu with filter/focus/linked options
-  cy.on('cxttap', 'node', function (evt) {
-    evt.originalEvent.preventDefault();
-    var node = evt.target;
-    var nodeType = node.data('type');
-    var nodeLabel = node.data('label');
-
-    // Store target for action handlers
-    contextMenuTargetNode = { id: node.data('id'), label: nodeLabel, type: nodeType };
-
-    var items = [
-      { type: 'header', label: 'Filter' },
-      { type: 'item', label: 'This type only (' + nodeType + ')',
-        action: 'filter-type:' + nodeType,
-        color: ENTITY_STYLES[nodeType] ? ENTITY_STYLES[nodeType].color : null },
-      { type: 'item', label: 'Focus on this node', action: 'focus' },
-      { type: 'divider' },
-      { type: 'header', label: 'Show Linked' },
-    ];
-
-    // Add one "Show linked <Type>" item per type, excluding the node's own type
-    Object.keys(ENTITY_STYLES).forEach(function (t) {
-      if (t !== nodeType) {
-        items.push({
-          type: 'item',
-          label: t,
-          action: 'show-linked:' + t,
-          color: ENTITY_STYLES[t].color,
-        });
-      }
+  // Zoom behavior
+  zoomBehavior = d3.zoom()
+    .scaleExtent([0.1, 3.0])
+    .on('zoom', function (event) {
+      svgG.attr('transform', event.transform);
+      currentZoom = event.transform.k;
+      updateLevelOfDetail();
     });
+  svg.call(zoomBehavior);
 
-    items.push({ type: 'divider' });
-    items.push({ type: 'header', label: 'Arrange' });
-    items.push({ type: 'item', label: 'Re-layout graph', action: 'relayout' });
-    items.push({ type: 'item', label: 'Fit to view', action: 'fit' });
-
-    // Position at cursor using page coordinates
-    var containerRect = cy.container().getBoundingClientRect();
-    var px = evt.renderedPosition.x + containerRect.left;
-    var py = evt.renderedPosition.y + containerRect.top;
-    showContextMenu(px, py, items);
+  // Background click: deselect + hide detail panel
+  svg.on('click', function (event) {
+    if (event.target === svg.node() || event.target.closest('.graph-zoom-group') === svgG.node() && !event.target.closest('.node-group')) {
+      hideDetailPanel();
+      selectedNodeId = null;
+      if (nodesGroup) nodesGroup.selectAll('.node-group').classed('selected', false);
+    }
   });
 
-  // Right-click on background: canvas context menu
-  cy.on('cxttap', function (evt) {
-    if (evt.target !== cy) return; // Only background clicks
-    evt.originalEvent.preventDefault();
+  // Right-click on background
+  svg.on('contextmenu', function (event) {
+    event.preventDefault();
+    // Check if click is on a node
+    var nodeGroup = event.target.closest('.node-group');
+    if (nodeGroup) return; // Handled by node's own contextmenu handler
 
     contextMenuTargetNode = null;
-
     var items = [
       { type: 'header', label: 'Filter' },
       { type: 'item', label: 'Reset filters (show all)', action: 'reset-filters' },
@@ -259,11 +267,7 @@ function initGraph(containerId) {
       { type: 'item', label: 'Re-layout graph', action: 'relayout' },
       { type: 'item', label: 'Fit to view', action: 'fit' },
     ];
-
-    var containerRect = cy.container().getBoundingClientRect();
-    var px = evt.renderedPosition.x + containerRect.left;
-    var py = evt.renderedPosition.y + containerRect.top;
-    showContextMenu(px, py, items);
+    showContextMenu(event.pageX, event.pageY, items);
   });
 
   // Performance stats keyboard shortcut: Ctrl+Shift+P
@@ -276,153 +280,361 @@ function initGraph(containerId) {
 
   initContextMenu();
 
-  console.log('[laminark:graph] Cytoscape initialized with viewport culling and LOD');
-  return cy;
+  // Create tooltip element
+  tooltipEl = document.createElement('div');
+  tooltipEl.className = 'graph-tooltip hidden';
+  containerEl.appendChild(tooltipEl);
+
+  console.log('[laminark:graph] D3 initialized with force simulation');
+  return svg;
 }
 
 // ---------------------------------------------------------------------------
-// buildCytoscapeStyles
+// Resolve edge source/target from string IDs to node object references
 // ---------------------------------------------------------------------------
 
-function buildCytoscapeStyles() {
-  var styles = [
-    // Base node style
-    {
-      selector: 'node',
-      style: {
-        'label': 'data(label)',
-        'text-valign': 'center',
-        'text-halign': 'center',
-        'font-size': '11px',
-        'color': '#c9d1d9',
-        'text-outline-width': 2,
-        'text-outline-color': '#0d1117',
-        'width': 'mapData(observationCount, 0, 50, 30, 80)',
-        'height': 'mapData(observationCount, 0, 50, 30, 80)',
-      },
-    },
+function resolveEdgeReferences() {
+  var nodeMap = {};
+  nodeData.forEach(function (d) { nodeMap[d.id] = d; });
+  edgeData.forEach(function (d) {
+    if (typeof d.source === 'string') d.source = nodeMap[d.source] || d.source;
+    if (typeof d.target === 'string') d.target = nodeMap[d.target] || d.target;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Force simulation setup
+// ---------------------------------------------------------------------------
+
+function computeDegrees() {
+  var degreeMap = {};
+  edgeData.forEach(function (d) {
+    var srcId = typeof d.source === 'object' ? d.source.id : d.source;
+    var tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+    degreeMap[srcId] = (degreeMap[srcId] || 0) + 1;
+    degreeMap[tgtId] = (degreeMap[tgtId] || 0) + 1;
+  });
+  nodeData.forEach(function (d) {
+    d._degree = degreeMap[d.id] || 0;
+  });
+}
+
+function createSimulation() {
+  if (simulation) simulation.stop();
+
+  computeDegrees();
+
+  var width = containerEl ? containerEl.clientWidth : 800;
+  var height = containerEl ? containerEl.clientHeight : 600;
+
+  var visibleEdges = edgeData.filter(function (d) {
+    return !d.source.hidden && !d.target.hidden;
+  });
+
+  // Degree-scaled repulsion: more links = stronger push away
+  var chargeScale = d3.scaleLinear().domain([0, 20]).range([-200, -1200]).clamp(true);
+
+  simulation = d3.forceSimulation(nodeData.filter(function (d) { return !d.hidden; }))
+    .force('link', d3.forceLink(visibleEdges)
+      .id(function (d) { return d.id; })
+      .distance(function (d) {
+        // Longer links between high-degree nodes so they spread out
+        var srcDeg = (typeof d.source === 'object' ? d.source._degree : 0) || 0;
+        var tgtDeg = (typeof d.target === 'object' ? d.target._degree : 0) || 0;
+        return 100 + Math.sqrt(srcDeg + tgtDeg) * 20;
+      }))
+    .force('charge', d3.forceManyBody().strength(function (d) {
+      return chargeScale(d._degree || 0);
+    }))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('collide', d3.forceCollide().radius(function (d) {
+      return getNodeSize(d) + 12;
+    }).strength(0.8))
+    .force('x', d3.forceX(width / 2).strength(0.03))
+    .force('y', d3.forceY(height / 2).strength(0.03))
+    .alphaDecay(0.02)
+    .velocityDecay(0.35)
+    .on('tick', ticked);
+}
+
+function ticked() {
+  if (edgeSelection) {
+    edgeSelection
+      .attr('x1', function (d) { return (d.source && d.source.x) || 0; })
+      .attr('y1', function (d) { return (d.source && d.source.y) || 0; })
+      .attr('x2', function (d) {
+        if (!d.source || !d.target || d.source.x == null || d.target.x == null) return 0;
+        return shortenLine(d.source, d.target, getNodeSize(d.target) + 5).x;
+      })
+      .attr('y2', function (d) {
+        if (!d.source || !d.target || d.source.y == null || d.target.y == null) return 0;
+        return shortenLine(d.source, d.target, getNodeSize(d.target) + 5).y;
+      });
+  }
+
+  if (edgeLabelSelection) {
+    edgeLabelSelection
+      .attr('x', function (d) { var sx = (d.source && d.source.x) || 0; var tx = (d.target && d.target.x) || 0; return (sx + tx) / 2; })
+      .attr('y', function (d) { var sy = (d.source && d.source.y) || 0; var ty = (d.target && d.target.y) || 0; return (sy + ty) / 2; });
+  }
+
+  if (nodeGroupSelection) {
+    nodeGroupSelection.attr('transform', function (d) {
+      return 'translate(' + (d.x || 0) + ',' + (d.y || 0) + ')';
+    });
+  }
+
+  if (nodeLabelSelection) {
+    nodeLabelSelection
+      .attr('x', function (d) { return d.x || 0; })
+      .attr('y', function (d) { return (d.y || 0) + getNodeSize(d) + 12; });
+  }
+}
+
+// Shorten line endpoint to stop at node boundary
+function shortenLine(source, target, offset) {
+  var sx = source.x || 0, sy = source.y || 0;
+  var tx = target.x || 0, ty = target.y || 0;
+  var dx = tx - sx;
+  var dy = ty - sy;
+  var dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist === 0) return { x: tx, y: ty };
+  var ratio = (dist - offset) / dist;
+  return {
+    x: sx + dx * ratio,
+    y: sy + dy * ratio,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// renderGraph - D3 data join
+// ---------------------------------------------------------------------------
+
+function renderGraph() {
+  if (!svg) return;
+  computeDegrees();
+
+  var visibleNodes = nodeData.filter(function (d) { return !d.hidden; });
+  var visibleNodeIds = new Set(visibleNodes.map(function (d) { return d.id; }));
+  var visibleEdges = edgeData.filter(function (d) {
+    var srcId = typeof d.source === 'object' ? d.source.id : d.source;
+    var tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+    return visibleNodeIds.has(srcId) && visibleNodeIds.has(tgtId);
+  });
+
+  // --- Edges ---
+  edgeSelection = edgesGroup.selectAll('line.edge')
+    .data(visibleEdges, function (d) { return d.id; });
+  edgeSelection.exit().remove();
+  edgeSelection = edgeSelection.enter()
+    .append('line')
+    .attr('class', 'edge')
+    .merge(edgeSelection);
+  edgeSelection
+    .attr('stroke', function (d) { return EDGE_TYPE_COLORS[d.type] || '#8b949e'; })
+    .attr('marker-end', function (d) {
+      var key = EDGE_TYPE_COLORS[d.type] ? d.type : 'default';
+      return 'url(#arrow-' + key + ')';
+    });
+
+  // --- Edge labels ---
+  edgeLabelSelection = edgeLabelsGroup.selectAll('text.edge-label')
+    .data(visibleEdges, function (d) { return d.id; });
+  edgeLabelSelection.exit().remove();
+  edgeLabelSelection = edgeLabelSelection.enter()
+    .append('text')
+    .attr('class', 'edge-label')
+    .merge(edgeLabelSelection);
+  edgeLabelSelection
+    .text(function (d) { return d.type; });
+
+  // --- Node groups ---
+  nodeGroupSelection = nodesGroup.selectAll('g.node-group')
+    .data(visibleNodes, function (d) { return d.id; });
+  nodeGroupSelection.exit().remove();
+  var nodeEnter = nodeGroupSelection.enter()
+    .append('g')
+    .attr('class', 'node-group')
+    .call(d3.drag()
+      .on('start', dragStarted)
+      .on('drag', dragged)
+      .on('end', dragEnded));
+
+  nodeEnter.append('path').attr('class', 'node-shape');
+  nodeEnter.append('text').attr('class', 'node-degree-label');
+
+  nodeGroupSelection = nodeEnter.merge(nodeGroupSelection);
+
+  // Update shapes and colors
+  nodeGroupSelection.select('path.node-shape')
+    .attr('d', function (d) { return getSymbolPath(d.type, getNodeSize(d)); })
+    .attr('fill', function (d) {
+      if (communityColorMap[d.id]) return communityColorMap[d.id];
+      return ENTITY_STYLES[d.type] ? ENTITY_STYLES[d.type].color : '#8b949e';
+    })
+    .attr('stroke', 'none');
+
+  // Degree count centered in node
+  nodeGroupSelection.select('text.node-degree-label')
+    .text(function (d) { return d._degree || ''; })
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'central')
+    .attr('font-size', function (d) { return Math.max(9, getNodeSize(d) * 0.55) + 'px'; })
+    .attr('fill', '#fff')
+    .attr('font-weight', '700')
+    .attr('pointer-events', 'none');
+
+  // Update selection state
+  nodeGroupSelection.classed('selected', function (d) { return d.id === selectedNodeId; });
+  nodeGroupSelection.classed('focus-root', function (d) {
+    return isFocusMode && focusStack.length > 0 && focusStack[focusStack.length - 1].nodeId === d.id;
+  });
+
+  // Node interactions
+  nodeGroupSelection
+    .on('click', function (event, d) {
+      event.stopPropagation();
+      handleNodeClick(d);
+    })
+    .on('dblclick', function (event, d) {
+      event.stopPropagation();
+      event.preventDefault();
+      enterFocusMode(d.id, d.label);
+    })
+    .on('contextmenu', function (event, d) {
+      event.preventDefault();
+      event.stopPropagation();
+      handleNodeContextMenu(event, d);
+    })
+    .on('mouseenter', function (event, d) {
+      showTooltip(event, d);
+    })
+    .on('mousemove', function (event) {
+      moveTooltip(event);
+    })
+    .on('mouseleave', function () {
+      hideTooltip();
+    });
+
+  // --- Node labels ---
+  nodeLabelSelection = nodeLabelsGroup.selectAll('text.node-label')
+    .data(visibleNodes, function (d) { return d.id; });
+  nodeLabelSelection.exit().remove();
+  nodeLabelSelection = nodeLabelSelection.enter()
+    .append('text')
+    .attr('class', 'node-label')
+    .merge(nodeLabelSelection);
+  nodeLabelSelection
+    .text(function (d) {
+      var label = d.label || '';
+      return label.length > 24 ? label.substring(0, 22) + '...' : label;
+    });
+
+  // Restart simulation only for force-directed layouts
+  if (!isStaticLayout) {
+    createSimulation();
+  } else {
+    // For static layouts, resolve edge references and position elements
+    resolveEdgeReferences();
+    ticked();
+  }
+
+  updateLevelOfDetail();
+  updateGraphStatsFromData();
+}
+
+// ---------------------------------------------------------------------------
+// Drag handlers
+// ---------------------------------------------------------------------------
+
+function dragStarted(event, d) {
+  if (!event.active && simulation) simulation.alphaTarget(0.3).restart();
+  d.fx = d.x;
+  d.fy = d.y;
+}
+
+function dragged(event, d) {
+  d.fx = event.x;
+  d.fy = event.y;
+}
+
+function dragEnded(event, d) {
+  if (!event.active && simulation) simulation.alphaTarget(0);
+  // Keep pinned: d.fx and d.fy remain set
+}
+
+// ---------------------------------------------------------------------------
+// Node interaction handlers
+// ---------------------------------------------------------------------------
+
+async function handleNodeClick(d) {
+  selectedNodeId = d.id;
+  if (nodesGroup) {
+    nodesGroup.selectAll('.node-group').classed('selected', function (n) { return n.id === d.id; });
+  }
+
+  if (window.laminarkApp && window.laminarkApp.fetchNodeDetails) {
+    var details = await window.laminarkApp.fetchNodeDetails(d.id);
+    if (details && window.laminarkApp.showNodeDetails) {
+      window.laminarkApp.showNodeDetails(details);
+    }
+  }
+}
+
+function handleNodeContextMenu(event, d) {
+  contextMenuTargetNode = { id: d.id, label: d.label, type: d.type };
+
+  var items = [
+    { type: 'header', label: 'Filter' },
+    { type: 'item', label: 'This type only (' + d.type + ')',
+      action: 'filter-type:' + d.type,
+      color: ENTITY_STYLES[d.type] ? ENTITY_STYLES[d.type].color : null },
+    { type: 'item', label: 'Focus on this node', action: 'focus' },
+    { type: 'divider' },
+    { type: 'header', label: 'Show Linked' },
   ];
 
-  // Per-type node styles
-  Object.keys(ENTITY_STYLES).forEach(function (type) {
-    styles.push({
-      selector: 'node[type="' + type + '"]',
-      style: {
-        'background-color': ENTITY_STYLES[type].color,
-        'shape': ENTITY_STYLES[type].shape,
-      },
-    });
+  Object.keys(ENTITY_STYLES).forEach(function (t) {
+    if (t !== d.type) {
+      items.push({
+        type: 'item',
+        label: t,
+        action: 'show-linked:' + t,
+        color: ENTITY_STYLES[t].color,
+      });
+    }
   });
 
-  // Edge style - brighter arrows and lines for visibility
-  styles.push({
-    selector: 'edge',
-    style: {
-      'label': 'data(type)',
-      'font-size': '9px',
-      'color': '#8b949e',
-      'text-rotation': 'autorotate',
-      'curve-style': 'bezier',
-      'target-arrow-shape': 'triangle',
-      'target-arrow-color': '#8b949e',
-      'line-color': '#8b949e',
-      'width': 1.5,
-      'opacity': 0.7,
-    },
-  });
+  items.push({ type: 'divider' });
+  items.push({ type: 'header', label: 'Arrange' });
+  items.push({ type: 'item', label: 'Re-layout graph', action: 'relayout' });
+  items.push({ type: 'item', label: 'Fit to view', action: 'fit' });
 
-  // Selection styles
-  styles.push({
-    selector: 'node:selected',
-    style: {
-      'border-width': 3,
-      'border-color': '#f0883e',
-    },
-  });
-
-  styles.push({
-    selector: 'edge:selected',
-    style: {
-      'line-color': '#f0883e',
-      'width': 3,
-    },
-  });
-
-  // Focus-root node style - pulsing border glow
-  styles.push({
-    selector: '.focus-root',
-    style: {
-      'border-width': 4,
-      'border-color': '#58a6ff',
-      'border-opacity': 1,
-      'overlay-color': '#58a6ff',
-      'overlay-padding': 6,
-      'overlay-opacity': 0.15,
-    },
-  });
-
-  // Focus mode edge coloring by relationship type
-  Object.keys(EDGE_TYPE_COLORS).forEach(function (relType) {
-    styles.push({
-      selector: 'edge.focus-edge[type="' + relType + '"]',
-      style: {
-        'line-color': EDGE_TYPE_COLORS[relType],
-        'target-arrow-color': EDGE_TYPE_COLORS[relType],
-        'opacity': 0.9,
-        'width': 2,
-      },
-    });
-  });
-
-  // Search dimmed elements
-  styles.push({
-    selector: '.search-dimmed',
-    style: {
-      'opacity': 0.15,
-    },
-  });
-
-  // Search match highlight (gold border)
-  styles.push({
-    selector: '.search-match',
-    style: {
-      'border-width': 3,
-      'border-color': '#d29922',
-      'border-opacity': 1,
-    },
-  });
-
-  // Culled elements (hidden via viewport culling)
-  styles.push({
-    selector: '.culled',
-    style: {
-      'display': 'none',
-    },
-  });
-
-  return styles;
+  showContextMenu(event.pageX, event.pageY, items);
 }
 
 // ---------------------------------------------------------------------------
 // loadGraphData
 // ---------------------------------------------------------------------------
 
-/**
- * Fetches graph data from the API and renders it in Cytoscape.
- * @param {Object} [filters] - Optional filters (type, since)
- * @returns {Promise<{nodeCount: number, edgeCount: number}>}
- */
 async function loadGraphData(filters) {
-  if (!cy) {
-    console.error('[laminark:graph] Cytoscape not initialized');
+  if (!svg) {
+    console.error('[laminark:graph] D3 not initialized');
     return { nodeCount: 0, edgeCount: 0 };
+  }
+
+  // Don't reload full graph data while in focus mode — it would
+  // replace the neighborhood data and corrupt breadcrumbs/state.
+  // SSE reconnects and tab switches should not interrupt focus.
+  if (isFocusMode) {
+    console.log('[laminark:graph] Skipping loadGraphData (focus mode active)');
+    return { nodeCount: nodeData.length, edgeCount: edgeData.length };
   }
 
   var data;
   if (window.laminarkApp && window.laminarkApp.fetchGraphData) {
     data = await window.laminarkApp.fetchGraphData(filters);
   } else {
-    // Direct fetch fallback
     var params = new URLSearchParams();
     if (filters && filters.type) params.set('type', filters.type);
     if (filters && filters.since) params.set('since', filters.since);
@@ -438,9 +650,10 @@ async function loadGraphData(filters) {
     }
   }
 
-  // Handle empty data
   if (!data.nodes.length && !data.edges.length) {
-    cy.elements().remove();
+    nodeData = [];
+    edgeData = [];
+    renderGraph();
     updateGraphStats(0, 0);
     showEmptyState();
     return { nodeCount: 0, edgeCount: 0 };
@@ -448,51 +661,47 @@ async function loadGraphData(filters) {
 
   hideEmptyState();
 
-  // Transform API data into Cytoscape elements
-  var elements = [];
-
-  data.nodes.forEach(function (node) {
-    elements.push({
-      group: 'nodes',
-      data: {
-        id: node.id,
-        label: node.label,
-        type: node.type,
-        observationCount: node.observationCount || 0,
-        createdAt: node.createdAt,
-      },
-    });
+  // Build data arrays
+  nodeData = data.nodes.map(function (node) {
+    return {
+      id: node.id,
+      label: node.label,
+      type: node.type,
+      observationCount: node.observationCount || 0,
+      createdAt: node.createdAt,
+      hidden: false,
+    };
   });
 
-  data.edges.forEach(function (edge) {
-    elements.push({
-      group: 'edges',
-      data: {
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        type: edge.type,
-        label: edge.label || edge.type,
-      },
-    });
+  edgeData = data.edges.map(function (edge) {
+    return {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      type: edge.type,
+      label: edge.label || edge.type,
+    };
   });
 
-  // Clear and add elements
-  cy.elements().remove();
-  cy.add(elements);
-
-  // Run layout based on current selection
-  var layoutConfig = LAYOUT_CONFIGS[currentLayout] || LAYOUT_CONFIGS.clustered;
-  cy.layout(Object.assign({}, layoutConfig)).run();
-
-  // Fit to view after layout settles
-  cy.one('layoutstop', function () {
-    cy.fit(undefined, 50);
-  });
+  // For static layouts, re-apply layout positioning after fresh data load
+  if (isStaticLayout) {
+    // Reset to force-directed first so renderGraph creates a simulation
+    isStaticLayout = false;
+    renderGraph();
+    // Re-apply the current static layout (which sets isStaticLayout back to true)
+    if (currentLayout === 'hierarchical') {
+      setTimeout(function () { applyHierarchicalLayout(); }, 100);
+    } else if (currentLayout === 'concentric') {
+      setTimeout(function () { applyConcentricLayout(); }, 100);
+    }
+  } else {
+    renderGraph();
+    // Fit to view after simulation settles a bit
+    setTimeout(function () { fitToView(); }, 800);
+  }
 
   var counts = { nodeCount: data.nodes.length, edgeCount: data.edges.length };
   updateGraphStats(counts.nodeCount, counts.edgeCount);
-
   console.log('[laminark:graph] Loaded', counts.nodeCount, 'nodes,', counts.edgeCount, 'edges');
   return counts;
 }
@@ -501,242 +710,127 @@ async function loadGraphData(filters) {
 // Incremental updates
 // ---------------------------------------------------------------------------
 
-/**
- * Adds or updates a node in the graph.
- * @param {Object} nodeData - Node data: { id, label, type, observationCount, createdAt }
- */
-function addNode(nodeData) {
-  if (!cy) return;
+function addNode(nodeDataIn) {
+  if (!svg) return;
 
-  var existing = cy.getElementById(nodeData.id);
-  if (existing.length > 0) {
-    // Update existing node data
-    existing.data(nodeData);
+  var existing = nodeData.find(function (d) { return d.id === nodeDataIn.id; });
+  if (existing) {
+    Object.assign(existing, nodeDataIn);
   } else {
-    // Add new node
-    cy.add({
-      group: 'nodes',
-      data: {
-        id: nodeData.id,
-        label: nodeData.label,
-        type: nodeData.type,
-        observationCount: nodeData.observationCount || 0,
-        createdAt: nodeData.createdAt,
-      },
+    nodeData.push({
+      id: nodeDataIn.id,
+      label: nodeDataIn.label,
+      type: nodeDataIn.type,
+      observationCount: nodeDataIn.observationCount || 0,
+      createdAt: nodeDataIn.createdAt,
+      hidden: false,
     });
-
-    // Run local layout on new node and its neighborhood
-    var newNode = cy.getElementById(nodeData.id);
-    var neighborhood = newNode.neighborhood().add(newNode);
-    neighborhood.layout(Object.assign({}, COSE_DEFAULTS, {
-      animate: true,
-      animationDuration: 300,
-      fit: false,
-    })).run();
-
     hideEmptyState();
   }
 
-  updateGraphStatsFromCy();
+  renderGraph();
+  if (!isStaticLayout && simulation) simulation.alpha(0.3).restart();
+  updateGraphStatsFromData();
 }
 
-/**
- * Adds an edge to the graph.
- * @param {Object} edgeData - Edge data: { id, source, target, type }
- */
-function addEdge(edgeData) {
-  if (!cy) return;
+function addEdge(edgeDataIn) {
+  if (!svg) return;
 
-  var existing = cy.getElementById(edgeData.id);
-  if (existing.length > 0) return; // Already exists
+  var existing = edgeData.find(function (d) { return d.id === edgeDataIn.id; });
+  if (existing) return;
 
-  // Only add if both endpoints exist
-  if (cy.getElementById(edgeData.source).length === 0) return;
-  if (cy.getElementById(edgeData.target).length === 0) return;
+  var srcExists = nodeData.find(function (d) { return d.id === edgeDataIn.source; });
+  var tgtExists = nodeData.find(function (d) { return d.id === edgeDataIn.target; });
+  if (!srcExists || !tgtExists) return;
 
-  cy.add({
-    group: 'edges',
-    data: {
-      id: edgeData.id,
-      source: edgeData.source,
-      target: edgeData.target,
-      type: edgeData.type,
-      label: edgeData.label || edgeData.type,
-    },
+  edgeData.push({
+    id: edgeDataIn.id,
+    source: edgeDataIn.source,
+    target: edgeDataIn.target,
+    type: edgeDataIn.type,
+    label: edgeDataIn.label || edgeDataIn.type,
   });
 
-  updateGraphStatsFromCy();
+  renderGraph();
+  if (!isStaticLayout && simulation) simulation.alpha(0.3).restart();
+  updateGraphStatsFromData();
 }
 
-/**
- * Removes elements by their IDs.
- * @param {string[]} ids - Array of element IDs to remove
- */
 function removeElements(ids) {
-  if (!cy) return;
+  if (!svg) return;
+  var idSet = new Set(ids);
 
-  ids.forEach(function (id) {
-    var ele = cy.getElementById(id);
-    if (ele.length > 0) {
-      ele.remove();
-    }
+  edgeData = edgeData.filter(function (d) { return !idSet.has(d.id); });
+  nodeData = nodeData.filter(function (d) { return !idSet.has(d.id); });
+  // Also remove edges connected to removed nodes
+  edgeData = edgeData.filter(function (d) {
+    var srcId = typeof d.source === 'object' ? d.source.id : d.source;
+    var tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+    return !idSet.has(srcId) && !idSet.has(tgtId);
   });
 
-  updateGraphStatsFromCy();
+  renderGraph();
+  updateGraphStatsFromData();
 
-  // Show empty state if graph is now empty
-  if (cy.nodes().length === 0) {
-    showEmptyState();
-  }
+  if (nodeData.length === 0) showEmptyState();
 }
 
 // ---------------------------------------------------------------------------
 // Fit to view
 // ---------------------------------------------------------------------------
 
-/**
- * Fits the graph view to show all elements with padding.
- */
 function fitToView() {
-  if (!cy) return;
-  cy.fit(undefined, 50);
+  if (!svg || !svgG || !containerEl) return;
+
+  var visibleNodes = nodeData.filter(function (d) { return !d.hidden; });
+  if (visibleNodes.length === 0) return;
+
+  var width = containerEl.clientWidth || 800;
+  var height = containerEl.clientHeight || 600;
+
+  var xExtent = d3.extent(visibleNodes, function (d) { return d.x; });
+  var yExtent = d3.extent(visibleNodes, function (d) { return d.y; });
+
+  if (xExtent[0] == null || yExtent[0] == null) return;
+
+  var padding = 60;
+  var graphWidth = (xExtent[1] - xExtent[0]) || 1;
+  var graphHeight = (yExtent[1] - yExtent[0]) || 1;
+  var scale = Math.min(
+    (width - padding * 2) / graphWidth,
+    (height - padding * 2) / graphHeight,
+    2.0
+  );
+  scale = Math.max(scale, 0.1);
+
+  var cx = (xExtent[0] + xExtent[1]) / 2;
+  var cy = (yExtent[0] + yExtent[1]) / 2;
+
+  var transform = d3.zoomIdentity
+    .translate(width / 2, height / 2)
+    .scale(scale)
+    .translate(-cx, -cy);
+
+  svg.transition().duration(500).call(zoomBehavior.transform, transform);
 }
 
 // ---------------------------------------------------------------------------
 // Filter handling
 // ---------------------------------------------------------------------------
 
-/**
- * Applies type filters to the graph -- hides nodes not matching the filter.
- * @param {string[]|null} types - Array of type names, or null for "show all"
- */
 function applyFilter(types) {
-  if (!cy) return;
-
   if (!types) {
-    // Show all
-    cy.elements().style('display', 'element');
+    nodeData.forEach(function (d) { d.hidden = false; });
   } else {
-    cy.nodes().forEach(function (node) {
-      var nodeType = node.data('type');
-      if (types.indexOf(nodeType) >= 0) {
-        node.style('display', 'element');
-      } else {
-        node.style('display', 'none');
-      }
-    });
-
-    // Hide edges where either endpoint is hidden
-    cy.edges().forEach(function (edge) {
-      var src = edge.source();
-      var tgt = edge.target();
-      if (src.style('display') === 'none' || tgt.style('display') === 'none') {
-        edge.style('display', 'none');
-      } else {
-        edge.style('display', 'element');
-      }
+    var typeSet = new Set(types);
+    nodeData.forEach(function (d) {
+      d.hidden = !typeSet.has(d.type);
     });
   }
-
-  updateGraphStatsFromCy();
+  renderGraph();
+  updateGraphStatsFromData();
 }
 
-// ---------------------------------------------------------------------------
-// Empty state
-// ---------------------------------------------------------------------------
-
-function showEmptyState() {
-  var container = cy ? cy.container() : null;
-  if (!container) return;
-
-  var existing = container.querySelector('.graph-empty-state');
-  if (existing) {
-    existing.style.display = '';
-    return;
-  }
-
-  var msg = document.createElement('div');
-  msg.className = 'graph-empty-state';
-  msg.textContent = 'No graph data yet. Observations will appear here as they are processed.';
-  container.appendChild(msg);
-}
-
-function hideEmptyState() {
-  var container = cy ? cy.container() : null;
-  if (!container) return;
-
-  var existing = container.querySelector('.graph-empty-state');
-  if (existing) {
-    existing.style.display = 'none';
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Stats display
-// ---------------------------------------------------------------------------
-
-function updateGraphStats(nodeCount, edgeCount) {
-  var el = document.getElementById('graph-stats');
-  if (el) {
-    el.textContent = nodeCount + ' nodes, ' + edgeCount + ' edges';
-  }
-}
-
-function updateGraphStatsFromCy() {
-  if (!cy) return;
-  var visibleNodes = cy.nodes().filter(function (n) { return n.style('display') !== 'none'; });
-  var visibleEdges = cy.edges().filter(function (e) { return e.style('display') !== 'none'; });
-  updateGraphStats(visibleNodes.length, visibleEdges.length);
-}
-
-// ---------------------------------------------------------------------------
-// Detail panel helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Hides the detail panel and deselects all nodes.
- */
-function hideDetailPanel() {
-  var panel = document.getElementById('detail-panel');
-  if (panel) panel.classList.add('hidden');
-  if (cy) cy.$(':selected').unselect();
-}
-
-/**
- * Selects a node by ID and centers the graph on it.
- * Used when clicking relationship links in the detail panel.
- * @param {string} nodeId - The ID of the node to select and center
- */
-function selectAndCenterNode(nodeId) {
-  if (!cy) return;
-  var node = cy.getElementById(nodeId);
-  if (node.length === 0) return;
-
-  cy.$(':selected').unselect();
-  node.select();
-  cy.animate({
-    center: { eles: node },
-    duration: 300,
-  });
-
-  // Also fetch and show details for the navigated node
-  if (window.laminarkApp && window.laminarkApp.fetchNodeDetails) {
-    window.laminarkApp.fetchNodeDetails(nodeId).then(function (details) {
-      if (details && window.laminarkApp.showNodeDetails) {
-        window.laminarkApp.showNodeDetails(details);
-      }
-    });
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Entity type filtering with state tracking
-// ---------------------------------------------------------------------------
-
-/**
- * Toggles an entity type filter on/off.
- * @param {string} type - Entity type to toggle
- */
 function filterByType(type) {
   if (activeEntityTypes.has(type)) {
     activeEntityTypes.delete(type);
@@ -746,20 +840,15 @@ function filterByType(type) {
   applyActiveFilters();
 }
 
-/**
- * Resets all entity type filters to active (show all).
- */
 function resetFilters() {
   Object.keys(ENTITY_STYLES).forEach(function (type) {
     activeEntityTypes.add(type);
   });
+  activeTimeRange.from = null;
+  activeTimeRange.to = null;
   applyActiveFilters();
 }
 
-/**
- * Sets which entity types are active (replaces the current set).
- * @param {string[]|null} types - Array of active types, or null for all
- */
 function setActiveTypes(types) {
   activeEntityTypes.clear();
   if (!types) {
@@ -770,102 +859,67 @@ function setActiveTypes(types) {
   applyActiveFilters();
 }
 
-/**
- * Applies the current activeEntityTypes + time range filter to the graph.
- */
 function applyActiveFilters() {
-  if (!cy) return;
-
   var allActive = activeEntityTypes.size === Object.keys(ENTITY_STYLES).length;
+  var hasTimeFilter = activeTimeRange.from || activeTimeRange.to;
 
-  if (allActive && !activeTimeRange.from && !activeTimeRange.to) {
-    // Show all
-    cy.elements().style('display', 'element');
-  } else {
-    cy.nodes().forEach(function (node) {
-      var nodeType = node.data('type');
-      var typeOk = activeEntityTypes.has(nodeType);
+  nodeData.forEach(function (d) {
+    var typeOk = activeEntityTypes.has(d.type);
+    var timeOk = true;
+    if (hasTimeFilter && d.createdAt) {
+      if (activeTimeRange.from && d.createdAt < activeTimeRange.from) timeOk = false;
+      if (activeTimeRange.to && d.createdAt > activeTimeRange.to) timeOk = false;
+    }
+    d.hidden = !(typeOk && timeOk);
+  });
 
-      // Time range check
-      var timeOk = true;
-      if (activeTimeRange.from || activeTimeRange.to) {
-        var createdAt = node.data('createdAt');
-        if (createdAt) {
-          if (activeTimeRange.from && createdAt < activeTimeRange.from) timeOk = false;
-          if (activeTimeRange.to && createdAt > activeTimeRange.to) timeOk = false;
-        }
-      }
-
-      if (typeOk && timeOk) {
-        node.style('display', 'element');
-      } else {
-        node.style('display', 'none');
-      }
-    });
-
-    // Hide edges where either endpoint is hidden
-    cy.edges().forEach(function (edge) {
-      var src = edge.source();
-      var tgt = edge.target();
-      if (src.style('display') === 'none' || tgt.style('display') === 'none') {
-        edge.style('display', 'none');
-      } else {
-        edge.style('display', 'element');
-      }
-    });
-  }
-
-  updateGraphStatsFromCy();
+  renderGraph();
+  updateGraphStatsFromData();
   updateFilterCounts();
 
   // Fit visible elements
-  var visible = cy.elements(':visible');
-  if (visible.length > 0) {
-    cy.fit(visible, 50);
-  }
+  setTimeout(function () {
+    var hasVisible = nodeData.some(function (d) { return !d.hidden; });
+    if (hasVisible) fitToView();
+  }, 600);
 }
 
-/**
- * Returns a count of nodes per entity type (total and visible).
- * @returns {Object} Map of type -> { total: number, visible: number }
- */
+function filterByTimeRange(from, to) {
+  activeTimeRange.from = from || null;
+  activeTimeRange.to = to || null;
+  applyActiveFilters();
+}
+
+// ---------------------------------------------------------------------------
+// Type counts
+// ---------------------------------------------------------------------------
+
 function getTypeCounts() {
   var counts = {};
   Object.keys(ENTITY_STYLES).forEach(function (type) {
     counts[type] = { total: 0, visible: 0 };
   });
 
-  if (!cy) return counts;
-
-  cy.nodes().forEach(function (node) {
-    var type = node.data('type');
-    if (counts[type]) {
-      counts[type].total++;
-      if (node.style('display') !== 'none') {
-        counts[type].visible++;
-      }
+  nodeData.forEach(function (d) {
+    if (counts[d.type]) {
+      counts[d.type].total++;
+      if (!d.hidden) counts[d.type].visible++;
     }
   });
 
   return counts;
 }
 
-/**
- * Updates the count badges on filter pill buttons.
- */
 function updateFilterCounts() {
   var counts = getTypeCounts();
   Object.keys(counts).forEach(function (type) {
     var pill = document.querySelector('.filter-pill[data-type="' + type + '"]');
     if (pill) {
       var countEl = pill.querySelector('.count');
-      if (countEl) {
-        countEl.textContent = counts[type].visible;
-      }
+      if (countEl) countEl.textContent = counts[type].visible;
     }
   });
 
-  // Update "All" pill count with total visible
   var allPill = document.querySelector('.filter-pill[data-type="all"]');
   if (allPill) {
     var allCountEl = allPill.querySelector('.count');
@@ -878,150 +932,274 @@ function updateFilterCounts() {
 }
 
 // ---------------------------------------------------------------------------
-// Time range state
+// Empty state
 // ---------------------------------------------------------------------------
 
-var activeTimeRange = { from: null, to: null };
+function showEmptyState() {
+  if (!containerEl) return;
+  var existing = containerEl.querySelector('.graph-empty-state');
+  if (existing) { existing.style.display = ''; return; }
 
-/**
- * Sets a time range filter. Nodes outside this range are hidden.
- * @param {string|null} from - ISO8601 start, or null for no lower bound
- * @param {string|null} to - ISO8601 end, or null for no upper bound
- */
-function filterByTimeRange(from, to) {
-  activeTimeRange.from = from || null;
-  activeTimeRange.to = to || null;
-  applyActiveFilters();
+  var msg = document.createElement('div');
+  msg.className = 'graph-empty-state';
+  msg.textContent = 'No graph data yet. Observations will appear here as they are processed.';
+  containerEl.appendChild(msg);
+}
+
+function hideEmptyState() {
+  if (!containerEl) return;
+  var existing = containerEl.querySelector('.graph-empty-state');
+  if (existing) existing.style.display = 'none';
 }
 
 // ---------------------------------------------------------------------------
-// Viewport culling
+// Stats display
 // ---------------------------------------------------------------------------
 
-/**
- * Hides elements that are outside the visible viewport plus a buffer zone.
- * Respects filter state: nodes hidden by filters stay hidden regardless.
- */
-function cullOffscreen() {
-  if (!cy || !cullingEnabled || isLayoutAnimating) return;
+function updateGraphStats(nodeCount, edgeCount) {
+  var el = document.getElementById('graph-stats');
+  if (el) el.textContent = nodeCount + ' nodes, ' + edgeCount + ' edges';
+}
 
-  var ext = cy.extent();
-  var bufferX = ext.w * 0.2;
-  var bufferY = ext.h * 0.2;
-  var viewRect = {
-    x1: ext.x1 - bufferX,
-    y1: ext.y1 - bufferY,
-    x2: ext.x2 + bufferX,
-    y2: ext.y2 + bufferY,
-  };
+function updateGraphStatsFromData() {
+  var visibleNodes = nodeData.filter(function (d) { return !d.hidden; });
+  var visibleNodeIds = new Set(visibleNodes.map(function (d) { return d.id; }));
+  var visibleEdges = edgeData.filter(function (d) {
+    var srcId = typeof d.source === 'object' ? d.source.id : d.source;
+    var tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+    return visibleNodeIds.has(srcId) && visibleNodeIds.has(tgtId);
+  });
+  updateGraphStats(visibleNodes.length, visibleEdges.length);
+}
 
-  cy.nodes().forEach(function (node) {
-    // Skip nodes hidden by entity type or time range filters
-    if (node.style('display') === 'none' && !node.hasClass('culled')) return;
+// ---------------------------------------------------------------------------
+// Tooltip
+// ---------------------------------------------------------------------------
 
-    var pos = node.position();
-    var inView = pos.x >= viewRect.x1 && pos.x <= viewRect.x2 &&
-                 pos.y >= viewRect.y1 && pos.y <= viewRect.y2;
+function buildTooltipContent(d) {
+  var degree = d._degree || 0;
 
-    if (inView) {
-      node.removeClass('culled');
-    } else {
-      node.addClass('culled');
-    }
+  // Gather connected node names by relationship type
+  var connections = {};
+  edgeData.forEach(function (e) {
+    var srcId = typeof e.source === 'object' ? e.source.id : e.source;
+    var tgtId = typeof e.target === 'object' ? e.target.id : e.target;
+    var linkedId = null;
+    if (srcId === d.id) linkedId = tgtId;
+    else if (tgtId === d.id) linkedId = srcId;
+    if (!linkedId) return;
+
+    var linked = nodeData.find(function (n) { return n.id === linkedId; });
+    if (!linked) return;
+    var relType = e.type || 'related_to';
+    if (!connections[relType]) connections[relType] = [];
+    connections[relType].push(linked.label || linkedId);
   });
 
-  // Cull edges where BOTH endpoints are culled
-  cy.edges().forEach(function (edge) {
-    var src = edge.source();
-    var tgt = edge.target();
-    if (src.hasClass('culled') && tgt.hasClass('culled')) {
-      edge.addClass('culled');
-    } else {
-      edge.removeClass('culled');
-    }
-  });
+  var html = '<div class="tooltip-header">'
+    + '<span class="tooltip-type" style="color:' + (ENTITY_STYLES[d.type] ? ENTITY_STYLES[d.type].color : '#8b949e') + '">' + d.type + '</span>'
+    + '</div>'
+    + '<div class="tooltip-name">' + escapeHtml(d.label || '') + '</div>'
+    + '<div class="tooltip-stat">' + degree + ' connection' + (degree !== 1 ? 's' : '') + '</div>';
+
+  var relTypes = Object.keys(connections);
+  if (relTypes.length > 0) {
+    html += '<div class="tooltip-connections">';
+    relTypes.forEach(function (rel) {
+      var names = connections[rel];
+      var display = names.slice(0, 3).map(escapeHtml).join(', ');
+      if (names.length > 3) display += ' +' + (names.length - 3) + ' more';
+      html += '<div class="tooltip-rel"><span class="tooltip-rel-type">' + rel.replace(/_/g, ' ') + ':</span> ' + display + '</div>';
+    });
+    html += '</div>';
+  }
+
+  return html;
+}
+
+function showTooltip(event, d) {
+  if (!tooltipEl) return;
+  tooltipEl.innerHTML = buildTooltipContent(d);
+  tooltipEl.classList.remove('hidden');
+  positionTooltip(event.pageX, event.pageY);
+}
+
+function moveTooltip(event) {
+  if (!tooltipEl || tooltipEl.classList.contains('hidden')) return;
+  positionTooltip(event.pageX, event.pageY);
+}
+
+function positionTooltip(px, py) {
+  var offset = 12;
+  var x = px + offset;
+  var y = py + offset;
+  var rect = tooltipEl.getBoundingClientRect();
+  var vw = window.innerWidth;
+  var vh = window.innerHeight;
+  if (x + rect.width > vw - 8) x = px - rect.width - offset;
+  if (y + rect.height > vh - 8) y = py - rect.height - offset;
+  if (x < 8) x = 8;
+  if (y < 8) y = 8;
+  tooltipEl.style.left = x + 'px';
+  tooltipEl.style.top = y + 'px';
+}
+
+function hideTooltip() {
+  if (tooltipEl) tooltipEl.classList.add('hidden');
 }
 
 // ---------------------------------------------------------------------------
 // Level-of-detail (LOD)
 // ---------------------------------------------------------------------------
 
-/**
- * Adjusts visual detail based on zoom level:
- * - zoom >= 0.5: full detail (labels + edges + shapes)
- * - zoom < 0.5: hide labels for cleaner view
- * - zoom < 0.3: hide edges entirely, show only nodes as simple circles
- */
 function updateLevelOfDetail() {
-  if (!cy) return;
-
-  var zoom = cy.zoom();
   var newLevel;
-
-  if (zoom < 0.3) {
-    newLevel = 2; // Minimal: no labels, no edges
-  } else if (zoom < 0.5) {
-    newLevel = 1; // Reduced: no labels
+  if (currentZoom < 0.3) {
+    newLevel = 2;
+  } else if (currentZoom < 0.5) {
+    newLevel = 1;
   } else {
-    newLevel = 0; // Full detail
+    newLevel = 0;
   }
 
   if (newLevel === currentLodLevel) return;
   currentLodLevel = newLevel;
 
-  if (newLevel === 0) {
-    // Full detail: restore labels and edges
-    cy.style()
-      .selector('node').style('label', 'data(label)').update();
-    cy.style()
-      .selector('edge').style('label', 'data(type)').style('display', 'element').update();
-    console.log('[laminark:graph] LOD: full detail');
-  } else if (newLevel === 1) {
-    // Reduced: hide labels but keep edges
-    cy.style()
-      .selector('node').style('label', '').update();
-    cy.style()
-      .selector('edge').style('label', '').style('display', 'element').update();
-    console.log('[laminark:graph] LOD: no labels (zoom < 0.5)');
-  } else {
-    // Minimal: hide labels and edges, simplify node shapes
-    cy.style()
-      .selector('node').style('label', '').update();
-    cy.style()
-      .selector('edge').style('display', 'none').update();
-    console.log('[laminark:graph] LOD: minimal (zoom < 0.3)');
+  if (nodeLabelsGroup) {
+    nodeLabelsGroup.style('display', newLevel >= 1 ? 'none' : null);
   }
+  if (edgeLabelsGroup) {
+    edgeLabelsGroup.style('display', newLevel >= 1 ? 'none' : null);
+  }
+  if (edgesGroup) {
+    edgesGroup.style('display', newLevel >= 2 ? 'none' : null);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Detail panel helpers
+// ---------------------------------------------------------------------------
+
+function hideDetailPanel() {
+  var panel = document.getElementById('detail-panel');
+  if (panel) panel.classList.add('hidden');
+  selectedNodeId = null;
+  if (nodesGroup) nodesGroup.selectAll('.node-group').classed('selected', false);
+}
+
+function selectAndCenterNode(nodeId) {
+  if (!svg) return;
+  var node = nodeData.find(function (d) { return d.id === nodeId; });
+  if (!node || node.x == null) return;
+
+  selectedNodeId = nodeId;
+  if (nodesGroup) {
+    nodesGroup.selectAll('.node-group').classed('selected', function (d) { return d.id === nodeId; });
+  }
+
+  // Center on node
+  var width = containerEl ? containerEl.clientWidth : 800;
+  var height = containerEl ? containerEl.clientHeight : 600;
+  var transform = d3.zoomIdentity
+    .translate(width / 2, height / 2)
+    .scale(currentZoom || 1)
+    .translate(-node.x, -node.y);
+  svg.transition().duration(300).call(zoomBehavior.transform, transform);
+
+  // Fetch and show details
+  if (window.laminarkApp && window.laminarkApp.fetchNodeDetails) {
+    window.laminarkApp.fetchNodeDetails(nodeId).then(function (details) {
+      if (details && window.laminarkApp.showNodeDetails) {
+        window.laminarkApp.showNodeDetails(details);
+      }
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Search functions
+// ---------------------------------------------------------------------------
+
+function searchNodes(query) {
+  if (!query) return [];
+  var lowerQuery = query.toLowerCase();
+  var results = [];
+
+  nodeData.forEach(function (d) {
+    var label = (d.label || '').toLowerCase();
+    if (label.indexOf(lowerQuery) >= 0) {
+      results.push({ id: d.id, label: d.label, type: d.type });
+    }
+  });
+
+  results.sort(function (a, b) {
+    var aLower = a.label.toLowerCase();
+    var bLower = b.label.toLowerCase();
+    if (aLower === lowerQuery && bLower !== lowerQuery) return -1;
+    if (aLower !== lowerQuery && bLower === lowerQuery) return 1;
+    if (aLower.startsWith(lowerQuery) && !bLower.startsWith(lowerQuery)) return -1;
+    if (!aLower.startsWith(lowerQuery) && bLower.startsWith(lowerQuery)) return 1;
+    return 0;
+  });
+
+  return results.slice(0, 20);
+}
+
+function highlightSearchMatches(matchIds) {
+  if (!nodesGroup || !edgesGroup) return;
+  var idSet = new Set(matchIds);
+
+  nodesGroup.selectAll('.node-group')
+    .classed('search-match', function (d) { return idSet.has(d.id); })
+    .classed('search-dimmed', function (d) { return !idSet.has(d.id); });
+
+  nodeLabelsGroup.selectAll('.node-label')
+    .classed('search-dimmed', function (d) { return !idSet.has(d.id); });
+
+  edgesGroup.selectAll('.edge')
+    .classed('search-dimmed', function (d) {
+      var srcId = typeof d.source === 'object' ? d.source.id : d.source;
+      var tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+      return !(idSet.has(srcId) && idSet.has(tgtId));
+    });
+
+  edgeLabelsGroup.selectAll('.edge-label')
+    .classed('search-dimmed', function (d) {
+      var srcId = typeof d.source === 'object' ? d.source.id : d.source;
+      var tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+      return !(idSet.has(srcId) && idSet.has(tgtId));
+    });
+}
+
+function clearSearchHighlight() {
+  if (!nodesGroup) return;
+  nodesGroup.selectAll('.node-group').classed('search-match', false).classed('search-dimmed', false);
+  nodeLabelsGroup.selectAll('.node-label').classed('search-dimmed', false);
+  edgesGroup.selectAll('.edge').classed('search-dimmed', false);
+  edgeLabelsGroup.selectAll('.edge-label').classed('search-dimmed', false);
+}
+
+function highlightCluster(nodeIds) {
+  highlightSearchMatches(nodeIds);
 }
 
 // ---------------------------------------------------------------------------
 // Performance stats overlay
 // ---------------------------------------------------------------------------
 
-/**
- * Toggles the performance overlay showing visible/total nodes, FPS, and culling status.
- * Keyboard shortcut: Ctrl+Shift+P
- */
 function togglePerfOverlay() {
   perfOverlayVisible = !perfOverlayVisible;
-
-  if (perfOverlayVisible) {
-    showPerfOverlay();
-  } else {
-    hidePerfOverlay();
-  }
+  if (perfOverlayVisible) showPerfOverlay();
+  else hidePerfOverlay();
 }
 
 function showPerfOverlay() {
-  if (!cy) return;
-  var container = cy.container();
-  if (!container) return;
-
+  if (!containerEl) return;
   if (!perfOverlayEl) {
     perfOverlayEl = document.createElement('div');
     perfOverlayEl.className = 'perf-overlay';
-    container.appendChild(perfOverlayEl);
+    containerEl.appendChild(perfOverlayEl);
   }
-
   perfOverlayEl.style.display = '';
   perfLastFpsTime = performance.now();
   perfFrameCount = 0;
@@ -1029,41 +1207,31 @@ function showPerfOverlay() {
 }
 
 function hidePerfOverlay() {
-  if (perfOverlayEl) {
-    perfOverlayEl.style.display = 'none';
-  }
-  if (perfRafId) {
-    cancelAnimationFrame(perfRafId);
-    perfRafId = null;
-  }
+  if (perfOverlayEl) perfOverlayEl.style.display = 'none';
+  if (perfRafId) { cancelAnimationFrame(perfRafId); perfRafId = null; }
 }
 
 function updatePerfOverlay() {
-  if (!perfOverlayVisible || !cy || !perfOverlayEl) return;
+  if (!perfOverlayVisible || !perfOverlayEl) return;
 
   perfFrameCount++;
   var now = performance.now();
-  var elapsed = now - perfLastFpsTime;
-
-  if (elapsed >= 1000) {
-    perfFps = Math.round((perfFrameCount * 1000) / elapsed);
+  if (now - perfLastFpsTime >= 1000) {
+    perfFps = Math.round((perfFrameCount * 1000) / (now - perfLastFpsTime));
     perfFrameCount = 0;
     perfLastFpsTime = now;
   }
 
-  var totalNodes = cy.nodes().length;
-  var culledNodes = cy.nodes('.culled').length;
-  var visibleNodes = totalNodes - culledNodes;
-  var totalEdges = cy.edges().length;
-  var zoom = cy.zoom().toFixed(2);
+  var total = nodeData.length;
+  var visible = nodeData.filter(function (d) { return !d.hidden; }).length;
+  var totalEdges = edgeData.length;
   var lodText = currentLodLevel === 0 ? 'Full' : currentLodLevel === 1 ? 'No labels' : 'Minimal';
 
   perfOverlayEl.textContent =
-    'Nodes: ' + visibleNodes + '/' + totalNodes +
-    ' | Culled: ' + culledNodes +
+    'Nodes: ' + visible + '/' + total +
     ' | Edges: ' + totalEdges +
     ' | FPS: ' + perfFps +
-    ' | Zoom: ' + zoom +
+    ' | Zoom: ' + currentZoom.toFixed(2) +
     ' | LOD: ' + lodText;
 
   perfRafId = requestAnimationFrame(updatePerfOverlay);
@@ -1073,59 +1241,47 @@ function updatePerfOverlay() {
 // Batch update optimization for SSE events
 // ---------------------------------------------------------------------------
 
-/**
- * Queues a graph update from an SSE event. Events are collected for
- * BATCH_DELAY_MS and then flushed together with a single layout run.
- * @param {Object} update - { type: 'addNode'|'addEdge', data: Object }
- */
 function queueBatchUpdate(update) {
   batchQueue.push(update);
-
   if (batchFlushTimer) clearTimeout(batchFlushTimer);
   batchFlushTimer = setTimeout(flushBatchUpdates, BATCH_DELAY_MS);
 }
 
-/**
- * Flushes all queued graph updates, applying them in batch with a
- * single layout run to prevent layout thrashing.
- */
 function flushBatchUpdates() {
-  if (!cy || batchQueue.length === 0) return;
+  if (!svg || batchQueue.length === 0) return;
 
-  var nodes = [];
-  var edges = [];
+  var newNodes = 0;
+  var newEdges = 0;
 
   batchQueue.forEach(function (update) {
     if (update.type === 'addNode') {
-      var existing = cy.getElementById(update.data.id);
-      if (existing.length > 0) {
-        existing.data(update.data);
+      var existing = nodeData.find(function (d) { return d.id === update.data.id; });
+      if (existing) {
+        Object.assign(existing, update.data);
       } else {
-        nodes.push({
-          group: 'nodes',
-          data: {
-            id: update.data.id,
-            label: update.data.label,
-            type: update.data.type,
-            observationCount: update.data.observationCount || 0,
-            createdAt: update.data.createdAt,
-          },
+        nodeData.push({
+          id: update.data.id,
+          label: update.data.label,
+          type: update.data.type,
+          observationCount: update.data.observationCount || 0,
+          createdAt: update.data.createdAt,
+          hidden: false,
         });
+        newNodes++;
       }
     } else if (update.type === 'addEdge') {
-      if (cy.getElementById(update.data.id).length === 0 &&
-          cy.getElementById(update.data.source).length > 0 &&
-          cy.getElementById(update.data.target).length > 0) {
-        edges.push({
-          group: 'edges',
-          data: {
-            id: update.data.id,
-            source: update.data.source,
-            target: update.data.target,
-            type: update.data.type,
-            label: update.data.label || update.data.type,
-          },
+      var edgeExists = edgeData.find(function (d) { return d.id === update.data.id; });
+      var srcExists = nodeData.find(function (d) { return d.id === update.data.source; });
+      var tgtExists = nodeData.find(function (d) { return d.id === update.data.target; });
+      if (!edgeExists && srcExists && tgtExists) {
+        edgeData.push({
+          id: update.data.id,
+          source: update.data.source,
+          target: update.data.target,
+          type: update.data.type,
+          label: update.data.label || update.data.type,
         });
+        newEdges++;
       }
     }
   });
@@ -1133,52 +1289,46 @@ function flushBatchUpdates() {
   batchQueue = [];
   batchFlushTimer = null;
 
-  // Add all new elements at once
-  var newEles = nodes.concat(edges);
-  if (newEles.length > 0) {
-    cy.add(newEles);
-
-    // Run a single local layout for new nodes
-    if (nodes.length > 0) {
-      var newNodeCollection = cy.collection();
-      nodes.forEach(function (n) {
-        var el = cy.getElementById(n.data.id);
-        if (el.length > 0) newNodeCollection = newNodeCollection.add(el);
-      });
-      var neighborhood = newNodeCollection.neighborhood().add(newNodeCollection);
-      neighborhood.layout(Object.assign({}, COSE_DEFAULTS, {
-        animate: true,
-        animationDuration: 300,
-        fit: false,
-      })).run();
-    }
-
+  if (newNodes > 0 || newEdges > 0) {
     hideEmptyState();
-    console.log('[laminark:graph] Batch update: added ' + nodes.length + ' nodes, ' + edges.length + ' edges');
+    renderGraph();
+    if (!isStaticLayout && simulation) simulation.alpha(0.3).restart();
+    console.log('[laminark:graph] Batch update: added ' + newNodes + ' nodes, ' + newEdges + ' edges');
   }
 
-  updateGraphStatsFromCy();
+  updateGraphStatsFromData();
 }
 
 // ---------------------------------------------------------------------------
 // Focus mode (drill-down)
 // ---------------------------------------------------------------------------
 
-/**
- * Enters focus mode centered on a node. Fetches the neighborhood subgraph
- * and renders it using breadthfirst layout.
- * @param {string} nodeId - The node to focus on
- * @param {string} label - The node's display label
- */
-async function enterFocusMode(nodeId, label) {
-  if (!cy) return;
+var _focusFetching = false;
 
-  // Stash full graph elements on first focus entry
+async function enterFocusMode(nodeId, label) {
+  if (!svg || _focusFetching) return;
+
   if (!isFocusMode) {
-    cachedFullElements = cy.elements().jsons();
+    cachedFullData = {
+      nodes: nodeData.map(function (d) {
+        var copy = Object.assign({}, d);
+        delete copy.x; delete copy.y; delete copy.vx; delete copy.vy;
+        delete copy.fx; delete copy.fy; delete copy.index;
+        return copy;
+      }),
+      edges: edgeData.map(function (d) {
+        return {
+          id: d.id,
+          source: typeof d.source === 'object' ? d.source.id : d.source,
+          target: typeof d.target === 'object' ? d.target.id : d.target,
+          type: d.type,
+          label: d.label,
+        };
+      }),
+    };
   }
 
-  // Fetch neighborhood data
+  _focusFetching = true;
   var data;
   try {
     var res = await fetch('/api/node/' + encodeURIComponent(nodeId) + '/neighborhood?depth=1');
@@ -1186,124 +1336,80 @@ async function enterFocusMode(nodeId, label) {
     data = await res.json();
   } catch (err) {
     console.error('[laminark:graph] Failed to fetch neighborhood:', err);
+    _focusFetching = false;
     return;
   }
 
-  if (!data.nodes || data.nodes.length === 0) return;
+  if (!data.nodes || data.nodes.length === 0) { _focusFetching = false; return; }
 
   isFocusMode = true;
+  // Prevent duplicate consecutive breadcrumb entries
+  var top = focusStack.length > 0 ? focusStack[focusStack.length - 1] : null;
+  if (!top || top.nodeId !== nodeId) {
+    focusStack.push({ nodeId: nodeId, label: label });
+  }
 
-  // Update focus stack
-  focusStack.push({ nodeId: nodeId, label: label });
-
-  // Build cytoscape elements from neighborhood data
-  var elements = [];
-
-  data.nodes.forEach(function (node) {
-    elements.push({
-      group: 'nodes',
-      data: {
-        id: node.id,
-        label: node.label,
-        type: node.type,
-        observationCount: node.observationCount || 0,
-        createdAt: node.createdAt,
-      },
-      classes: node.id === nodeId ? 'focus-root' : '',
-    });
+  nodeData = data.nodes.map(function (node) {
+    return {
+      id: node.id,
+      label: node.label,
+      type: node.type,
+      observationCount: node.observationCount || 0,
+      createdAt: node.createdAt,
+      hidden: false,
+    };
   });
 
-  data.edges.forEach(function (edge) {
-    elements.push({
-      group: 'edges',
-      data: {
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        type: edge.type,
-        label: edge.type,
-      },
-      classes: 'focus-edge',
-    });
+  edgeData = data.edges.map(function (edge) {
+    return {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      type: edge.type,
+      label: edge.type,
+    };
   });
 
-  // Replace graph elements
-  cy.elements().remove();
-  cy.add(elements);
+  renderGraph();
+  setTimeout(function () { fitToView(); }, 600);
 
-  // Use breadthfirst layout rooted at the focus node
-  cy.layout({
-    name: 'breadthfirst',
-    animate: true,
-    animationDuration: 400,
-    directed: true,
-    roots: '#' + CSS.escape(nodeId),
-    spacingFactor: 1.5,
-    nodeDimensionsIncludeLabels: true,
-  }).run();
-
-  cy.one('layoutstop', function () {
-    cy.fit(undefined, 50);
-  });
-
+  _focusFetching = false;
   updateBreadcrumbs();
-  updateGraphStatsFromCy();
-
+  updateGraphStatsFromData();
   console.log('[laminark:graph] Focus mode: centered on', label, '(' + data.nodes.length + ' nodes)');
 }
 
-/**
- * Exits focus mode and restores the full graph.
- */
 function exitFocusMode() {
-  if (!cy || !isFocusMode) return;
+  if (!svg || !isFocusMode) return;
 
   isFocusMode = false;
   focusStack = [];
 
-  if (cachedFullElements) {
-    cy.elements().remove();
-    cy.add(cachedFullElements);
-    cachedFullElements = null;
-
-    var layoutConfig = LAYOUT_CONFIGS[currentLayout] || LAYOUT_CONFIGS.clustered;
-    cy.layout(Object.assign({}, layoutConfig)).run();
-    cy.one('layoutstop', function () {
-      cy.fit(undefined, 50);
-    });
+  if (cachedFullData) {
+    nodeData = cachedFullData.nodes;
+    edgeData = cachedFullData.edges;
+    cachedFullData = null;
+    renderGraph();
+    setTimeout(function () { fitToView(); }, 600);
   } else {
-    // Fallback: reload from API
     loadGraphData();
   }
 
   updateBreadcrumbs();
-  updateGraphStatsFromCy();
-
+  updateGraphStatsFromData();
   console.log('[laminark:graph] Exited focus mode');
 }
 
-/**
- * Navigates focus mode back to a specific breadcrumb level.
- * @param {number} index - The breadcrumb index to navigate to (-1 for full graph)
- */
 function navigateBreadcrumb(index) {
-  if (index < 0) {
-    exitFocusMode();
-    return;
-  }
-
-  // Pop focus stack to the target level
+  if (index < 0) { exitFocusMode(); return; }
   var target = focusStack[index];
   if (!target) return;
-
+  // Trim stack to just before the target — enterFocusMode will re-push it.
+  // Keep isFocusMode true so enterFocusMode doesn't overwrite cachedFullData.
   focusStack = focusStack.slice(0, index);
-  isFocusMode = false; // Will be re-set by enterFocusMode
   enterFocusMode(target.nodeId, target.label);
 }
 
-/**
- * Updates the breadcrumb bar to reflect the current focus stack.
- */
 function updateBreadcrumbs() {
   var bar = document.getElementById('graph-breadcrumbs');
   if (!bar) return;
@@ -1316,16 +1422,12 @@ function updateBreadcrumbs() {
   bar.classList.remove('hidden');
   bar.innerHTML = '';
 
-  // "Full Graph" root crumb
   var rootBtn = document.createElement('button');
   rootBtn.className = 'breadcrumb-item';
   rootBtn.textContent = 'Full Graph';
-  rootBtn.addEventListener('click', function () {
-    exitFocusMode();
-  });
+  rootBtn.addEventListener('click', function () { exitFocusMode(); });
   bar.appendChild(rootBtn);
 
-  // Focus stack crumbs
   focusStack.forEach(function (item, idx) {
     var sep = document.createElement('span');
     sep.className = 'breadcrumb-separator';
@@ -1334,15 +1436,11 @@ function updateBreadcrumbs() {
 
     var btn = document.createElement('button');
     btn.className = 'breadcrumb-item';
-    if (idx === focusStack.length - 1) {
-      btn.classList.add('current');
-    }
+    if (idx === focusStack.length - 1) btn.classList.add('current');
     btn.textContent = item.label;
     btn.addEventListener('click', (function (i) {
       return function () {
-        if (i < focusStack.length - 1) {
-          navigateBreadcrumb(i);
-        }
+        if (i < focusStack.length - 1) navigateBreadcrumb(i);
       };
     })(idx));
     bar.appendChild(btn);
@@ -1353,71 +1451,243 @@ function updateBreadcrumbs() {
 // Layout selector
 // ---------------------------------------------------------------------------
 
-/**
- * Switches the graph layout and re-renders.
- * @param {string} layoutName - 'clustered', 'hierarchical', or 'concentric'
- */
 function setLayout(layoutName) {
-  if (!LAYOUT_CONFIGS[layoutName]) return;
+  var validLayouts = ['clustered', 'hierarchical', 'concentric', 'communities'];
+  if (validLayouts.indexOf(layoutName) === -1) return;
 
   var previousLayout = currentLayout;
   currentLayout = layoutName;
   localStorage.setItem('laminark-layout', layoutName);
 
-  // Update button states
   var btns = document.querySelectorAll('.layout-btn');
   btns.forEach(function (btn) {
     btn.classList.toggle('active', btn.getAttribute('data-layout') === layoutName);
   });
 
-  // Clear community colors when switching away from communities layout
   if (previousLayout === 'communities' && layoutName !== 'communities') {
     clearCommunityColors();
   }
 
-  // Re-run layout if not in focus mode
-  if (!isFocusMode && cy && cy.nodes().length > 0) {
+  if (!isFocusMode && nodeData.length > 0) {
     if (layoutName === 'communities') {
-      // Fetch community data, then apply colors and layout
-      var params = new URLSearchParams();
-      if (window.laminarkState && window.laminarkState.currentProject) {
-        params.set('project', window.laminarkState.currentProject);
-      }
-      fetch('/api/graph/communities' + (params.toString() ? '?' + params.toString() : ''))
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-          if (data.communities) {
-            applyCommunityColors(data.communities);
-          }
-          var layoutConfig = LAYOUT_CONFIGS[layoutName];
-          cy.layout(Object.assign({}, layoutConfig)).run();
-          cy.one('layoutstop', function () {
-            cy.fit(undefined, 50);
-          });
-        })
-        .catch(function (err) {
-          console.error('[laminark:graph] Failed to fetch communities:', err);
-          // Fallback: run layout without community colors
-          var layoutConfig = LAYOUT_CONFIGS[layoutName];
-          cy.layout(Object.assign({}, layoutConfig)).run();
-        });
+      applyCommunitiesLayout();
+    } else if (layoutName === 'hierarchical') {
+      applyHierarchicalLayout();
+    } else if (layoutName === 'concentric') {
+      applyConcentricLayout();
     } else {
-      var layoutConfig = LAYOUT_CONFIGS[layoutName];
-      cy.layout(Object.assign({}, layoutConfig)).run();
-      cy.one('layoutstop', function () {
-        cy.fit(undefined, 50);
-      });
+      applyClusteredLayout();
     }
   }
 }
 
-/**
- * Initializes layout selector button click handlers.
- */
+function applyClusteredLayout() {
+  isStaticLayout = false;
+  // Release any fixed positions from other layouts
+  nodeData.forEach(function (d) { d.fx = null; d.fy = null; });
+  renderGraph();
+  if (simulation) simulation.alpha(1).restart();
+  setTimeout(function () { fitToView(); }, 800);
+}
+
+function applyHierarchicalLayout() {
+  isStaticLayout = true;
+  if (simulation) simulation.stop();
+
+  var visibleNodes = nodeData.filter(function (d) { return !d.hidden; });
+  if (visibleNodes.length === 0) return;
+
+  var width = containerEl ? containerEl.clientWidth : 800;
+  var height = containerEl ? containerEl.clientHeight : 600;
+
+  // Find root nodes (Project type or no incoming edges)
+  var incomingSet = new Set();
+  edgeData.forEach(function (e) {
+    var tgtId = typeof e.target === 'object' ? e.target.id : e.target;
+    incomingSet.add(tgtId);
+  });
+
+  var roots = visibleNodes.filter(function (d) {
+    return d.type === 'Project' || !incomingSet.has(d.id);
+  });
+  if (roots.length === 0) roots = [visibleNodes[0]];
+
+  // BFS to assign depth layers
+  var nodeDepth = {};
+  var visited = new Set();
+  var queue = [];
+  roots.forEach(function (r) {
+    nodeDepth[r.id] = 0;
+    visited.add(r.id);
+    queue.push(r.id);
+  });
+
+  // Build adjacency (both directions for better BFS coverage)
+  var adj = {};
+  edgeData.forEach(function (e) {
+    var srcId = typeof e.source === 'object' ? e.source.id : e.source;
+    var tgtId = typeof e.target === 'object' ? e.target.id : e.target;
+    if (!adj[srcId]) adj[srcId] = [];
+    adj[srcId].push(tgtId);
+    if (!adj[tgtId]) adj[tgtId] = [];
+    adj[tgtId].push(srcId);
+  });
+
+  while (queue.length > 0) {
+    var current = queue.shift();
+    var neighbors = adj[current] || [];
+    neighbors.forEach(function (n) {
+      if (!visited.has(n)) {
+        visited.add(n);
+        nodeDepth[n] = (nodeDepth[current] || 0) + 1;
+        queue.push(n);
+      }
+    });
+  }
+
+  // Assign depth 0 to unvisited (truly disconnected) nodes
+  visibleNodes.forEach(function (d) {
+    if (nodeDepth[d.id] == null) nodeDepth[d.id] = 0;
+  });
+
+  // Group by depth
+  var layers = {};
+  visibleNodes.forEach(function (d) {
+    var depth = nodeDepth[d.id];
+    if (!layers[depth]) layers[depth] = [];
+    layers[depth].push(d);
+  });
+
+  var layerKeys = Object.keys(layers).map(Number).sort(function (a, b) { return a - b; });
+  var nodeGap = 60;
+  var rowGap = 50;
+  var layerGap = 100;
+  var maxRowWidth = Math.max(width * 1.5, 800);
+  var cx = width / 2;
+  var currentY = 80;
+
+  layerKeys.forEach(function (depth) {
+    var nodesInLayer = layers[depth];
+    // Calculate columns per row to fit within maxRowWidth
+    var cols = Math.max(1, Math.floor(maxRowWidth / nodeGap));
+    var rows = Math.ceil(nodesInLayer.length / cols);
+    var actualCols = Math.min(cols, nodesInLayer.length);
+    var layerWidth = actualCols * nodeGap;
+    var startX = cx - layerWidth / 2 + nodeGap / 2;
+
+    nodesInLayer.forEach(function (d, i) {
+      var col = i % cols;
+      var row = Math.floor(i / cols);
+      d.x = startX + col * nodeGap;
+      d.y = currentY + row * rowGap;
+      d.fx = d.x;
+      d.fy = d.y;
+    });
+
+    currentY += rows * rowGap + layerGap;
+  });
+
+  // Re-render with fixed positions
+  renderGraph();
+  setTimeout(function () { fitToView(); }, 200);
+}
+
+function applyConcentricLayout() {
+  isStaticLayout = true;
+  if (simulation) simulation.stop();
+
+  var visibleNodes = nodeData.filter(function (d) { return !d.hidden; });
+  if (visibleNodes.length === 0) return;
+
+  var width = containerEl ? containerEl.clientWidth : 800;
+  var height = containerEl ? containerEl.clientHeight : 600;
+  var cx = width / 2;
+  var cy = height / 2;
+
+  var typePriority = { Project: 0, File: 1, Reference: 2, Decision: 3, Problem: 4, Solution: 4 };
+
+  // Group by ring
+  var rings = {};
+  visibleNodes.forEach(function (d) {
+    var ring = typePriority[d.type] != null ? typePriority[d.type] : 4;
+    if (!rings[ring]) rings[ring] = [];
+    rings[ring].push(d);
+  });
+
+  var ringKeys = Object.keys(rings).map(Number).sort(function (a, b) { return a - b; });
+  // Dynamic ring spacing: ensure nodes don't overlap on each ring
+  var baseSpacing = 100;
+
+  ringKeys.forEach(function (ring, ringIndex) {
+    var nodesInRing = rings[ring];
+    // Ensure minimum arc spacing between nodes on each ring
+    var minArcGap = 30;
+    var minRadius = (nodesInRing.length * minArcGap) / (2 * Math.PI);
+    var radius = Math.max((ringIndex + 1) * baseSpacing, minRadius);
+    nodesInRing.forEach(function (d, i) {
+      var angle = (2 * Math.PI * i) / nodesInRing.length;
+      d.x = cx + radius * Math.cos(angle);
+      d.y = cy + radius * Math.sin(angle);
+      d.fx = d.x;
+      d.fy = d.y;
+    });
+  });
+
+  // Re-render with fixed positions
+  renderGraph();
+  setTimeout(function () { fitToView(); }, 200);
+}
+
+function applyCommunitiesLayout() {
+  isStaticLayout = false;
+  var params = new URLSearchParams();
+  if (window.laminarkState && window.laminarkState.currentProject) {
+    params.set('project', window.laminarkState.currentProject);
+  }
+
+  fetch('/api/graph/communities' + (params.toString() ? '?' + params.toString() : ''))
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      if (data.communities) {
+        applyCommunityColors(data.communities);
+
+        var width = containerEl ? containerEl.clientWidth : 800;
+        var height = containerEl ? containerEl.clientHeight : 600;
+        var cx = width / 2;
+        var cy = height / 2;
+
+        // Arrange community centers in a circle
+        var communities = data.communities;
+        var commRadius = Math.min(width, height) * 0.3;
+
+        communities.forEach(function (comm, i) {
+          var angle = (2 * Math.PI * i) / communities.length;
+          var commCx = cx + commRadius * Math.cos(angle);
+          var commCy = cy + commRadius * Math.sin(angle);
+          comm.nodeIds.forEach(function (nodeId) {
+            var node = nodeData.find(function (d) { return d.id === nodeId; });
+            if (node) {
+              // Set initial position near community center with some jitter
+              node.x = commCx + (Math.random() - 0.5) * 60;
+              node.y = commCy + (Math.random() - 0.5) * 60;
+            }
+          });
+        });
+      }
+
+      // Reset fixed positions and re-render
+      nodeData.forEach(function (d) { d.fx = null; d.fy = null; });
+      renderGraph();
+      setTimeout(function () { fitToView(); }, 800);
+    })
+    .catch(function (err) {
+      console.error('[laminark:graph] Failed to fetch communities:', err);
+      applyClusteredLayout();
+    });
+}
+
 function initLayoutSelector() {
   var btns = document.querySelectorAll('.layout-btn');
-
-  // Set initial active state from stored preference
   btns.forEach(function (btn) {
     btn.classList.toggle('active', btn.getAttribute('data-layout') === currentLayout);
     btn.addEventListener('click', function () {
@@ -1427,244 +1697,142 @@ function initLayoutSelector() {
 }
 
 // ---------------------------------------------------------------------------
-// Search functions
+// Community coloring
 // ---------------------------------------------------------------------------
 
-/**
- * Searches loaded Cytoscape nodes by label. Returns matching node data.
- * @param {string} query - Search query
- * @returns {Array<{id: string, label: string, type: string}>}
- */
-function searchNodes(query) {
-  if (!cy || !query) return [];
-
-  var lowerQuery = query.toLowerCase();
-  var results = [];
-
-  cy.nodes().forEach(function (node) {
-    var label = (node.data('label') || '').toLowerCase();
-    if (label.indexOf(lowerQuery) >= 0) {
-      results.push({
-        id: node.data('id'),
-        label: node.data('label'),
-        type: node.data('type'),
-      });
-    }
-  });
-
-  // Sort: exact > prefix > contains
-  results.sort(function (a, b) {
-    var aLower = a.label.toLowerCase();
-    var bLower = b.label.toLowerCase();
-    var aExact = aLower === lowerQuery;
-    var bExact = bLower === lowerQuery;
-    if (aExact && !bExact) return -1;
-    if (!aExact && bExact) return 1;
-    var aPrefix = aLower.startsWith(lowerQuery);
-    var bPrefix = bLower.startsWith(lowerQuery);
-    if (aPrefix && !bPrefix) return -1;
-    if (!aPrefix && bPrefix) return 1;
-    return 0;
-  });
-
-  return results.slice(0, 20);
-}
-
-/**
- * Highlights matching nodes and dims the rest.
- * @param {string[]} matchIds - Node IDs to highlight
- */
-function highlightSearchMatches(matchIds) {
-  if (!cy) return;
-  var idSet = new Set(matchIds);
-
-  cy.elements().forEach(function (ele) {
-    if (ele.isNode()) {
-      if (idSet.has(ele.data('id'))) {
-        ele.removeClass('search-dimmed');
-        ele.addClass('search-match');
-      } else {
-        ele.addClass('search-dimmed');
-        ele.removeClass('search-match');
-      }
-    } else {
-      // Dim edges connected to dimmed nodes
-      var src = ele.source();
-      var tgt = ele.target();
-      if (idSet.has(src.data('id')) && idSet.has(tgt.data('id'))) {
-        ele.removeClass('search-dimmed');
-      } else {
-        ele.addClass('search-dimmed');
-      }
-    }
-  });
-}
-
-/**
- * Clears search highlight, restoring all nodes to normal.
- */
-function clearSearchHighlight() {
-  if (!cy) return;
-  cy.elements().removeClass('search-dimmed').removeClass('search-match');
-}
-
-// ---------------------------------------------------------------------------
-// Cluster/community highlight
-// ---------------------------------------------------------------------------
-
-/**
- * Highlights a cluster of nodes and dims the rest.
- * @param {string[]} nodeIds - Node IDs in the cluster
- */
-function highlightCluster(nodeIds) {
-  if (!cy) return;
-  var idSet = new Set(nodeIds);
-
-  cy.elements().forEach(function (ele) {
-    if (ele.isNode()) {
-      if (idSet.has(ele.data('id'))) {
-        ele.removeClass('search-dimmed');
-        ele.addClass('search-match');
-      } else {
-        ele.addClass('search-dimmed');
-        ele.removeClass('search-match');
-      }
-    } else {
-      var src = ele.source();
-      var tgt = ele.target();
-      if (idSet.has(src.data('id')) && idSet.has(tgt.data('id'))) {
-        ele.removeClass('search-dimmed');
-      } else {
-        ele.addClass('search-dimmed');
-      }
-    }
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Community layout + coloring
-// ---------------------------------------------------------------------------
-
-/**
- * Community layout config: COSE with variable edge lengths.
- * Intra-community edges are short (80px), inter-community edges are long (250px).
- */
-var communityNodeMap = {}; // nodeId -> communityId, populated by applyCommunityColors
-
-LAYOUT_CONFIGS.communities = {
-  name: 'cose',
-  animate: true,
-  animationDuration: 500,
-  nodeRepulsion: function () { return 600000; },
-  idealEdgeLength: function (edge) {
-    var srcId = edge.source().data('id');
-    var tgtId = edge.target().data('id');
-    var srcComm = communityNodeMap[srcId];
-    var tgtComm = communityNodeMap[tgtId];
-    if (srcComm !== undefined && tgtComm !== undefined && srcComm === tgtComm) {
-      return 80;
-    }
-    return 250;
-  },
-  gravity: 0.3,
-  numIter: 1200,
-  nodeDimensionsIncludeLabels: true,
-};
-
-/**
- * Applies community colors to graph nodes.
- * @param {Array<{id: number, color: string, nodeIds: string[]}>} communities
- */
 function applyCommunityColors(communities) {
-  if (!cy) return;
-
-  // Build node -> community map
   communityNodeMap = {};
+  communityColorMap = {};
   communities.forEach(function (comm) {
     comm.nodeIds.forEach(function (nodeId) {
       communityNodeMap[nodeId] = comm.id;
+      communityColorMap[nodeId] = comm.color;
     });
   });
 
-  // Apply colors
-  communities.forEach(function (comm) {
-    comm.nodeIds.forEach(function (nodeId) {
-      var node = cy.getElementById(nodeId);
-      if (node.length > 0) {
-        node.data('communityColor', comm.color);
-        node.style('background-color', comm.color);
-      }
-    });
-  });
+  // Update node colors
+  if (nodesGroup) {
+    nodesGroup.selectAll('.node-group path.node-shape')
+      .attr('fill', function (d) {
+        if (communityColorMap[d.id]) return communityColorMap[d.id];
+        return ENTITY_STYLES[d.type] ? ENTITY_STYLES[d.type].color : '#8b949e';
+      });
+  }
 }
 
-/**
- * Restores type-based colors, clearing community colors.
- */
 function clearCommunityColors() {
-  if (!cy) return;
   communityNodeMap = {};
-
-  cy.nodes().forEach(function (node) {
-    var type = node.data('type');
-    var style = ENTITY_STYLES[type];
-    if (style) {
-      node.style('background-color', style.color);
-    }
-    node.removeData('communityColor');
-  });
+  communityColorMap = {};
+  if (nodesGroup) {
+    nodesGroup.selectAll('.node-group path.node-shape')
+      .attr('fill', function (d) {
+        return ENTITY_STYLES[d.type] ? ENTITY_STYLES[d.type].color : '#8b949e';
+      });
+  }
 }
 
-// Initialize layout selector when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initLayoutSelector);
-} else {
-  initLayoutSelector();
+// ---------------------------------------------------------------------------
+// Show linked nodes of type (context menu action)
+// ---------------------------------------------------------------------------
+
+async function showLinkedNodesOfType(nodeId, nodeLabel, filterType) {
+  if (!svg || _focusFetching) return;
+
+  if (!isFocusMode) {
+    cachedFullData = {
+      nodes: nodeData.map(function (d) {
+        var copy = Object.assign({}, d);
+        delete copy.x; delete copy.y; delete copy.vx; delete copy.vy;
+        delete copy.fx; delete copy.fy; delete copy.index;
+        return copy;
+      }),
+      edges: edgeData.map(function (d) {
+        return {
+          id: d.id,
+          source: typeof d.source === 'object' ? d.source.id : d.source,
+          target: typeof d.target === 'object' ? d.target.id : d.target,
+          type: d.type,
+          label: d.label,
+        };
+      }),
+    };
+  }
+
+  var data;
+  try {
+    var res = await fetch('/api/node/' + encodeURIComponent(nodeId) + '/neighborhood?depth=1');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    data = await res.json();
+  } catch (err) {
+    console.error('[laminark:graph] Failed to fetch neighborhood:', err);
+    return;
+  }
+
+  if (!data.nodes || data.nodes.length === 0) return;
+
+  var keepIds = new Set();
+  keepIds.add(nodeId);
+  data.nodes.forEach(function (n) {
+    if (n.id === nodeId || n.type === filterType) keepIds.add(n.id);
+  });
+
+  var filteredNodes = data.nodes.filter(function (n) { return keepIds.has(n.id); });
+  if (filteredNodes.length <= 1) {
+    console.log('[laminark:graph] No linked ' + filterType + ' nodes found');
+    return;
+  }
+
+  isFocusMode = true;
+  focusStack.push({ nodeId: nodeId, label: nodeLabel + ' \u2192 ' + filterType });
+
+  nodeData = filteredNodes.map(function (node) {
+    return {
+      id: node.id,
+      label: node.label,
+      type: node.type,
+      observationCount: node.observationCount || 0,
+      createdAt: node.createdAt,
+      hidden: false,
+    };
+  });
+
+  edgeData = data.edges
+    .filter(function (edge) { return keepIds.has(edge.source) && keepIds.has(edge.target); })
+    .map(function (edge) {
+      return { id: edge.id, source: edge.source, target: edge.target, type: edge.type, label: edge.type };
+    });
+
+  renderGraph();
+  setTimeout(function () { fitToView(); }, 600);
+
+  updateBreadcrumbs();
+  updateGraphStatsFromData();
+  console.log('[laminark:graph] Show linked: ' + filterType + ' from', nodeLabel,
+    '(' + filteredNodes.length + ' nodes)');
 }
 
 // ---------------------------------------------------------------------------
 // Context menu
 // ---------------------------------------------------------------------------
 
-/**
- * Creates the context menu DOM element and attaches dismiss listeners.
- * Called once at the end of initGraph().
- */
 function initContextMenu() {
-  if (!cy) return;
-  var container = cy.container();
-  if (!container) return;
+  if (!containerEl) return;
 
   contextMenuEl = document.createElement('div');
   contextMenuEl.className = 'graph-context-menu hidden';
-  container.appendChild(contextMenuEl);
+  containerEl.appendChild(contextMenuEl);
 
-  // Click-away to close
   document.addEventListener('mousedown', function (e) {
     if (contextMenuVisible && contextMenuEl && !contextMenuEl.contains(e.target)) {
       hideContextMenu();
     }
   });
 
-  // Escape to close
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && contextMenuVisible) {
-      hideContextMenu();
-    }
-  });
-
-  // Suppress browser context menu on the graph container
-  container.addEventListener('contextmenu', function (e) {
-    e.preventDefault();
+    if (e.key === 'Escape' && contextMenuVisible) hideContextMenu();
   });
 }
 
-/**
- * Populates and positions the context menu.
- * @param {number} x - Page X coordinate
- * @param {number} y - Page Y coordinate
- * @param {Array} items - Menu items: { type: 'header'|'item'|'divider', label?, action?, color? }
- */
 function showContextMenu(x, y, items) {
   if (!contextMenuEl) return;
 
@@ -1684,7 +1852,6 @@ function showContextMenu(x, y, items) {
   });
   contextMenuEl.innerHTML = html;
 
-  // Attach click handler via delegation
   contextMenuEl.onclick = function (e) {
     var target = e.target.closest('.context-menu-item');
     if (target) {
@@ -1697,14 +1864,12 @@ function showContextMenu(x, y, items) {
     }
   };
 
-  // Position, then adjust if overflowing viewport
   contextMenuEl.classList.remove('hidden');
   contextMenuVisible = true;
 
   var rect = contextMenuEl.getBoundingClientRect();
   var vw = window.innerWidth;
   var vh = window.innerHeight;
-
   if (x + rect.width > vw) x = vw - rect.width - 8;
   if (y + rect.height > vh) y = vh - rect.height - 8;
   if (x < 0) x = 8;
@@ -1720,19 +1885,12 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-/**
- * Hides the context menu and clears target state.
- */
 function hideContextMenu() {
   if (contextMenuEl) contextMenuEl.classList.add('hidden');
   contextMenuVisible = false;
   contextMenuTargetNode = null;
 }
 
-/**
- * Routes a context menu action string to the appropriate graph function.
- * @param {string} action - Action identifier (e.g. 'filter-type:File', 'focus', 'relayout')
- */
 function handleContextMenuAction(action) {
   if (!action) return;
 
@@ -1750,11 +1908,7 @@ function handleContextMenuAction(action) {
       enterFocusMode(contextMenuTargetNode.id, contextMenuTargetNode.label);
     }
   } else if (action === 'relayout') {
-    if (cy && cy.nodes().length > 0) {
-      var layoutConfig = LAYOUT_CONFIGS[currentLayout] || LAYOUT_CONFIGS.clustered;
-      cy.layout(Object.assign({}, layoutConfig)).run();
-      cy.one('layoutstop', function () { cy.fit(undefined, 50); });
-    }
+    setLayout(currentLayout);
   } else if (action === 'reset-filters') {
     resetFilters();
     syncFilterPills();
@@ -1763,120 +1917,24 @@ function handleContextMenuAction(action) {
   }
 }
 
-/**
- * Fetches the neighborhood of a node, filters to only the given entity type,
- * and enters focus mode with the filtered subgraph.
- * @param {string} nodeId - Center node ID
- * @param {string} nodeLabel - Center node label
- * @param {string} filterType - Entity type to keep (e.g. 'Decision')
- */
-async function showLinkedNodesOfType(nodeId, nodeLabel, filterType) {
-  if (!cy) return;
-
-  // Stash full graph elements on first focus entry
-  if (!isFocusMode) {
-    cachedFullElements = cy.elements().jsons();
-  }
-
-  var data;
-  try {
-    var res = await fetch('/api/node/' + encodeURIComponent(nodeId) + '/neighborhood?depth=1');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    data = await res.json();
-  } catch (err) {
-    console.error('[laminark:graph] Failed to fetch neighborhood:', err);
-    return;
-  }
-
-  if (!data.nodes || data.nodes.length === 0) return;
-
-  // Keep center node + nodes matching filterType
-  var keepIds = new Set();
-  keepIds.add(nodeId);
-  data.nodes.forEach(function (n) {
-    if (n.id === nodeId || n.type === filterType) keepIds.add(n.id);
-  });
-
-  var filteredNodes = data.nodes.filter(function (n) { return keepIds.has(n.id); });
-  if (filteredNodes.length <= 1) {
-    console.log('[laminark:graph] No linked ' + filterType + ' nodes found');
-    return;
-  }
-
-  isFocusMode = true;
-  focusStack.push({ nodeId: nodeId, label: nodeLabel + ' → ' + filterType });
-
-  var elements = [];
-  filteredNodes.forEach(function (node) {
-    elements.push({
-      group: 'nodes',
-      data: {
-        id: node.id,
-        label: node.label,
-        type: node.type,
-        observationCount: node.observationCount || 0,
-        createdAt: node.createdAt,
-      },
-      classes: node.id === nodeId ? 'focus-root' : '',
-    });
-  });
-
-  data.edges.forEach(function (edge) {
-    if (keepIds.has(edge.source) && keepIds.has(edge.target)) {
-      elements.push({
-        group: 'edges',
-        data: {
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-          type: edge.type,
-          label: edge.type,
-        },
-        classes: 'focus-edge',
-      });
-    }
-  });
-
-  cy.elements().remove();
-  cy.add(elements);
-
-  cy.layout({
-    name: 'breadthfirst',
-    animate: true,
-    animationDuration: 400,
-    directed: true,
-    roots: '#' + CSS.escape(nodeId),
-    spacingFactor: 1.5,
-    nodeDimensionsIncludeLabels: true,
-  }).run();
-
-  cy.one('layoutstop', function () { cy.fit(undefined, 50); });
-
-  updateBreadcrumbs();
-  updateGraphStatsFromCy();
-
-  console.log('[laminark:graph] Show linked: ' + filterType + ' from', nodeLabel,
-    '(' + filteredNodes.length + ' nodes)');
-}
-
-/**
- * Syncs filter pill .active classes to match the current activeEntityTypes set.
- */
 function syncFilterPills() {
   var allTypes = Object.keys(ENTITY_STYLES);
   var allActive = activeEntityTypes.size === allTypes.length;
 
   allTypes.forEach(function (type) {
     var pill = document.querySelector('.filter-pill[data-type="' + type + '"]');
-    if (pill) {
-      pill.classList.toggle('active', activeEntityTypes.has(type));
-    }
+    if (pill) pill.classList.toggle('active', activeEntityTypes.has(type));
   });
 
   var allPill = document.querySelector('.filter-pill[data-type="all"]');
-  if (allPill) {
-    allPill.classList.toggle('active', allActive);
-  }
+  if (allPill) allPill.classList.toggle('active', allActive);
+}
+
+// Initialize layout selector when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initLayoutSelector);
+} else {
+  initLayoutSelector();
 }
 
 // ---------------------------------------------------------------------------
@@ -1906,7 +1964,7 @@ window.laminarkGraph = {
   setLayout: setLayout,
   isFocusMode: function () { return isFocusMode; },
   ENTITY_STYLES: ENTITY_STYLES,
-  getCy: function () { return cy; },
+  getCy: function () { return null; }, // Compatibility stub (no longer Cytoscape)
   searchNodes: searchNodes,
   highlightSearchMatches: highlightSearchMatches,
   clearSearchHighlight: clearSearchHighlight,

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Laminark - Memory Visualization</title>
   <link rel="stylesheet" href="/styles.css">
-  <script src="https://unpkg.com/cytoscape@3.33/dist/cytoscape.min.js"></script>
+  <script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
 </head>
 <body>
   <nav id="nav-bar">
@@ -27,12 +27,12 @@
     <div id="filter-bar">
       <span class="filter-label">Filter:</span>
       <button class="filter-pill active" data-type="all">All <span class="count">0</span></button>
-      <button class="filter-pill active" data-type="Project"><span class="color-dot" style="background:#58a6ff"></span>Project <span class="count">0</span></button>
-      <button class="filter-pill active" data-type="File"><span class="color-dot" style="background:#7ee787"></span>File <span class="count">0</span></button>
-      <button class="filter-pill active" data-type="Decision"><span class="color-dot" style="background:#d2a8ff"></span>Decision <span class="count">0</span></button>
-      <button class="filter-pill active" data-type="Problem"><span class="color-dot" style="background:#f85149"></span>Problem <span class="count">0</span></button>
-      <button class="filter-pill active" data-type="Solution"><span class="color-dot" style="background:#3fb950"></span>Solution <span class="count">0</span></button>
-      <button class="filter-pill active" data-type="Reference"><span class="color-dot" style="background:#f0883e"></span>Reference <span class="count">0</span></button>
+      <button class="filter-pill active" data-type="Project"><svg class="type-icon" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" rx="2.5" fill="#58a6ff"/></svg>Project <span class="count">0</span></button>
+      <button class="filter-pill active" data-type="File"><svg class="type-icon" viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8" fill="#3fb950"/></svg>File <span class="count">0</span></button>
+      <button class="filter-pill active" data-type="Decision"><svg class="type-icon" viewBox="0 0 12 12"><polygon points="6,1 11,6 6,11 1,6" fill="#d29922"/></svg>Decision <span class="count">0</span></button>
+      <button class="filter-pill active" data-type="Problem"><svg class="type-icon" viewBox="0 0 12 12"><polygon points="6,1.5 11,10.5 1,10.5" fill="#f85149"/></svg>Problem <span class="count">0</span></button>
+      <button class="filter-pill active" data-type="Solution"><svg class="type-icon" viewBox="0 0 12 12"><polygon points="6,0.5 7.4,4.2 11.5,4.5 8.3,7.2 9.3,11.5 6,9.2 2.7,11.5 3.7,7.2 0.5,4.5 4.6,4.2" fill="#a371f7"/></svg>Solution <span class="count">0</span></button>
+      <button class="filter-pill active" data-type="Reference"><svg class="type-icon" viewBox="0 0 12 12"><polygon points="6,0.5 9.5,2.5 9.5,7.5 6,9.5 2.5,7.5 2.5,2.5" fill="#f0883e"/></svg>Reference <span class="count">0</span></button>
       <div class="filter-search-wrapper">
         <input type="text" id="graph-search" class="graph-search-input" placeholder="Search nodes..." autocomplete="off" spellcheck="false">
         <div id="search-results" class="search-results-dropdown hidden"></div>
@@ -56,36 +56,47 @@
       <div id="graph-breadcrumbs" class="graph-breadcrumbs hidden">
         <button class="breadcrumb-item" data-action="full">Full Graph</button>
       </div>
-      <div class="graph-area">
-        <div id="cy"></div>
-        <div id="graph-stats" class="graph-stats">0 nodes, 0 edges</div>
-        <div class="graph-toolbar">
-          <div class="layout-selector">
-            <button class="layout-btn active" data-layout="clustered" title="Force-directed layout">Clustered</button>
-            <button class="layout-btn" data-layout="hierarchical" title="Top-down tree layout">Hierarchical</button>
-            <button class="layout-btn" data-layout="concentric" title="Rings by entity type">Concentric</button>
-            <button class="layout-btn" data-layout="communities" title="Community-grouped layout">Communities</button>
+      <div class="graph-content-row">
+        <div class="graph-area">
+          <div id="cy"></div>
+          <div id="graph-stats" class="graph-stats">0 nodes, 0 edges</div>
+          <div class="graph-toolbar">
+            <div class="layout-selector">
+              <button class="layout-btn active" data-layout="clustered" title="Force-directed layout">Clustered</button>
+              <button class="layout-btn" data-layout="hierarchical" title="Top-down tree layout">Hierarchical</button>
+              <button class="layout-btn" data-layout="concentric" title="Rings by entity type">Concentric</button>
+              <button class="layout-btn" data-layout="communities" title="Community-grouped layout">Communities</button>
+            </div>
+            <button id="analysis-btn" class="analysis-btn" title="Graph analysis">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M1 14h14v1H0V0h1v14zM3 12V8h2v4H3zm3 0V5h2v7H6zm3 0V2h2v10H9zm3 0V6h2v6h-2z"/>
+              </svg>
+            </button>
+            <button id="fit-btn" class="fit-btn" title="Fit to view" onclick="window.laminarkGraph && window.laminarkGraph.fitToView()">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2 2h4v1.5H3.5V6H2V2zm8 0h4v4h-1.5V3.5H10V2zM2 10h1.5v2.5H6V14H2v-4zm10.5 2.5V10H14v4h-4v-1.5h2.5z"/>
+              </svg>
+            </button>
           </div>
-          <button id="analysis-btn" class="analysis-btn" title="Graph analysis">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M1 14h14v1H0V0h1v14zM3 12V8h2v4H3zm3 0V5h2v7H6zm3 0V2h2v10H9zm3 0V6h2v6h-2z"/>
-            </svg>
-          </button>
-          <button id="fit-btn" class="fit-btn" title="Fit to view" onclick="window.laminarkGraph && window.laminarkGraph.fitToView()">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M2 2h4v1.5H3.5V6H2V2zm8 0h4v4h-1.5V3.5H10V2zM2 10h1.5v2.5H6V14H2v-4zm10.5 2.5V10H14v4h-4v-1.5h2.5z"/>
-            </svg>
-          </button>
+          <div class="graph-legend" id="graph-legend">
+          <div class="graph-legend-title">Entity Types</div>
+          <div class="graph-legend-item"><span class="legend-color" style="background:#58a6ff; border-radius:3px;"></span> Project</div>
+          <div class="graph-legend-item"><span class="legend-color" style="background:#3fb950; border-radius:2px;"></span> File</div>
+          <div class="graph-legend-item"><span class="legend-color" style="background:#d29922; border-radius:0; transform:rotate(45deg); width:9px; height:9px;"></span> Decision</div>
+          <div class="graph-legend-item"><span class="legend-color legend-triangle" style="background:transparent; border-left:6px solid transparent; border-right:6px solid transparent; border-bottom:11px solid #f85149; border-radius:0; width:0; height:0;"></span> Problem</div>
+          <div class="graph-legend-item"><span class="legend-color" style="background:#a371f7; clip-path:polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);"></span> Solution</div>
+          <div class="graph-legend-item"><span class="legend-color" style="background:#f0883e; clip-path:polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);"></span> Reference</div>
+          </div>
         </div>
-        <div class="graph-legend" id="graph-legend">
-        <div class="graph-legend-title">Entity Types</div>
-        <div class="graph-legend-item"><span class="legend-color" style="background:#58a6ff; border-radius:3px;"></span> Project</div>
-        <div class="graph-legend-item"><span class="legend-color" style="background:#7ee787; border-radius:2px;"></span> File</div>
-        <div class="graph-legend-item"><span class="legend-color" style="background:#d2a8ff; border-radius:0; transform:rotate(45deg); width:9px; height:9px;"></span> Decision</div>
-        <div class="graph-legend-item"><span class="legend-color legend-triangle" style="background:transparent; border-left:6px solid transparent; border-right:6px solid transparent; border-bottom:11px solid #f85149; border-radius:0; width:0; height:0;"></span> Problem</div>
-        <div class="graph-legend-item"><span class="legend-color" style="background:#3fb950; clip-path:polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);"></span> Solution</div>
-        <div class="graph-legend-item"><span class="legend-color" style="background:#f0883e; clip-path:polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);"></span> Reference</div>
-        </div>
+        <aside id="analysis-panel" class="analysis-panel hidden">
+          <div class="panel-header">
+            <h3>Graph Analysis</h3>
+            <button id="analysis-close" aria-label="Close analysis panel">&times;</button>
+          </div>
+          <div id="analysis-body" class="analysis-body">
+            <p class="empty-state">Loading analysis...</p>
+          </div>
+        </aside>
       </div>
     </div>
 
@@ -114,6 +125,261 @@
         </div>
 
         <div id="settings-success" class="settings-success hidden"></div>
+
+        <!-- Topic Detection Config -->
+        <div id="topic-detection-section" class="config-section collapsed">
+          <div class="config-section-header" data-config-toggle="topic-detection">
+            <h3><span class="toggle-icon">&#9660;</span> Topic Detection</h3>
+            <span id="td-status" class="config-section-status enabled">Enabled</span>
+          </div>
+          <div class="config-section-body" id="td-body">
+            <div class="config-field">
+              <div class="config-field-header">
+                <span class="config-field-label">Enabled</span>
+                <label class="config-toggle">
+                  <input type="checkbox" id="td-enabled" checked>
+                  <span class="config-toggle-slider"></span>
+                </label>
+              </div>
+              <div class="config-field-desc">Master toggle for topic shift detection</div>
+            </div>
+
+            <div id="td-fields">
+              <div class="config-field">
+                <div class="config-field-label">Sensitivity Preset</div>
+                <div class="config-field-desc">Controls how easily topic shifts are detected</div>
+                <div class="config-radio-group" id="td-preset">
+                  <button class="config-radio" data-value="sensitive">Sensitive</button>
+                  <button class="config-radio active" data-value="balanced">Balanced</button>
+                  <button class="config-radio" data-value="relaxed">Relaxed</button>
+                </div>
+              </div>
+
+              <div class="config-field">
+                <div class="config-field-label">Sensitivity Multiplier</div>
+                <div class="config-field-desc">Multiplied with EWMA stddev for threshold (auto-filled from preset)</div>
+                <div class="config-field-value">
+                  <input type="number" id="td-multiplier" class="config-number-input" step="0.1" min="0.1" value="1.5">
+                </div>
+              </div>
+
+              <div class="config-field">
+                <div class="config-field-header">
+                  <span class="config-field-label">Manual Threshold</span>
+                  <label class="config-toggle">
+                    <input type="checkbox" id="td-manual-enabled">
+                    <span class="config-toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="config-field-desc">Override adaptive threshold with a fixed value</div>
+                <div class="config-field-value">
+                  <input type="number" id="td-manual-value" class="config-number-input" step="0.01" min="0" value="0.3" disabled>
+                </div>
+              </div>
+
+              <div class="config-field">
+                <div class="config-field-label">EWMA Alpha</div>
+                <div class="config-field-desc">Decay factor for exponentially weighted moving average (0.01 - 1.0)</div>
+                <div class="config-field-value">
+                  <input type="range" id="td-ewma" class="config-slider" min="0.01" max="1" step="0.01" value="0.3">
+                  <span id="td-ewma-val" class="config-slider-value">0.30</span>
+                </div>
+              </div>
+
+              <div class="config-field">
+                <div class="config-field-label">Threshold Bounds</div>
+                <div class="config-field-desc">Hard min/max limits for the adaptive threshold</div>
+                <div class="config-field-row">
+                  <div class="config-field-inline">
+                    <span>Min</span>
+                    <input type="number" id="td-bounds-min" class="config-number-input" step="0.01" min="0.05" max="0.95" value="0.15">
+                  </div>
+                  <div class="config-field-inline">
+                    <span>Max</span>
+                    <input type="number" id="td-bounds-max" class="config-number-input" step="0.01" min="0.05" max="0.95" value="0.6">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="config-actions">
+              <button class="btn-config-save" id="td-save">Save</button>
+              <button class="btn-config-defaults" id="td-defaults">Reset to Defaults</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Graph Extraction Config -->
+        <div id="graph-extraction-section" class="config-section collapsed">
+          <div class="config-section-header" data-config-toggle="graph-extraction">
+            <h3><span class="toggle-icon">&#9660;</span> Graph Extraction</h3>
+            <span id="ge-status" class="config-section-status enabled">Enabled</span>
+          </div>
+          <div class="config-section-body" id="ge-body">
+            <div class="config-field">
+              <div class="config-field-header">
+                <span class="config-field-label">Enabled</span>
+                <label class="config-toggle">
+                  <input type="checkbox" id="ge-enabled" checked>
+                  <span class="config-toggle-slider"></span>
+                </label>
+              </div>
+              <div class="config-field-desc">Master toggle for knowledge graph extraction</div>
+            </div>
+
+            <div id="ge-fields">
+              <div class="config-field-group-label">Temporal Decay</div>
+
+              <div class="config-field">
+                <div class="config-field-label">Half-Life (days)</div>
+                <div class="config-field-desc">How many days until edge weight decays to 50%</div>
+                <div class="config-field-value">
+                  <input type="number" id="ge-halflife" class="config-number-input" min="1" value="30">
+                </div>
+              </div>
+
+              <div class="config-field">
+                <div class="config-field-label">Minimum Floor</div>
+                <div class="config-field-desc">Lowest weight an edge can decay to before deletion check</div>
+                <div class="config-field-value">
+                  <input type="range" id="ge-minfloor" class="config-slider" min="0" max="0.99" step="0.01" value="0.05">
+                  <span id="ge-minfloor-val" class="config-slider-value">0.05</span>
+                </div>
+              </div>
+
+              <div class="config-field">
+                <div class="config-field-label">Deletion Threshold</div>
+                <div class="config-field-desc">Edges below this weight are deleted during curation</div>
+                <div class="config-field-value">
+                  <input type="range" id="ge-delthresh" class="config-slider" min="0" max="0.99" step="0.01" value="0.08">
+                  <span id="ge-delthresh-val" class="config-slider-value">0.08</span>
+                </div>
+              </div>
+
+              <div class="config-field">
+                <div class="config-field-label">Max Age (days)</div>
+                <div class="config-field-desc">Maximum age before forced deletion regardless of weight</div>
+                <div class="config-field-value">
+                  <input type="number" id="ge-maxage" class="config-number-input" min="1" value="180">
+                </div>
+              </div>
+
+              <div class="config-field-group-label">Fuzzy Deduplication</div>
+
+              <div class="config-field">
+                <div class="config-field-label">Max Levenshtein Distance</div>
+                <div class="config-field-desc">Maximum edit distance for typo matching</div>
+                <div class="config-field-value">
+                  <input type="number" id="ge-levenshtein" class="config-number-input" min="1" max="10" value="2">
+                </div>
+              </div>
+
+              <div class="config-field">
+                <div class="config-field-label">Jaccard Threshold</div>
+                <div class="config-field-desc">Minimum word-overlap similarity for dedup matching</div>
+                <div class="config-field-value">
+                  <input type="range" id="ge-jaccard" class="config-slider" min="0" max="1" step="0.01" value="0.7">
+                  <span id="ge-jaccard-val" class="config-slider-value">0.70</span>
+                </div>
+              </div>
+
+              <div class="config-field-group-label">Quality Gate</div>
+
+              <div class="config-field">
+                <div class="config-field-label">Max Files per Observation</div>
+                <div class="config-field-desc">Maximum File nodes extracted from a single observation</div>
+                <div class="config-field-value">
+                  <input type="number" id="ge-maxfiles" class="config-number-input" min="1" value="5">
+                </div>
+              </div>
+
+              <div class="config-field">
+                <div class="config-field-label">Type Confidence Thresholds</div>
+                <div class="config-field-desc">Minimum confidence to persist each entity type</div>
+                <div class="config-threshold-grid" id="ge-thresholds">
+                  <div class="config-threshold-row">
+                    <span class="config-threshold-label">File</span>
+                    <input type="range" class="config-slider" data-type="File" min="0" max="1" step="0.01" value="0.95">
+                    <span class="config-slider-value">0.95</span>
+                  </div>
+                  <div class="config-threshold-row">
+                    <span class="config-threshold-label">Project</span>
+                    <input type="range" class="config-slider" data-type="Project" min="0" max="1" step="0.01" value="0.8">
+                    <span class="config-slider-value">0.80</span>
+                  </div>
+                  <div class="config-threshold-row">
+                    <span class="config-threshold-label">Reference</span>
+                    <input type="range" class="config-slider" data-type="Reference" min="0" max="1" step="0.01" value="0.85">
+                    <span class="config-slider-value">0.85</span>
+                  </div>
+                  <div class="config-threshold-row">
+                    <span class="config-threshold-label">Decision</span>
+                    <input type="range" class="config-slider" data-type="Decision" min="0" max="1" step="0.01" value="0.65">
+                    <span class="config-slider-value">0.65</span>
+                  </div>
+                  <div class="config-threshold-row">
+                    <span class="config-threshold-label">Problem</span>
+                    <input type="range" class="config-slider" data-type="Problem" min="0" max="1" step="0.01" value="0.6">
+                    <span class="config-slider-value">0.60</span>
+                  </div>
+                  <div class="config-threshold-row">
+                    <span class="config-threshold-label">Solution</span>
+                    <input type="range" class="config-slider" data-type="Solution" min="0" max="1" step="0.01" value="0.6">
+                    <span class="config-slider-value">0.60</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="config-field">
+                <div class="config-field-label">File Non-Change Multiplier</div>
+                <div class="config-field-desc">Confidence multiplier for File paths from non-change observations</div>
+                <div class="config-field-value">
+                  <input type="range" id="ge-filenonchange" class="config-slider" min="0" max="1" step="0.01" value="0.74">
+                  <span id="ge-filenonchange-val" class="config-slider-value">0.74</span>
+                </div>
+              </div>
+
+              <div class="config-field">
+                <div class="config-field-row">
+                  <div class="config-field-inline">
+                    <span>Min Name Length</span>
+                    <input type="number" id="ge-minname" class="config-number-input" min="1" value="3">
+                  </div>
+                  <div class="config-field-inline">
+                    <span>Max Name Length</span>
+                    <input type="number" id="ge-maxname" class="config-number-input" min="10" value="200">
+                  </div>
+                </div>
+              </div>
+
+              <div class="config-field-group-label">Relationship Detector</div>
+
+              <div class="config-field">
+                <div class="config-field-label">Min Edge Confidence</div>
+                <div class="config-field-desc">Minimum confidence to persist a relationship edge</div>
+                <div class="config-field-value">
+                  <input type="range" id="ge-minedge" class="config-slider" min="0" max="1" step="0.01" value="0.45">
+                  <span id="ge-minedge-val" class="config-slider-value">0.45</span>
+                </div>
+              </div>
+
+              <div class="config-field-group-label">Signal Classifier</div>
+
+              <div class="config-field">
+                <div class="config-field-label">Min Content Length</div>
+                <div class="config-field-desc">Minimum characters required to process an observation</div>
+                <div class="config-field-value">
+                  <input type="number" id="ge-mincontent" class="config-number-input" min="0" value="30">
+                </div>
+              </div>
+            </div>
+
+            <div class="config-actions">
+              <button class="btn-config-save" id="ge-save">Save</button>
+              <button class="btn-config-defaults" id="ge-defaults">Reset to Defaults</button>
+            </div>
+          </div>
+        </div>
 
         <h2 class="settings-heading settings-heading-danger">Danger Zone</h2>
         <div class="settings-scope">
@@ -174,15 +440,6 @@
     </div>
   </div>
 
-  <aside id="analysis-panel" class="analysis-panel hidden">
-    <div class="panel-header">
-      <h3>Graph Analysis</h3>
-      <button id="analysis-close" aria-label="Close analysis panel">&times;</button>
-    </div>
-    <div id="analysis-body" class="analysis-body">
-      <p class="empty-state">Loading analysis...</p>
-    </div>
-  </aside>
 
   <aside id="detail-panel" class="hidden">
     <div class="panel-header">

@@ -89,10 +89,10 @@
 
     var entities = [
       { name: 'Project', color: '#58a6ff', desc: 'Represents a codebase or project workspace.' },
-      { name: 'File', color: '#7ee787', desc: 'Source files, configs, or other project files.' },
-      { name: 'Decision', color: '#d2a8ff', desc: 'Architectural or implementation decisions made during development.' },
+      { name: 'File', color: '#3fb950', desc: 'Source files, configs, or other project files.' },
+      { name: 'Decision', color: '#d29922', desc: 'Architectural or implementation decisions made during development.' },
       { name: 'Problem', color: '#f85149', desc: 'Issues, bugs, or challenges encountered.' },
-      { name: 'Solution', color: '#3fb950', desc: 'Fixes, workarounds, or approaches that resolved problems.' },
+      { name: 'Solution', color: '#a371f7', desc: 'Fixes, workarounds, or approaches that resolved problems.' },
       { name: 'Reference', color: '#f0883e', desc: 'External docs, libraries, APIs, or resources referenced.' },
     ];
 
