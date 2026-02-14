@@ -2655,3 +2655,197 @@ g.node-group.search-match path.node-shape {
   color: var(--text, #c9d1d9);
   font-weight: 500;
 }
+
+/* ====================================================================
+   Path Detail Panel
+   ==================================================================== */
+
+.path-detail-panel {
+  position: fixed;
+  top: var(--nav-height);
+  right: 0;
+  width: var(--panel-width);
+  height: calc(100vh - var(--nav-height));
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: transform var(--transition);
+}
+
+.path-detail-panel.hidden {
+  display: none;
+}
+
+.path-detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+/* Path status badge */
+.path-status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.path-status-badge.active {
+  background: rgba(210, 153, 34, 0.2);
+  color: var(--warning);
+}
+
+.path-status-badge.resolved {
+  background: rgba(63, 185, 80, 0.2);
+  color: var(--success);
+}
+
+.path-status-badge.abandoned {
+  background: rgba(139, 148, 158, 0.2);
+  color: var(--text-muted);
+}
+
+/* Path info section */
+.path-info-section {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.path-info-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.path-info-value {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* KISS Summary section */
+.kiss-summary-section {
+  margin-bottom: 16px;
+  padding: 10px;
+  background: rgba(63, 185, 80, 0.08);
+  border: 1px solid rgba(63, 185, 80, 0.2);
+  border-radius: var(--radius);
+}
+
+.kiss-summary-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--success);
+  margin-bottom: 6px;
+}
+
+.kiss-summary-field {
+  margin-bottom: 6px;
+}
+
+.kiss-summary-field-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.kiss-summary-field-value {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+/* Waypoint timeline */
+.waypoint-timeline {
+  position: relative;
+  padding-left: 20px;
+}
+
+.waypoint-timeline::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+
+.waypoint-item {
+  position: relative;
+  padding: 8px 0 8px 12px;
+  margin-bottom: 4px;
+}
+
+.waypoint-item::before {
+  content: '';
+  position: absolute;
+  left: -17px;
+  top: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--bg);
+}
+
+.waypoint-item[data-type="error"]::before { background: #f85149; }
+.waypoint-item[data-type="attempt"]::before { background: #d29922; }
+.waypoint-item[data-type="failure"]::before { background: #f0883e; }
+.waypoint-item[data-type="success"]::before { background: #3fb950; }
+.waypoint-item[data-type="pivot"]::before { background: #a371f7; }
+.waypoint-item[data-type="revert"]::before { background: #79c0ff; }
+.waypoint-item[data-type="discovery"]::before { background: #58a6ff; }
+.waypoint-item[data-type="resolution"]::before { background: #3fb950; }
+
+.waypoint-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.waypoint-seq {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 600;
+  min-width: 16px;
+}
+
+.waypoint-type-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.waypoint-time {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.waypoint-summary {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* Waypoint timeline section title */
+.waypoint-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
