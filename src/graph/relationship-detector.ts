@@ -17,6 +17,7 @@ import type BetterSqlite3 from 'better-sqlite3';
 import type { EntityType, RelationshipType, GraphEdge } from './types.js';
 import { getNodeByNameAndType, insertEdge } from './schema.js';
 import { enforceMaxDegree } from './constraints.js';
+import { inferRelationshipsWithHaiku } from '../intelligence/haiku-relationship-agent.js';
 
 // =============================================================================
 // Types
@@ -85,6 +86,9 @@ const TYPE_PAIR_DEFAULTS: Record<string, RelationshipType> = {
 // =============================================================================
 
 /**
+ * @deprecated Use detectRelationshipsAsync() or call inferRelationshipsWithHaiku() directly.
+ * Retained as a non-Haiku fallback. The HaikuProcessor calls agents directly.
+ *
  * Detects typed relationships between co-occurring entities in observation text.
  *
  * For each unique entity pair:
@@ -265,6 +269,40 @@ export function detectAndPersist(
 
   persist();
   return persisted;
+}
+
+// =============================================================================
+// Async Haiku Path
+// =============================================================================
+
+/**
+ * Detects relationships between entities using Haiku agent.
+ *
+ * This is the async alternative to the deprecated regex-based detectRelationships().
+ * Delegates to the Haiku relationship agent for LLM-powered inference.
+ *
+ * @param text - The observation text providing context
+ * @param entities - Already-extracted entities with name and type
+ * @returns Array of relationship candidates from Haiku
+ */
+export async function detectRelationshipsAsync(
+  text: string,
+  entities: Array<{ name: string; type: EntityType }>,
+): Promise<RelationshipCandidate[]> {
+  const relationships = await inferRelationshipsWithHaiku(text, entities);
+  return relationships.map((rel) => ({
+    sourceEntity: {
+      name: rel.source,
+      type: entities.find((e) => e.name === rel.source)?.type ?? 'File' as EntityType,
+    },
+    targetEntity: {
+      name: rel.target,
+      type: entities.find((e) => e.name === rel.target)?.type ?? 'File' as EntityType,
+    },
+    relationshipType: rel.type,
+    confidence: rel.confidence,
+    evidence: `Haiku inference from observation text`,
+  }));
 }
 
 // =============================================================================

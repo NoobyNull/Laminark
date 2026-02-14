@@ -20,6 +20,7 @@ import { upsertNode } from './schema.js';
 import { ALL_RULES, type ExtractionMatch } from './extraction-rules.js';
 import { applyQualityGate } from './write-quality-gate.js';
 import type { GraphExtractionConfig } from '../config/graph-extraction-config.js';
+import { extractEntitiesWithHaiku } from '../intelligence/haiku-entity-agent.js';
 
 // =============================================================================
 // Types
@@ -42,6 +43,9 @@ const DEFAULT_MIN_CONFIDENCE = 0.5;
 // =============================================================================
 
 /**
+ * @deprecated Use extractEntitiesAsync() or call extractEntitiesWithHaiku() directly.
+ * Retained as a non-Haiku fallback. The HaikuProcessor calls agents directly.
+ *
  * Extracts entities from observation text using all registered rules.
  *
  * - Runs every rule against the text
@@ -147,6 +151,32 @@ export function extractAndPersist(
 
   persist();
   return persisted;
+}
+
+// =============================================================================
+// Async Haiku Path
+// =============================================================================
+
+/**
+ * Extracts entities from observation text using Haiku agent.
+ *
+ * This is the async alternative to the deprecated regex-based extractEntities().
+ * Delegates to the Haiku entity agent for LLM-powered extraction.
+ *
+ * @param text - The observation content to analyze
+ * @param observationId - The observation ID for result metadata
+ * @returns Validated extraction result with entities from Haiku
+ */
+export async function extractEntitiesAsync(
+  text: string,
+  observationId: string,
+): Promise<EntityExtractionResult> {
+  const entities = await extractEntitiesWithHaiku(text);
+  return {
+    entities,
+    observationId,
+    extractedAt: new Date().toISOString(),
+  };
 }
 
 // =============================================================================
