@@ -1,76 +1,104 @@
 /**
- * Shared Anthropic client singleton and callHaiku helper.
+ * Shared Haiku client using Claude Agent SDK V2 session.
+ *
+ * Routes Haiku calls through the user's Claude Code subscription
+ * instead of requiring a separate API key. Uses a persistent session
+ * to avoid 12s cold-start overhead on sequential calls.
  *
  * Provides the core infrastructure for all Haiku agent modules:
- * - Singleton Anthropic client initialized with LAMINARK_API_KEY
  * - callHaiku() helper for structured prompt/response calls
  * - extractJsonFromResponse() for defensive JSON parsing
- * - Graceful degradation when no API key is configured
+ * - Session reuse across batch processing cycles
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import {
+  unstable_v2_createSession,
+  type SDKSession,
+} from '@anthropic-ai/claude-agent-sdk';
 
-import { loadHaikuConfig, type HaikuConfig } from '../config/haiku-config.js';
+import { loadHaikuConfig } from '../config/haiku-config.js';
 
 // ---------------------------------------------------------------------------
 // Singleton state
 // ---------------------------------------------------------------------------
 
-let _client: Anthropic | null = null;
-let _config: HaikuConfig | null = null;
+let _session: SDKSession | null = null;
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+function getOrCreateSession(): SDKSession {
+  if (!_session) {
+    const config = loadHaikuConfig();
+    _session = unstable_v2_createSession({
+      model: config.model,
+      permissionMode: 'bypassPermissions',
+      allowedTools: [], // No tools -- pure text completion only
+    });
+  }
+  return _session;
+}
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /**
- * Returns the shared Anthropic client instance, or null if no API key is configured.
- * The client is created once and reused for all subsequent calls.
- */
-export function getHaikuClient(): Anthropic | null {
-  if (_client) return _client;
-
-  _config = loadHaikuConfig();
-  if (!_config.apiKey) return null;
-
-  _client = new Anthropic({ apiKey: _config.apiKey });
-  return _client;
-}
-
-/**
- * Returns whether Haiku enrichment is available (API key configured).
+ * Returns whether Haiku enrichment is available.
+ * Always true with subscription auth -- no API key check needed.
  */
 export function isHaikuEnabled(): boolean {
-  if (_config) return _config.enabled;
-  _config = loadHaikuConfig();
-  return _config.enabled;
+  return true;
 }
 
 /**
  * Calls Haiku with a system prompt and user content.
  * Returns the text content from the response.
  *
- * @throws Error if Haiku client is not configured
+ * Uses a persistent V2 session to avoid cold-start overhead on sequential calls.
+ * System prompt is embedded in the user message since session-level systemPrompt
+ * is set at creation time and we need different prompts per agent.
+ *
+ * @param systemPrompt - Instructions for the model
+ * @param userContent - The content to process
+ * @param _maxTokens - Kept for signature compatibility (unused -- Agent SDK constrains output via prompts)
+ * @throws Error if the Haiku call fails or session expires
  */
 export async function callHaiku(
   systemPrompt: string,
   userContent: string,
-  maxTokens?: number,
+  _maxTokens?: number,
 ): Promise<string> {
-  const client = getHaikuClient();
-  if (!client || !_config) {
-    throw new Error('Haiku not configured -- set LAMINARK_API_KEY or add apiKey to config.json');
+  const session = getOrCreateSession();
+
+  // Embed system prompt in user message since the session shares a single
+  // system prompt but our three agents each need different instructions
+  const fullPrompt = `<instructions>\n${systemPrompt}\n</instructions>\n\n${userContent}`;
+
+  try {
+    await session.send(fullPrompt);
+    for await (const msg of session.stream()) {
+      if (msg.type === 'result') {
+        if (msg.subtype === 'success') {
+          return msg.result;
+        }
+        const errors = 'errors' in msg ? (msg as { errors?: string[] }).errors : undefined;
+        const errorMsg = errors?.join(', ') ?? msg.subtype;
+        throw new Error(`Haiku call failed: ${errorMsg}`);
+      }
+    }
+    return ''; // No result message received
+  } catch (error) {
+    // Session may have expired -- reset and rethrow so next call creates fresh session
+    try {
+      _session?.close();
+    } catch {
+      // Ignore close errors
+    }
+    _session = null;
+    throw error;
   }
-
-  const message = await client.messages.create({
-    model: _config.model,
-    max_tokens: maxTokens ?? _config.maxTokensPerCall,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userContent }],
-  });
-
-  const textBlock = message.content.find((b) => b.type === 'text');
-  return textBlock?.text ?? '';
 }
 
 /**
@@ -99,9 +127,13 @@ export function extractJsonFromResponse(text: string): unknown {
 }
 
 /**
- * Resets the singleton client and config. Used for testing.
+ * Resets the singleton session. Used for testing.
  */
 export function resetHaikuClient(): void {
-  _client = null;
-  _config = null;
+  try {
+    _session?.close();
+  } catch {
+    // Ignore close errors
+  }
+  _session = null;
 }
