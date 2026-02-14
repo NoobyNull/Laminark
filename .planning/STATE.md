@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-14)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
-**Current focus:** v2.2 Debug Resolution Paths — Phase 19: Path Detection & Storage
+**Current focus:** v2.2 Debug Resolution Paths — Phase 20: Intelligence & MCP Tools
 
 ## Current Position
 
-Phase: 19 of 21 (Path Detection & Storage) -- COMPLETE
-Plan: 3 of 3
-Status: Phase Complete
-Last activity: 2026-02-14 — Completed 19-03 (PathTracker state machine and pipeline integration)
+Phase: 20 of 21 (Intelligence & MCP Tools)
+Plan: —
+Status: Ready to plan
+Last activity: 2026-02-14 — Phase 19 complete (Path Detection & Storage, 3/3 plans, verified)
 
 ## Performance Metrics
 
@@ -85,5 +85,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 19-03-PLAN.md (PathTracker state machine and pipeline integration) — Phase 19 complete
+Stopped at: Phase 19 verified and complete, ready to plan Phase 20
 Resume file: None
