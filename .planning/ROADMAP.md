@@ -346,5 +346,5 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 18-01-PLAN.md -- SDK dependency swap, haiku-config simplification, and haiku-client rewrite to Agent SDK V2 session API
-- [ ] 18-02-PLAN.md -- Test suite rewrite for Agent SDK mocks and full migration verification
+- [x] 18-01-PLAN.md -- SDK dependency swap, haiku-config simplification, and haiku-client rewrite to Agent SDK V2 session API
+- [x] 18-02-PLAN.md -- Test suite rewrite for Agent SDK mocks and full migration verification
