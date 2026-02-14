@@ -335,6 +335,6 @@ Note: Phases 15 and 16 depend on Phases 10+12 (not on each other or on 13/14), s
 **Plans:** 3 plans
 
 Plans:
-- [ ] 17-01-PLAN.md -- SDK installation, API key config, Haiku client singleton, and 3 focused agent modules (entity, relationship, classifier)
-- [ ] 17-02-PLAN.md -- HaikuProcessor background orchestrator, admission filter simplification, index.ts rewiring, delete obsolete regex/classifier files
-- [ ] 17-03-PLAN.md -- Test suite: new Haiku module tests (mocked API), updated tests for modified modules, removed tests for deleted modules
+- [x] 17-01-PLAN.md -- SDK installation, API key config, Haiku client singleton, and 3 focused agent modules (entity, relationship, classifier)
+- [x] 17-02-PLAN.md -- HaikuProcessor background orchestrator, admission filter simplification, index.ts rewiring, delete obsolete regex/classifier files
+- [x] 17-03-PLAN.md -- Test suite: new Haiku module tests (mocked API), updated tests for modified modules, removed tests for deleted modules
