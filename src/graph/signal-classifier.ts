@@ -1,10 +1,11 @@
 /**
- * Signal classifier for observation-to-graph extraction gating.
+ * DEPRECATED: Signal classification is now handled by the HaikuProcessor
+ * which classifies observations directly via Haiku. This file is retained
+ * for backward compatibility but is no longer called from the embedding loop.
  *
+ * Previously: Signal classifier for observation-to-graph extraction gating.
  * Gates which observations trigger entity extraction and relationship
- * detection based on source quality and content analysis. Prevents
- * low-signal observations (Read, Glob, Grep, task management) from
- * polluting the knowledge graph with noise.
+ * detection based on source quality and content analysis.
  *
  * Signal levels:
  *   - HIGH: full extraction (entities + relationships)

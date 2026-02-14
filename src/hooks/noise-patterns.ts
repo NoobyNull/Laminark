@@ -1,8 +1,11 @@
 /**
- * Noise pattern definitions by category.
+ * DEPRECATED: Noise detection is now handled by Haiku classifier agent
+ * (haiku-classifier-agent.ts). This file is retained only for reference.
+ * No active code imports it.
  *
- * These patterns identify low-signal content that should be rejected
- * by the admission filter before database storage.
+ * Previously: Noise pattern definitions by category that identified
+ * low-signal content to be rejected by the admission filter before
+ * database storage.
  */
 
 /**

@@ -30,16 +30,12 @@ import { AdaptiveThresholdManager } from './intelligence/adaptive-threshold.js';
 import { TopicShiftDecisionLogger } from './intelligence/decision-logger.js';
 import { loadTopicDetectionConfig, applyConfig } from './config/topic-detection-config.js';
 import { loadGraphExtractionConfig } from './config/graph-extraction-config.js';
-import { classifySignal } from './graph/signal-classifier.js';
 import { StashManager } from './storage/stash-manager.js';
 import { ThresholdStore } from './storage/threshold-store.js';
 import { NotificationStore } from './storage/notifications.js';
 import { initGraphSchema } from './graph/schema.js';
-import { extractAndPersist } from './graph/entity-extractor.js';
-import { detectAndPersist } from './graph/relationship-detector.js';
-import { upsertNode, getNodeByNameAndType, insertEdge } from './graph/schema.js';
 import { CurationAgent } from './graph/curation-agent.js';
-import { ObservationClassifier } from './curation/observation-classifier.js';
+import { HaikuProcessor } from './intelligence/haiku-processor.js';
 import { broadcast } from './web/routes/sse.js';
 import { createWebServer, startWebServer } from './web/server.js';
 import { ToolRegistryRepository } from './storage/tool-registry.js';
@@ -191,138 +187,8 @@ async function processUnembedded(): Promise<void> {
         }
       }
 
-      // Knowledge graph -- extract entities and detect relationships
-      // Signal classification gates which observations trigger graph extraction
-      const signal = graphConfig.enabled
-        ? classifySignal(obs.source, text, graphConfig)
-        : { level: 'skip' as const, reason: 'Graph extraction disabled' };
-
-      if (signal.level !== 'skip') try {
-        const isChangeObs = obs.kind === 'change' || obs.source === 'hook:Write' || obs.source === 'hook:Edit';
-        const nodes = extractAndPersist(db.db, text, String(id), {
-          projectHash,
-          isChangeObservation: isChangeObs,
-          graphConfig,
-        });
-        if (nodes.length > 0) {
-          const entityPairs = nodes.map(n => ({
-            name: n.name,
-            type: n.type,
-          }));
-          // Medium signal: entities only, skip relationship detection
-          if (signal.level === 'high') {
-            detectAndPersist(db.db, text, entityPairs, {
-              projectHash,
-              minConfidence: graphConfig.relationshipDetector.minEdgeConfidence,
-            });
-          }
-
-          // Provenance edges: link research context files to changed files
-          if (obs.kind === 'change' && obs.content.includes('Research context:')) {
-            try {
-              const researchSection = obs.content.split('Research context:\n')[1];
-              if (researchSection) {
-                const researchPaths = researchSection
-                  .split('\n')
-                  .map(line => {
-                    const match = line.match(/\[(?:Read|Glob|Grep)\]\s+(.+)/);
-                    return match ? match[1].trim() : null;
-                  })
-                  .filter((p): p is string => p !== null);
-
-                // Find the File node for the changed file
-                const changeFileNodes = nodes.filter(n => n.type === 'File');
-                for (const changeNode of changeFileNodes) {
-                  for (const researchPath of researchPaths) {
-                    // Ensure the research file exists as a node
-                    const researchNode = upsertNode(db.db, {
-                      type: 'File',
-                      name: researchPath,
-                      metadata: {},
-                      observation_ids: [String(id)],
-                      project_hash: projectHash,
-                    });
-                    // Create informed_by edge
-                    try {
-                      insertEdge(db.db, {
-                        source_id: changeNode.id,
-                        target_id: researchNode.id,
-                        type: 'informed_by',
-                        weight: 0.7,
-                        metadata: { source: 'research_buffer' },
-                        project_hash: projectHash,
-                      });
-                    } catch {
-                      // Edge may already exist
-                    }
-                  }
-                }
-              }
-            } catch (provErr) {
-              const msg = provErr instanceof Error ? provErr.message : String(provErr);
-              debug('embed', 'Provenance edge error (non-fatal)', { error: msg });
-            }
-          }
-
-          // Temporal ordering: preceded_by edges between consecutive changes
-          if (obs.kind === 'change' && obs.sessionId) {
-            try {
-              const priorChange = db.db.prepare(`
-                SELECT id, content FROM observations
-                WHERE project_hash = ? AND session_id = ? AND kind = 'change'
-                  AND deleted_at IS NULL AND id != ?
-                ORDER BY created_at DESC, rowid DESC LIMIT 1
-              `).get(projectHash, obs.sessionId, obs.id) as { id: string; content: string } | undefined;
-
-              if (priorChange) {
-                const changeFileNodes = nodes.filter(n => n.type === 'File');
-                // Extract file path from prior change content
-                const priorFileMatch = priorChange.content.match(/\[(?:Write|Edit)\]\s+(?:Created|Modified)\s+(\S+)/);
-                if (priorFileMatch && changeFileNodes.length > 0) {
-                  const priorNode = getNodeByNameAndType(db.db, priorFileMatch[1], 'File');
-                  if (priorNode) {
-                    try {
-                      insertEdge(db.db, {
-                        source_id: changeFileNodes[0].id,
-                        target_id: priorNode.id,
-                        type: 'preceded_by',
-                        weight: 0.6,
-                        metadata: { source: 'temporal' },
-                        project_hash: projectHash,
-                      });
-                    } catch {
-                      // Edge may already exist
-                    }
-                  }
-                }
-              }
-            } catch (tempErr) {
-              const msg = tempErr instanceof Error ? tempErr.message : String(tempErr);
-              debug('embed', 'Temporal ordering error (non-fatal)', { error: msg });
-            }
-          }
-
-          debug('embed', 'Graph updated', {
-            id,
-            entities: nodes.length,
-          });
-          statusCache.markDirty();
-
-          // Broadcast entity updates to SSE clients
-          for (const node of nodes) {
-            broadcast('entity_updated', {
-              id: node.name,
-              label: node.name,
-              type: node.type,
-              observationCount: 1,
-              createdAt: new Date().toISOString(),
-            });
-          }
-        }
-      } catch (graphErr) {
-        const msg = graphErr instanceof Error ? graphErr.message : String(graphErr);
-        debug('embed', 'Graph extraction error (non-fatal)', { error: msg });
-      }
+      // Knowledge graph extraction is now handled by HaikuProcessor in the background.
+      // The embedding loop only handles: embeddings, SSE broadcast, topic shift detection.
     }
   }
 }
@@ -395,17 +261,17 @@ if (toolRegistry) {
 }
 
 // ---------------------------------------------------------------------------
-// Background observation classifier (LLM-based via MCP sampling)
+// Background Haiku processor (classification + entity extraction + relationships)
 // ---------------------------------------------------------------------------
 
-const classifier = new ObservationClassifier(db.db, projectHash, server, {
-  intervalMs: 45_000,
-  contextWindow: 5,
-  batchSize: 20,
+const haikuProcessor = new HaikuProcessor(db.db, projectHash, {
+  intervalMs: 30_000,
+  batchSize: 10,
+  concurrency: 3,
 });
 
 startServer(server).then(() => {
-  classifier.start();
+  haikuProcessor.start();
 }).catch((err) => {
   debug('mcp', 'Fatal: failed to start server', { error: err.message });
   clearInterval(embedTimer);
@@ -455,7 +321,7 @@ curationAgent.start();
 
 function shutdown(code: number): void {
   clearInterval(embedTimer);
-  classifier.stop();
+  haikuProcessor.stop();
   curationAgent.stop();
   worker.shutdown().catch(() => {});
   db.close();

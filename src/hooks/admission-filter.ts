@@ -1,4 +1,3 @@
-import { isNoise } from './noise-patterns.js';
 import { isLaminarksOwnTool } from './self-referential.js';
 import { debug } from '../shared/debug.js';
 
@@ -146,16 +145,9 @@ export function shouldAdmit(toolName: string, content: string): boolean {
     return true;
   }
 
-  // Check content against noise patterns
-  const noiseResult = isNoise(content);
-  if (noiseResult.isNoise) {
-    debug('hook', 'Observation rejected', {
-      tool: toolName,
-      reason: 'noise',
-      category: noiseResult.category,
-    });
-    return false;
-  }
+  // Noise pattern detection is now handled post-storage by the HaikuProcessor.
+  // Observations are stored first, then classified by Haiku, and noise is soft-deleted.
+  // Only cheap structural filters remain here as pre-storage gates.
 
   // Long content without decision/error indicators is likely noise
   if (content.length > MAX_CONTENT_LENGTH) {
