@@ -225,39 +225,41 @@ function connectSSE() {
     recordEventReceived();
   });
 
+  // Helper: only dispatch SSE events that belong to the currently selected project.
+  // Events without projectHash are dropped (all broadcasts now include it).
+  function dispatchIfCurrentProject(eventName, data) {
+    if (!data.projectHash || data.projectHash !== window.laminarkState.currentProject) return;
+    document.dispatchEvent(new CustomEvent(eventName, { detail: data }));
+  }
+
   eventSource.addEventListener('new_observation', function (e) {
     var data = JSON.parse(e.data);
     recordEventReceived();
-    if (data.projectHash && data.projectHash !== window.laminarkState.currentProject) return;
-    document.dispatchEvent(new CustomEvent('laminark:new_observation', { detail: data }));
+    dispatchIfCurrentProject('laminark:new_observation', data);
   });
 
   eventSource.addEventListener('entity_updated', function (e) {
     var data = JSON.parse(e.data);
     recordEventReceived();
-    if (data.projectHash && data.projectHash !== window.laminarkState.currentProject) return;
-    document.dispatchEvent(new CustomEvent('laminark:entity_updated', { detail: data }));
+    dispatchIfCurrentProject('laminark:entity_updated', data);
   });
 
   eventSource.addEventListener('topic_shift', function (e) {
     var data = JSON.parse(e.data);
     recordEventReceived();
-    if (data.projectHash && data.projectHash !== window.laminarkState.currentProject) return;
-    document.dispatchEvent(new CustomEvent('laminark:topic_shift', { detail: data }));
+    dispatchIfCurrentProject('laminark:topic_shift', data);
   });
 
   eventSource.addEventListener('session_start', function (e) {
     var data = JSON.parse(e.data);
     recordEventReceived();
-    if (data.projectHash && data.projectHash !== window.laminarkState.currentProject) return;
-    document.dispatchEvent(new CustomEvent('laminark:session_start', { detail: data }));
+    dispatchIfCurrentProject('laminark:session_start', data);
   });
 
   eventSource.addEventListener('session_end', function (e) {
     var data = JSON.parse(e.data);
     recordEventReceived();
-    if (data.projectHash && data.projectHash !== window.laminarkState.currentProject) return;
-    document.dispatchEvent(new CustomEvent('laminark:session_end', { detail: data }));
+    dispatchIfCurrentProject('laminark:session_end', data);
   });
 
   eventSource.addEventListener('path_started', function (e) {
