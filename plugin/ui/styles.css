@@ -2023,28 +2023,135 @@ body {
 }
 
 /* =========================================================================
- * Help View
+ * Help View — Sidebar Tree Layout
  * ========================================================================= */
 
 #help-view {
-  overflow-y: auto;
+  overflow: hidden;
 }
 
-.help-container {
-  max-width: 760px;
-  margin: 0 auto;
-  padding: 24px;
+#help-view.active {
+  display: flex;
+  flex-direction: row;
+}
+
+/* Sidebar */
+.help-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.help-sidebar-search {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.help-tree-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.help-tree {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.help-tree-item {
+  user-select: none;
+}
+
+.help-tree-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-muted);
+  border-radius: 4px;
+  margin: 0 8px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.help-tree-label:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+
+.help-tree-label.active {
+  background: rgba(88, 166, 255, 0.1);
+  color: var(--accent);
+}
+
+.help-tree-toggle {
+  width: 16px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+  text-align: center;
+}
+
+.help-tree-item.expanded > .help-tree-label .help-tree-toggle {
+  transform: rotate(90deg);
+}
+
+.help-tree-children {
+  list-style: none;
+  padding: 0 0 0 20px;
+  margin: 0;
+  display: none;
+}
+
+.help-tree-item.expanded > .help-tree-children {
+  display: block;
+}
+
+.help-tree-child-label {
+  display: block;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+  border-radius: 4px;
+  margin: 0 8px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.help-tree-child-label:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+
+.help-tree-child-label.active {
+  color: var(--accent);
+}
+
+/* Content area */
+.help-content-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
+  min-width: 0;
 }
 
 .help-section {
-  margin-bottom: 32px;
+  margin-bottom: 0;
 }
 
 .help-section-title {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--text);
-  margin-bottom: 12px;
+  margin-bottom: 16px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
 }
@@ -3013,4 +3120,153 @@ line.edge.path-highlight {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   pointer-events: none;
+}
+
+/* =========================================================================
+ * Help View — Enhanced Documentation
+ * ========================================================================= */
+
+/* Help sidebar search input */
+.help-search-input {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  transition: border-color var(--transition);
+}
+
+.help-search-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.help-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Subsection titles (h3-level) */
+.help-subsection-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 16px 0 8px;
+}
+
+/* Styled bullet list */
+.help-list {
+  list-style: none;
+  margin: 8px 0 16px;
+}
+
+.help-list li {
+  position: relative;
+  padding-left: 16px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.6;
+  margin-bottom: 4px;
+}
+
+.help-list li::before {
+  content: '\2022';
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+}
+
+/* Tip / note callout box */
+.help-tip {
+  padding: 10px 14px;
+  margin: 12px 0;
+  background: rgba(88, 166, 255, 0.06);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.help-tip strong {
+  color: var(--accent);
+}
+
+/* Screenshot containers */
+.help-screenshot {
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.help-screenshot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.help-screenshot-caption {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--surface);
+  text-align: center;
+}
+
+/* Cross-links */
+.help-crosslinks {
+  margin-top: 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.help-crosslink {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+  margin-left: 4px;
+  transition: color var(--transition);
+}
+
+.help-crosslink:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+/* No results state for search */
+.help-no-results {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 48px 16px;
+  font-size: 14px;
+}
+
+/* Help table (key-value, shortcuts) */
+.help-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+
+.help-table td {
+  padding: 6px 8px;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+  vertical-align: top;
+}
+
+.help-table td:first-child {
+  white-space: nowrap;
+  width: 180px;
+  color: var(--text);
+}
+
+.help-table td:last-child {
+  color: var(--text-muted);
 }

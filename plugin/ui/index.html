@@ -73,12 +73,11 @@
                 <path d="M5 5.5a1.5 1.5 0 013 0v.25h1V5.5a2.5 2.5 0 00-5 0v5a2.5 2.5 0 005 0v-.25H8v.25a1.5 1.5 0 01-3 0v-5z" opacity=".6"/>
               </svg>
             </button>
-            <button id="paths-toggle-btn" class="paths-toggle-btn active" title="Toggle debug path overlay">
+            <button id="paths-toggle-btn" class="paths-toggle-btn" title="Find shortest path between two nodes">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M2 8c0-.4.3-.7.7-.7h1.6c.4 0 .7.3.7.7s-.3.7-.7.7H2.7C2.3 8.7 2 8.4 2 8zm4.3 0c0-.4.3-.7.7-.7h1.6c.4 0 .7.3.7.7s-.3.7-.7.7H7C6.6 8.7 6.3 8.4 6.3 8zm4.4 0c0-.4.3-.7.7-.7h1.6c.4 0 .7.3.7.7s-.3.7-.7.7h-1.6c-.4 0-.7-.3-.7-.7z"/>
-                <circle cx="2" cy="8" r="1.5"/>
-                <circle cx="8" cy="8" r="1.5"/>
-                <circle cx="14" cy="8" r="1.5"/>
+                <circle cx="3" cy="13" r="2" opacity=".8"/>
+                <circle cx="13" cy="3" r="2" opacity=".8"/>
+                <path d="M4.5 11.5L11.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 2" fill="none"/>
               </svg>
             </button>
             <button id="analysis-btn" class="analysis-btn" title="Graph analysis">
@@ -435,7 +434,7 @@
     </div>
 
     <div id="help-view" class="view-container">
-      <div class="help-container" id="help-content">
+      <div id="help-content" style="display:flex;flex:1;min-height:0;">
         <p class="empty-state">Loading help...</p>
       </div>
     </div>
