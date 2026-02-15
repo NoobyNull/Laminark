@@ -88,6 +88,7 @@ Recent decisions affecting current work:
 - [x] Add PreToolUse hook for proactive context injection — SHIPPED
 - [x] Add toggle to hide edge type labels on graph — SHIPPED
 - [ ] Add server-side SSE project filtering to prevent cross-project spillage
+- [ ] Build comprehensive help page with screenshots and cross-linked feature docs
 
 ### Blockers/Concerns
 
