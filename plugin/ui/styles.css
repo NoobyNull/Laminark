@@ -2874,6 +2874,37 @@ g.node-group.search-match path.node-shape {
 }
 
 /* ====================================================================
+   Graph Freeze Button (pause/resume live updates)
+   ==================================================================== */
+
+.graph-freeze-btn {
+  width: 32px;
+  height: 32px;
+  background: rgba(13, 17, 23, 0.85);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: color var(--transition), border-color var(--transition), background var(--transition);
+}
+
+.graph-freeze-btn:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.graph-freeze-btn.active {
+  color: var(--warning);
+  border-color: var(--warning);
+  background: rgba(210, 153, 34, 0.12);
+}
+
+/* ====================================================================
    Graph Sync Button (stale data indicator)
    ==================================================================== */
 

@@ -176,6 +176,7 @@ async function processUnembedded(): Promise<void> {
         text: truncatedText,
         sessionId: obs.sessionId ?? null,
         createdAt: obs.createdAt,
+        projectHash,
       });
 
       // Topic shift detection -- only evaluate user-directed observations

@@ -319,12 +319,13 @@ async function initProjectSelector() {
 
   select.addEventListener('change', function () {
     window.laminarkState.currentProject = select.value;
+    // Clear any pending batch updates from the previous project
+    if (window.laminarkGraph && window.laminarkGraph.clearBatchQueue) {
+      window.laminarkGraph.clearBatchQueue();
+    }
     // Reload all data for the new project
     if (window.laminarkGraph && window.laminarkState.graphInitialized) {
       window.laminarkGraph.loadGraphData();
-      if (window.laminarkGraph.loadPathOverlay) {
-        window.laminarkGraph.loadPathOverlay();
-      }
     }
     if (window.laminarkTimeline && window.laminarkState.timelineInitialized) {
       window.laminarkTimeline.loadTimelineData();
@@ -1485,7 +1486,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     if (!window.laminarkGraph) return;
     var data = e.detail;
     // Only add entities belonging to the currently selected project
-    if (data && data.id && (!data.projectHash || data.projectHash === window.laminarkState.currentProject)) {
+    if (data && data.id && data.projectHash && data.projectHash === window.laminarkState.currentProject) {
       window.laminarkGraph.queueBatchUpdate({
         type: 'addNode',
         data: {
@@ -1499,30 +1500,14 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
   });
 
-  document.addEventListener('laminark:new_observation', function () {
+  document.addEventListener('laminark:new_observation', function (e) {
+    var data = e.detail;
+    // Only refresh if observation belongs to current project
+    if (data && data.projectHash && data.projectHash !== window.laminarkState.currentProject) return;
     // Refresh observation counts by reloading graph data
     if (window.laminarkGraph) {
       var filters = getActiveFilters();
       window.laminarkGraph.loadGraphData(filters ? { type: filters.join(',') } : undefined);
-    }
-  });
-
-  // Path overlay event handlers (Plan 02 adds the graph overlay functions)
-  document.addEventListener('laminark:path_started', function (e) {
-    if (window.laminarkGraph && window.laminarkGraph.addPathOverlay) {
-      window.laminarkGraph.addPathOverlay(e.detail);
-    }
-  });
-
-  document.addEventListener('laminark:path_waypoint', function (e) {
-    if (window.laminarkGraph && window.laminarkGraph.updatePathOverlay) {
-      window.laminarkGraph.updatePathOverlay(e.detail);
-    }
-  });
-
-  document.addEventListener('laminark:path_resolved', function (e) {
-    if (window.laminarkGraph && window.laminarkGraph.resolvePathOverlay) {
-      window.laminarkGraph.resolvePathOverlay(e.detail);
     }
   });
 

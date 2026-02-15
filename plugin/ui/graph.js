@@ -194,9 +194,11 @@ var pathfinderSelection = []; // Max 2 node IDs: [startId, endId]
 var pathfinderResult = null; // { nodeIds: Set, edgeIds: Set, path: [{nodeId, edgeId}] }
 var pathfinderInfoEl = null;
 
-// Stale graph state (suppressed refresh while pathfinder result is showing)
+// Graph freeze state (suppresses SSE-driven refreshes)
+var graphFrozen = false;
 var graphStale = false;
 var syncBtnEl = null;
+var freezeBtnEl = null;
 
 // ---------------------------------------------------------------------------
 // initGraph
@@ -301,6 +303,7 @@ function initGraph(containerId) {
   initContextMenu();
   initEdgeLabelToggle();
   initPathfinderToggle();
+  initFreezeButton();
   initSyncButton();
 
   // Create tooltip element
@@ -660,10 +663,10 @@ async function loadGraphData(filters) {
     return { nodeCount: nodeData.length, edgeCount: edgeData.length };
   }
 
-  // Don't reload while pathfinder result is displayed — it would wipe
-  // the shortest-path visualization. Mark graph as stale so user can sync.
-  if (pathfinderResult) {
-    console.log('[laminark:graph] Skipping loadGraphData (pathfinder result showing)');
+  // Don't reload while graph is frozen (manual pause or pathfinder result).
+  // Data will be fetched when the user unfreezes or clicks sync.
+  if (graphFrozen) {
+    console.log('[laminark:graph] Skipping loadGraphData (graph frozen)');
     graphStale = true;
     updateSyncButton();
     return { nodeCount: nodeData.length, edgeCount: edgeData.length };
@@ -1417,6 +1420,12 @@ function queueBatchUpdate(update) {
   batchFlushTimer = setTimeout(flushBatchUpdates, BATCH_DELAY_MS);
 }
 
+function clearBatchQueue() {
+  if (batchFlushTimer) clearTimeout(batchFlushTimer);
+  batchFlushTimer = null;
+  batchQueue = [];
+}
+
 function flushBatchUpdates() {
   if (!svg || batchQueue.length === 0) return;
 
@@ -1460,9 +1469,9 @@ function flushBatchUpdates() {
   batchFlushTimer = null;
 
   if (newNodes > 0 || newEdges > 0) {
-    // Suppress rendering while pathfinder result is displayed
-    if (pathfinderResult) {
-      console.log('[laminark:graph] Batch data accumulated but render suppressed (pathfinder result showing)');
+    // Suppress rendering while graph is frozen
+    if (graphFrozen) {
+      console.log('[laminark:graph] Batch data accumulated but render suppressed (graph frozen)');
       graphStale = true;
       updateSyncButton();
       return;
@@ -2115,8 +2124,60 @@ if (document.readyState === 'loading') {
 }
 
 // ---------------------------------------------------------------------------
-// Sync button (appears when graph data arrives while pathfinder is showing)
+// Freeze button (pauses SSE-driven refreshes) + Sync button (reload stale data)
 // ---------------------------------------------------------------------------
+
+function initFreezeButton() {
+  // Add freeze toggle to the toolbar (toolbar is sibling of containerEl, not inside it)
+  var graphArea = containerEl ? containerEl.parentElement : null;
+  var toolbar = graphArea ? graphArea.querySelector('.graph-toolbar') : null;
+  if (!toolbar) return;
+
+  freezeBtnEl = document.createElement('button');
+  freezeBtnEl.className = 'graph-freeze-btn';
+  freezeBtnEl.title = 'Pause live updates';
+  freezeBtnEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 3.5A1.5 1.5 0 0 1 7 5v6a1.5 1.5 0 0 1-3 0V5a1.5 1.5 0 0 1 1.5-1.5zm5 0A1.5 1.5 0 0 1 12 5v6a1.5 1.5 0 0 1-3 0V5a1.5 1.5 0 0 1 1.5-1.5z"/></svg>';
+  freezeBtnEl.addEventListener('click', function () {
+    toggleGraphFrozen();
+  });
+  // Insert before the fit button (last in toolbar)
+  var fitBtn = toolbar.querySelector('.fit-btn');
+  if (fitBtn) {
+    toolbar.insertBefore(freezeBtnEl, fitBtn);
+  } else {
+    toolbar.appendChild(freezeBtnEl);
+  }
+}
+
+function toggleGraphFrozen() {
+  graphFrozen = !graphFrozen;
+  updateFreezeButton();
+
+  if (!graphFrozen && graphStale) {
+    // Unfreeze: reload pending data
+    graphStale = false;
+    clearPathfinder();
+    loadGraphData();
+    updateSyncButton();
+  }
+}
+
+function setGraphFrozen(frozen) {
+  graphFrozen = frozen;
+  updateFreezeButton();
+}
+
+function updateFreezeButton() {
+  if (!freezeBtnEl) return;
+  freezeBtnEl.classList.toggle('active', graphFrozen);
+  freezeBtnEl.title = graphFrozen ? 'Resume live updates' : 'Pause live updates';
+  // Swap icon: pause when live, play when frozen
+  if (graphFrozen) {
+    freezeBtnEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2l10 6-10 6V2z"/></svg>';
+  } else {
+    freezeBtnEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 3.5A1.5 1.5 0 0 1 7 5v6a1.5 1.5 0 0 1-3 0V5a1.5 1.5 0 0 1 1.5-1.5zm5 0A1.5 1.5 0 0 1 12 5v6a1.5 1.5 0 0 1-3 0V5a1.5 1.5 0 0 1 1.5-1.5z"/></svg>';
+  }
+}
 
 function initSyncButton() {
   if (!containerEl) return;
@@ -2125,6 +2186,8 @@ function initSyncButton() {
   syncBtnEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 0 1 11.25-4.4l-1.54 1.54A.5.5 0 0 0 11.56 6H15.5a.5.5 0 0 0 .5-.5V1.56a.5.5 0 0 0-.85-.35L13.6 2.76A8 8 0 0 0 0 8h1.5zm13 0a6.5 6.5 0 0 1-11.25 4.4l1.54-1.54A.5.5 0 0 0 4.44 10H.5a.5.5 0 0 0-.5.5v3.94a.5.5 0 0 0 .85.35l1.55-1.55A8 8 0 0 0 16 8h-1.5z"/></svg> Sync';
   syncBtnEl.addEventListener('click', function () {
     graphStale = false;
+    graphFrozen = false;
+    updateFreezeButton();
     clearPathfinder();
     loadGraphData();
     updateSyncButton();
@@ -2134,7 +2197,7 @@ function initSyncButton() {
 
 function updateSyncButton() {
   if (!syncBtnEl) return;
-  if (graphStale) {
+  if (graphStale && graphFrozen) {
     syncBtnEl.classList.remove('hidden');
     syncBtnEl.classList.add('stale');
   } else {
@@ -2189,6 +2252,8 @@ function handlePathfinderClick(d) {
     if (result) {
       pathfinderResult = result;
       visualizePathfinderResult(result);
+      // Auto-freeze to protect the path visualization
+      setGraphFrozen(true);
     } else {
       updatePathfinderInfo('No path found between these nodes');
     }
@@ -2341,6 +2406,7 @@ window.laminarkGraph = {
   hideDetailPanel: hideDetailPanel,
   selectAndCenterNode: selectAndCenterNode,
   queueBatchUpdate: queueBatchUpdate,
+  clearBatchQueue: clearBatchQueue,
   togglePerfOverlay: togglePerfOverlay,
   enterFocusMode: enterFocusMode,
   exitFocusMode: exitFocusMode,
@@ -2358,6 +2424,8 @@ window.laminarkGraph = {
   hideContextMenu: hideContextMenu,
   clearPathfinder: clearPathfinder,
   isPathfinderActive: function () { return pathfinderActive; },
+  isGraphFrozen: function () { return graphFrozen; },
+  toggleGraphFrozen: toggleGraphFrozen,
   toggleEdgeLabels: function (type) {
     if (type) {
       if (hiddenEdgeLabelTypes.has(type)) hiddenEdgeLabelTypes.delete(type);
