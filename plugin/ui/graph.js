@@ -31,17 +31,8 @@ const ENTITY_STYLES = {
   Reference: { color: '#f0883e', shape: 'hexagon' },
 };
 
-// Waypoint type colors for path overlay
-var WAYPOINT_TYPE_COLORS = {
-  error: '#f85149',
-  attempt: '#d29922',
-  failure: '#f0883e',
-  success: '#3fb950',
-  pivot: '#a371f7',
-  revert: '#79c0ff',
-  discovery: '#58a6ff',
-  resolution: '#3fb950',
-};
+// Pathfinder highlight color
+var PATHFINDER_COLOR = '#f0883e';
 
 // Relationship type colors for edge coloring
 var EDGE_TYPE_COLORS = {
@@ -197,10 +188,15 @@ var hiddenEdgeLabelTypes = new Set(
   JSON.parse(localStorage.getItem('laminark-hidden-edge-types') || '[]')
 );
 
-// Path overlay state
-var pathOverlayGroup = null;
-var pathOverlayVisible = localStorage.getItem('laminark-path-overlay') !== 'false';
-var pathData = []; // Array of { id, status, triggerSummary, waypoints: [{id, type, summary, nodeId?}] }
+// Pathfinder state
+var pathfinderActive = false;
+var pathfinderSelection = []; // Max 2 node IDs: [startId, endId]
+var pathfinderResult = null; // { nodeIds: Set, edgeIds: Set, path: [{nodeId, edgeId}] }
+var pathfinderInfoEl = null;
+
+// Stale graph state (suppressed refresh while pathfinder result is showing)
+var graphStale = false;
+var syncBtnEl = null;
 
 // ---------------------------------------------------------------------------
 // initGraph
@@ -252,7 +248,6 @@ function initGraph(containerId) {
   // Layer groups in paint order (back to front)
   edgesGroup = svgG.append('g').attr('class', 'edges-group');
   edgeLabelsGroup = svgG.append('g').attr('class', 'edge-labels-group');
-  pathOverlayGroup = svgG.append('g').attr('class', 'path-overlay-group');
   nodesGroup = svgG.append('g').attr('class', 'nodes-group');
   nodeLabelsGroup = svgG.append('g').attr('class', 'node-labels-group');
 
@@ -263,16 +258,16 @@ function initGraph(containerId) {
       svgG.attr('transform', event.transform);
       currentZoom = event.transform.k;
       updateLevelOfDetail();
-      renderPathOverlay();
     });
   svg.call(zoomBehavior);
 
-  // Background click: deselect + hide detail panel
+  // Background click: deselect + hide detail panel + clear pathfinder
   svg.on('click', function (event) {
     if (event.target === svg.node() || event.target.closest('.graph-zoom-group') === svgG.node() && !event.target.closest('.node-group')) {
       hideDetailPanel();
       selectedNodeId = null;
       if (nodesGroup) nodesGroup.selectAll('.node-group').classed('selected', false);
+      clearPathfinder();
     }
   });
 
@@ -305,7 +300,8 @@ function initGraph(containerId) {
 
   initContextMenu();
   initEdgeLabelToggle();
-  initPathOverlayToggle();
+  initPathfinderToggle();
+  initSyncButton();
 
   // Create tooltip element
   tooltipEl = document.createElement('div');
@@ -595,6 +591,12 @@ function dragEnded(event, d) {
 // ---------------------------------------------------------------------------
 
 async function handleNodeClick(d) {
+  // Pathfinder mode: collect start/end nodes
+  if (pathfinderActive) {
+    handlePathfinderClick(d);
+    return;
+  }
+
   selectedNodeId = d.id;
   if (nodesGroup) {
     nodesGroup.selectAll('.node-group').classed('selected', function (n) { return n.id === d.id; });
@@ -655,6 +657,15 @@ async function loadGraphData(filters) {
   // SSE reconnects and tab switches should not interrupt focus.
   if (isFocusMode) {
     console.log('[laminark:graph] Skipping loadGraphData (focus mode active)');
+    return { nodeCount: nodeData.length, edgeCount: edgeData.length };
+  }
+
+  // Don't reload while pathfinder result is displayed — it would wipe
+  // the shortest-path visualization. Mark graph as stale so user can sync.
+  if (pathfinderResult) {
+    console.log('[laminark:graph] Skipping loadGraphData (pathfinder result showing)');
+    graphStale = true;
+    updateSyncButton();
     return { nodeCount: nodeData.length, edgeCount: edgeData.length };
   }
 
@@ -725,11 +736,6 @@ async function loadGraphData(filters) {
     renderGraph();
     // Fit to view after simulation settles a bit
     setTimeout(function () { fitToView(); }, 800);
-  }
-
-  // Load path overlay after graph data
-  if (pathOverlayVisible) {
-    setTimeout(function () { loadPathOverlay(); }, 1000);
   }
 
   var counts = { nodeCount: data.nodes.length, edgeCount: data.edges.length };
@@ -1450,6 +1456,13 @@ function flushBatchUpdates() {
   batchFlushTimer = null;
 
   if (newNodes > 0 || newEdges > 0) {
+    // Suppress rendering while pathfinder result is displayed
+    if (pathfinderResult) {
+      console.log('[laminark:graph] Batch data accumulated but render suppressed (pathfinder result showing)');
+      graphStale = true;
+      updateSyncButton();
+      return;
+    }
     hideGraphEmptyState();
     renderGraph();
     if (!isStaticLayout && simulation) simulation.alpha(0.3).restart();
@@ -2098,182 +2111,209 @@ if (document.readyState === 'loading') {
 }
 
 // ---------------------------------------------------------------------------
-// Path overlay
+// Sync button (appears when graph data arrives while pathfinder is showing)
 // ---------------------------------------------------------------------------
 
-async function loadPathOverlay() {
-  if (!svg || !pathOverlayVisible) return;
-
-  try {
-    var params = new URLSearchParams();
-    if (window.laminarkState && window.laminarkState.currentProject) {
-      params.set('project', window.laminarkState.currentProject);
-    }
-    params.set('limit', '10');
-    var url = '/api/paths' + (params.toString() ? '?' + params.toString() : '');
-    var res = await fetch(url);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    var data = await res.json();
-    pathData = (data.paths || []).filter(function(p) { return p.status === 'active' || p.status === 'resolved'; });
-
-    // For each path, fetch waypoints
-    for (var i = 0; i < pathData.length; i++) {
-      try {
-        var detailRes = await fetch('/api/paths/' + encodeURIComponent(pathData[i].id));
-        if (detailRes.ok) {
-          var detail = await detailRes.json();
-          pathData[i].waypoints = detail.waypoints || [];
-        }
-      } catch (e) { pathData[i].waypoints = []; }
-    }
-
-    renderPathOverlay();
-  } catch (err) {
-    console.error('[laminark:graph] Failed to load path overlay:', err);
-  }
-}
-
-function renderPathOverlay() {
-  if (!pathOverlayGroup || !pathOverlayVisible) {
-    if (pathOverlayGroup) pathOverlayGroup.style('display', 'none');
-    return;
-  }
-  pathOverlayGroup.style('display', null);
-  pathOverlayGroup.selectAll('*').remove();
-
-  if (pathData.length === 0) return;
-
-  var width = containerEl ? containerEl.clientWidth : 800;
-  var height = containerEl ? containerEl.clientHeight : 600;
-
-  // Get current transform to position in screen space
-  var transform = d3.zoomTransform(svg.node());
-
-  pathData.forEach(function(path, pathIndex) {
-    if (!path.waypoints || path.waypoints.length === 0) return;
-
-    var pathGroup = pathOverlayGroup.append('g')
-      .attr('class', 'path-trail')
-      .attr('data-path-id', path.id);
-
-    // Position waypoints evenly spaced along a line
-    var waypoints = path.waypoints;
-    var margin = 80;
-    var yBase = (height - 60) / transform.k - transform.y / transform.k;
-    var xStart = (-transform.x / transform.k) + margin / transform.k;
-    var xEnd = (-transform.x / transform.k) + (width - margin) / transform.k;
-    var spacing = waypoints.length > 1 ? (xEnd - xStart) / (waypoints.length - 1) : 0;
-
-    var points = waypoints.map(function(wp, i) {
-      return { x: xStart + i * spacing, y: yBase + pathIndex * 40 / transform.k };
-    });
-
-    // Draw connecting line (animated dashed)
-    if (points.length > 1) {
-      var lineGen = d3.line()
-        .x(function(d) { return d.x; })
-        .y(function(d) { return d.y; })
-        .curve(d3.curveCatmullRom.alpha(0.5));
-
-      pathGroup.append('path')
-        .attr('class', 'path-line' + (path.status === 'active' ? ' path-line-active' : ''))
-        .attr('d', lineGen(points))
-        .attr('fill', 'none')
-        .attr('stroke', path.status === 'resolved' ? '#3fb950' : '#d29922')
-        .attr('stroke-width', 2.5 / transform.k)
-        .attr('stroke-dasharray', (6 / transform.k) + ' ' + (4 / transform.k))
-        .attr('opacity', 0.8);
-    }
-
-    // Draw waypoint markers
-    points.forEach(function(pt, i) {
-      var wp = waypoints[i];
-      var color = WAYPOINT_TYPE_COLORS[wp.waypoint_type] || '#8b949e';
-      var radius = 6 / transform.k;
-
-      var marker = pathGroup.append('g')
-        .attr('class', 'waypoint-marker')
-        .attr('transform', 'translate(' + pt.x + ',' + pt.y + ')')
-        .style('cursor', 'pointer');
-
-      marker.append('circle')
-        .attr('r', radius)
-        .attr('fill', color)
-        .attr('stroke', '#0d1117')
-        .attr('stroke-width', 1.5 / transform.k);
-
-      // Sequence number
-      marker.append('text')
-        .attr('text-anchor', 'middle')
-        .attr('dominant-baseline', 'central')
-        .attr('font-size', (8 / transform.k) + 'px')
-        .attr('fill', '#fff')
-        .attr('font-weight', '700')
-        .attr('pointer-events', 'none')
-        .text(wp.sequence_order);
-
-      // Tooltip on hover
-      marker.append('title')
-        .text(wp.waypoint_type + ': ' + (wp.summary || '').substring(0, 80));
-
-      // Click to show path detail
-      marker.on('click', function(event) {
-        event.stopPropagation();
-        if (window.laminarkApp && window.laminarkApp.fetchPathDetail) {
-          window.laminarkApp.fetchPathDetail(path.id).then(function(detail) {
-            if (detail) {
-              document.dispatchEvent(new CustomEvent('laminark:show_path_detail', { detail: detail }));
-            }
-          });
-        }
-      });
-    });
-
-    // Path label
-    if (points.length > 0) {
-      var labelX = points[0].x;
-      var labelY = points[0].y - 12 / transform.k;
-      pathGroup.append('text')
-        .attr('class', 'path-label')
-        .attr('x', labelX)
-        .attr('y', labelY)
-        .attr('font-size', (10 / transform.k) + 'px')
-        .attr('fill', path.status === 'resolved' ? '#3fb950' : '#d29922')
-        .attr('opacity', 0.9)
-        .text((path.trigger_summary || 'Debug Path').substring(0, 40));
-    }
+function initSyncButton() {
+  if (!containerEl) return;
+  syncBtnEl = document.createElement('button');
+  syncBtnEl.className = 'graph-sync-btn hidden';
+  syncBtnEl.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 8a6.5 6.5 0 0 1 11.25-4.4l-1.54 1.54A.5.5 0 0 0 11.56 6H15.5a.5.5 0 0 0 .5-.5V1.56a.5.5 0 0 0-.85-.35L13.6 2.76A8 8 0 0 0 0 8h1.5zm13 0a6.5 6.5 0 0 1-11.25 4.4l1.54-1.54A.5.5 0 0 0 4.44 10H.5a.5.5 0 0 0-.5.5v3.94a.5.5 0 0 0 .85.35l1.55-1.55A8 8 0 0 0 16 8h-1.5z"/></svg> Sync';
+  syncBtnEl.addEventListener('click', function () {
+    graphStale = false;
+    clearPathfinder();
+    loadGraphData();
+    updateSyncButton();
   });
+  containerEl.appendChild(syncBtnEl);
 }
 
-function addPathOverlay(pathEvent) {
-  loadPathOverlay();
+function updateSyncButton() {
+  if (!syncBtnEl) return;
+  if (graphStale) {
+    syncBtnEl.classList.remove('hidden');
+    syncBtnEl.classList.add('stale');
+  } else {
+    syncBtnEl.classList.add('hidden');
+    syncBtnEl.classList.remove('stale');
+  }
 }
 
-function updatePathOverlay(waypointEvent) {
-  loadPathOverlay();
-}
+// ---------------------------------------------------------------------------
+// Pathfinder: shortest path between two nodes
+// ---------------------------------------------------------------------------
 
-function resolvePathOverlay(resolveEvent) {
-  loadPathOverlay();
-}
-
-function initPathOverlayToggle() {
+function initPathfinderToggle() {
   var btn = document.getElementById('paths-toggle-btn');
   if (!btn) return;
 
-  btn.classList.toggle('active', pathOverlayVisible);
+  btn.classList.toggle('active', pathfinderActive);
 
-  btn.addEventListener('click', function() {
-    pathOverlayVisible = !pathOverlayVisible;
-    localStorage.setItem('laminark-path-overlay', pathOverlayVisible ? 'true' : 'false');
-    btn.classList.toggle('active', pathOverlayVisible);
-
-    if (pathOverlayVisible) {
-      loadPathOverlay();
-    } else {
-      if (pathOverlayGroup) pathOverlayGroup.style('display', 'none');
+  btn.addEventListener('click', function () {
+    pathfinderActive = !pathfinderActive;
+    btn.classList.toggle('active', pathfinderActive);
+    if (!pathfinderActive) {
+      clearPathfinder();
     }
   });
+}
+
+function handlePathfinderClick(d) {
+  if (pathfinderSelection.length === 0) {
+    // First node selected
+    pathfinderSelection = [d.id];
+    pathfinderResult = null;
+    clearPathfinderVisuals();
+    if (nodesGroup) {
+      nodesGroup.selectAll('.node-group')
+        .classed('pathfinder-start', function (n) { return n.id === d.id; })
+        .classed('pathfinder-end', false);
+    }
+    updatePathfinderInfo('Select target node...');
+  } else if (pathfinderSelection.length === 1) {
+    if (pathfinderSelection[0] === d.id) return; // Same node
+    pathfinderSelection.push(d.id);
+
+    // Mark end node
+    if (nodesGroup) {
+      nodesGroup.selectAll('.node-group')
+        .classed('pathfinder-end', function (n) { return n.id === d.id; });
+    }
+
+    // Run BFS
+    var result = bfsShortestPath(pathfinderSelection[0], pathfinderSelection[1]);
+    if (result) {
+      pathfinderResult = result;
+      visualizePathfinderResult(result);
+    } else {
+      updatePathfinderInfo('No path found between these nodes');
+    }
+  } else {
+    // Already have 2 — restart with this node as new start
+    pathfinderSelection = [d.id];
+    pathfinderResult = null;
+    clearPathfinderVisuals();
+    if (nodesGroup) {
+      nodesGroup.selectAll('.node-group')
+        .classed('pathfinder-start', function (n) { return n.id === d.id; })
+        .classed('pathfinder-end', false);
+    }
+    updatePathfinderInfo('Select target node...');
+  }
+}
+
+function bfsShortestPath(startId, endId) {
+  // Build adjacency from edgeData (treat as undirected)
+  var adj = {};
+  edgeData.forEach(function (e) {
+    var srcId = typeof e.source === 'object' ? e.source.id : e.source;
+    var tgtId = typeof e.target === 'object' ? e.target.id : e.target;
+    if (!adj[srcId]) adj[srcId] = [];
+    if (!adj[tgtId]) adj[tgtId] = [];
+    adj[srcId].push({ nodeId: tgtId, edgeId: e.id });
+    adj[tgtId].push({ nodeId: srcId, edgeId: e.id });
+  });
+
+  // BFS
+  var visited = new Set();
+  visited.add(startId);
+  var queue = [{ nodeId: startId, path: [{ nodeId: startId, edgeId: null }] }];
+
+  while (queue.length > 0) {
+    var current = queue.shift();
+    if (current.nodeId === endId) {
+      // Build result sets
+      var nodeIds = new Set();
+      var edgeIds = new Set();
+      var relTypes = [];
+      current.path.forEach(function (step) {
+        nodeIds.add(step.nodeId);
+        if (step.edgeId) {
+          edgeIds.add(step.edgeId);
+          var edge = edgeData.find(function (e) { return e.id === step.edgeId; });
+          if (edge) relTypes.push(edge.type);
+        }
+      });
+      return { nodeIds: nodeIds, edgeIds: edgeIds, path: current.path, relTypes: relTypes };
+    }
+
+    var neighbors = adj[current.nodeId] || [];
+    for (var i = 0; i < neighbors.length; i++) {
+      var nb = neighbors[i];
+      if (!visited.has(nb.nodeId)) {
+        visited.add(nb.nodeId);
+        queue.push({
+          nodeId: nb.nodeId,
+          path: current.path.concat([{ nodeId: nb.nodeId, edgeId: nb.edgeId }]),
+        });
+      }
+    }
+  }
+
+  return null; // No path found
+}
+
+function visualizePathfinderResult(result) {
+  if (!nodesGroup || !edgesGroup) return;
+
+  // Dim non-path nodes
+  nodesGroup.selectAll('.node-group')
+    .classed('search-dimmed', function (d) { return !result.nodeIds.has(d.id); })
+    .classed('pathfinder-start', function (d) { return d.id === pathfinderSelection[0]; })
+    .classed('pathfinder-end', function (d) { return d.id === pathfinderSelection[1]; });
+
+  nodeLabelsGroup.selectAll('.node-label')
+    .classed('search-dimmed', function (d) { return !result.nodeIds.has(d.id); });
+
+  // Dim non-path edges, highlight path edges
+  edgesGroup.selectAll('.edge')
+    .classed('search-dimmed', function (d) { return !result.edgeIds.has(d.id); })
+    .classed('path-highlight', function (d) { return result.edgeIds.has(d.id); });
+
+  edgeLabelsGroup.selectAll('.edge-label')
+    .classed('search-dimmed', function (d) { return !result.edgeIds.has(d.id); });
+
+  // Show info
+  var hops = result.path.length - 1;
+  var types = result.relTypes.join(' > ');
+  updatePathfinderInfo(hops + ' hop' + (hops !== 1 ? 's' : '') + ': ' + types);
+}
+
+function clearPathfinder() {
+  pathfinderSelection = [];
+  pathfinderResult = null;
+  clearPathfinderVisuals();
+  hidePathfinderInfo();
+}
+
+function clearPathfinderVisuals() {
+  if (!nodesGroup) return;
+  nodesGroup.selectAll('.node-group')
+    .classed('pathfinder-start', false)
+    .classed('pathfinder-end', false)
+    .classed('search-dimmed', false);
+  nodeLabelsGroup.selectAll('.node-label')
+    .classed('search-dimmed', false);
+  edgesGroup.selectAll('.edge')
+    .classed('search-dimmed', false)
+    .classed('path-highlight', false);
+  edgeLabelsGroup.selectAll('.edge-label')
+    .classed('search-dimmed', false);
+}
+
+function updatePathfinderInfo(text) {
+  if (!containerEl) return;
+  if (!pathfinderInfoEl) {
+    pathfinderInfoEl = document.createElement('div');
+    pathfinderInfoEl.className = 'pathfinder-info';
+    containerEl.appendChild(pathfinderInfoEl);
+  }
+  pathfinderInfoEl.textContent = text;
+  pathfinderInfoEl.style.display = '';
+}
+
+function hidePathfinderInfo() {
+  if (pathfinderInfoEl) pathfinderInfoEl.style.display = 'none';
 }
 
 // ---------------------------------------------------------------------------
@@ -2312,11 +2352,8 @@ window.laminarkGraph = {
   clearCommunityColors: clearCommunityColors,
   showLinkedNodesOfType: showLinkedNodesOfType,
   hideContextMenu: hideContextMenu,
-  addPathOverlay: addPathOverlay,
-  updatePathOverlay: updatePathOverlay,
-  resolvePathOverlay: resolvePathOverlay,
-  loadPathOverlay: loadPathOverlay,
-  isPathOverlayVisible: function() { return pathOverlayVisible; },
+  clearPathfinder: clearPathfinder,
+  isPathfinderActive: function () { return pathfinderActive; },
   toggleEdgeLabels: function (type) {
     if (type) {
       if (hiddenEdgeLabelTypes.has(type)) hiddenEdgeLabelTypes.delete(type);
