@@ -130,7 +130,14 @@
 
     var scope = getSelectedScope();
     var count = getAffectedCount(type);
-    var scopeLabel = scope === 'current' ? 'current project' : 'ALL projects';
+    var projectName = '';
+    if (scope === 'current') {
+      var select = document.getElementById('project-selector');
+      if (select && select.selectedOptions && select.selectedOptions[0]) {
+        projectName = select.selectedOptions[0].textContent;
+      }
+    }
+    var scopeLabel = scope === 'current' ? 'project "' + (projectName || 'unknown') + '"' : 'ALL projects';
 
     var title = document.getElementById('confirm-title');
     var desc = document.getElementById('confirm-desc');
