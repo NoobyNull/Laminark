@@ -5641,7 +5641,18 @@ const noGui = process.argv.includes("--no_gui");
 const db = openDatabase(getDatabaseConfig());
 initGraphSchema(db.db);
 initPathSchema(db.db);
-const projectHash = getProjectHash(process.cwd());
+function resolveProjectHash(sqliteDb) {
+	try {
+		const row = sqliteDb.prepare("SELECT project_hash FROM project_metadata ORDER BY last_seen_at DESC LIMIT 1").get();
+		if (row?.project_hash) {
+			debug("startup", "Resolved project hash from project_metadata", { hash: row.project_hash });
+			return row.project_hash;
+		}
+	} catch {}
+	debug("startup", "No project_metadata found, falling back to process.cwd()");
+	return getProjectHash(process.cwd());
+}
+const projectHash = resolveProjectHash(db.db);
 let toolRegistry = null;
 try {
 	toolRegistry = new ToolRegistryRepository(db.db);

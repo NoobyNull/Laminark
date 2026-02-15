@@ -49,11 +49,29 @@ const noGui = process.argv.includes('--no_gui');
 const db = openDatabase(getDatabaseConfig());
 initGraphSchema(db.db);
 initPathSchema(db.db);
-const projectHash = getProjectHash(process.cwd());
 
-// NOTE: project_metadata is populated by the SessionStart hook handler,
-// which receives the real project directory via input.cwd.
-// The MCP server's process.cwd() returns the plugin install path, not the project dir.
+// Resolve the correct project hash. The MCP server's process.cwd() returns the
+// plugin install path, not the user's project directory. Look up the most recently
+// active project from project_metadata (populated by the SessionStart hook which
+// receives the real project directory via input.cwd).
+function resolveProjectHash(sqliteDb: import('better-sqlite3').Database): string {
+  try {
+    const row = sqliteDb.prepare(
+      'SELECT project_hash FROM project_metadata ORDER BY last_seen_at DESC LIMIT 1'
+    ).get() as { project_hash: string } | undefined;
+    if (row?.project_hash) {
+      debug('startup', 'Resolved project hash from project_metadata', { hash: row.project_hash });
+      return row.project_hash;
+    }
+  } catch {
+    // Table may not exist yet on first run
+  }
+  // Fallback for first-ever run before any SessionStart has populated project_metadata
+  debug('startup', 'No project_metadata found, falling back to process.cwd()');
+  return getProjectHash(process.cwd());
+}
+
+const projectHash = resolveProjectHash(db.db);
 
 // Tool registry (cross-project, scope-aware)
 let toolRegistry: ToolRegistryRepository | null = null;
