@@ -1185,9 +1185,13 @@ function initEdgeLabelToggle() {
     dropdown.appendChild(row);
   });
 
-  // Insert dropdown after button
-  btn.parentElement.style.position = 'relative';
-  btn.insertAdjacentElement('afterend', dropdown);
+  // Insert dropdown after button — wrap btn in a relative container
+  // so the dropdown positions correctly without breaking the toolbar's absolute positioning
+  var btnWrapper = document.createElement('div');
+  btnWrapper.style.position = 'relative';
+  btn.parentElement.insertBefore(btnWrapper, btn);
+  btnWrapper.appendChild(btn);
+  btnWrapper.appendChild(dropdown);
 
   // Toggle dropdown on click
   btn.addEventListener('click', function (e) {
