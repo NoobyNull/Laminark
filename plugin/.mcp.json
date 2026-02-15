@@ -1,12 +1,11 @@
 {
   "mcpServers": {
     "laminark": {
-      "command": "npx",
+      "command": "bash",
       "args": [
-        "-y",
-        "-p",
-        "laminark",
-        "laminark-server"
+        "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-deps.sh",
+        "node",
+        "${CLAUDE_PLUGIN_ROOT}/dist/index.js"
       ]
     }
   }
