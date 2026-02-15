@@ -4,7 +4,9 @@ All notable changes to Laminark will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [v2.2] - 2026-02-14
+> **Note on versioning:** Starting with v2.2.0 (2026-02-14), Laminark uses semantic versioning aligned with milestone versions (v2.2.0, v2.3.0, etc). Previous releases used simple numeric versioning (v1-v14). Version v14 corresponds to the v2.1 milestone.
+
+## [2.2.0] - 2026-02-14
 
 ### Added
 - Automatic debug path detection from error patterns
@@ -15,13 +17,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Path detail panel with waypoint timeline
 - MCP tools: `start_path`, `resolve_path`, `show_path`, `list_paths`
 
-## [v2.1] - 2026-02-14
+## [2.1.0] - 2026-02-14
 
 ### Changed
 - Replaced regex entity extraction with Haiku AI agents
 - Migrated from @anthropic-ai/sdk to @anthropic-ai/claude-agent-sdk
 
-## [v2.0] - 2026-02-10
+## [2.0.0] - 2026-02-10
 
 ### Added
 - Global plugin installation with project-aware session bootstrapping
@@ -31,7 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Tool search with hybrid FTS5+vector search
 - Staleness management for tool registry
 
-## [v1.0] - 2026-02-09
+## [1.0.0] - 2026-02-09
 
 ### Added
 - SQLite storage engine with WAL and crash recovery
