@@ -16,22 +16,15 @@ Persistent adaptive memory for Claude Code. Automatically captures observations 
 
 ### Quick Install (Recommended)
 
-```bash
-npm install -g laminark
-```
-
-Then configure Claude Code:
+One command — no git clone needed:
 
 ```bash
-# Clone repo for install scripts (or download just the scripts)
-git clone https://github.com/NoobyNull/Laminark.git
-cd Laminark
-./plugin/scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/NoobyNull/Laminark/master/plugin/scripts/install.sh | bash
 ```
 
-The install script will:
-1. Install `laminark` globally via npm (if not already installed)
-2. Register the MCP server with `claude mcp add-json`
+This will:
+1. Install `laminark` globally via npm
+2. Register the MCP server with Claude Code
 3. Configure hooks in `~/.claude/settings.json`
 
 ### Local Installation (Development)
@@ -60,7 +53,7 @@ npm install -g laminark
 claude mcp add-json laminark '{"command":"laminark-server"}' -s user
 
 # Configure hooks manually in ~/.claude/settings.json
-# (see plugin/hooks/hooks.json for the hook structure)
+# (see install.sh for the hook structure)
 ```
 
 ### Post-Installation
@@ -68,7 +61,11 @@ claude mcp add-json laminark '{"command":"laminark-server"}' -s user
 Verify installation:
 
 ```bash
+# If installed from repo:
 ./plugin/scripts/verify-install.sh
+
+# Or check manually:
+npm list -g laminark && claude mcp list | grep laminark
 ```
 
 Laminark will now run in every Claude Code session. Each project's memory is isolated by directory path -- Project A and Project B never share data, but each project remembers across sessions.
@@ -82,17 +79,12 @@ npm update -g laminark
 
 ### Uninstalling
 
-Remove Laminark with optional data cleanup:
-
 ```bash
-./plugin/scripts/uninstall.sh
+claude mcp remove laminark -s user
+npm uninstall -g laminark
+# Then remove laminark hook entries from ~/.claude/settings.json
+# Optionally: rm -rf ~/.laminark  (deletes all memories)
 ```
-
-The uninstall script will:
-- Remove the MCP server registration
-- Remove hooks from `~/.claude/settings.json`
-- Uninstall the npm package
-- Optionally delete your data
 
 ## Why User-Level?
 

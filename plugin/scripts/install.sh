@@ -1,7 +1,8 @@
 #!/bin/bash
 # Install Laminark via npm + MCP server registration
+# Fully standalone — no git clone required.
 #
-# Usage: curl -fsSL <raw-url> | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/NoobyNull/Laminark/master/plugin/scripts/install.sh | bash
 #   or:  ./plugin/scripts/install.sh
 
 set -e
@@ -14,6 +15,12 @@ echo ""
 if ! command -v node &> /dev/null; then
   echo "Error: node not found"
   echo "Please install Node.js >= 22: https://nodejs.org"
+  exit 1
+fi
+
+NODE_MAJOR=$(node -e "console.log(process.versions.node.split('.')[0])")
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  echo "Error: Node.js >= 22 required (found v$(node -v))"
   exit 1
 fi
 
@@ -32,16 +39,11 @@ fi
 CURRENT_VERSION=$(npm list -g laminark --depth=0 2>/dev/null | grep laminark@ | sed 's/.*@//' || echo "")
 if [ -n "$CURRENT_VERSION" ]; then
   echo "Currently installed: v$CURRENT_VERSION"
-  echo ""
-  read -p "Update/reinstall? (Y/n): " -n 1 -r
-  echo ""
-  if [[ $REPLY =~ ^[Nn]$ ]]; then
-    echo "Installation cancelled."
-    exit 0
-  fi
+  echo "Reinstalling..."
 fi
 
 # Step 1: Install via npm
+echo ""
 echo "Installing laminark globally via npm..."
 npm install -g laminark
 echo "✓ npm package installed"
@@ -59,7 +61,11 @@ SETTINGS_FILE="${CLAUDE_HOME:-$HOME/.claude}/settings.json"
 
 node -e '
 const fs = require("fs");
+const path = require("path");
 const settingsPath = process.argv[1];
+
+// Ensure directory exists
+fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
 
 let settings = {};
 if (fs.existsSync(settingsPath)) {
@@ -80,16 +86,14 @@ const hookEvents = {
 for (const [event, hookConfig] of Object.entries(hookEvents)) {
   if (!settings.hooks[event]) settings.hooks[event] = [];
 
-  // Check if laminark hook already exists for this event
-  const exists = settings.hooks[event].some(entry =>
-    entry.hooks && entry.hooks.some(h => h.command && h.command.includes("laminark"))
+  // Remove any existing laminark hooks, then re-add (ensures up-to-date config)
+  settings.hooks[event] = settings.hooks[event].filter(entry =>
+    !(entry.hooks && entry.hooks.some(h => h.command && h.command.includes("laminark")))
   );
 
-  if (!exists) {
-    settings.hooks[event].push({
-      hooks: [hookConfig]
-    });
-  }
+  settings.hooks[event].push({
+    hooks: [hookConfig]
+  });
 }
 
 fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
