@@ -1,6 +1,6 @@
 {
   "name": "laminark",
-  "version": "2.21.7",
+  "version": "2.21.8",
   "description": "Persistent adaptive memory for Claude Code",
   "type": "module",
   "bin": {
