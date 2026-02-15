@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "laminark": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "-p",
+        "laminark",
+        "laminark-server"
+      ]
+    }
+  }
+}

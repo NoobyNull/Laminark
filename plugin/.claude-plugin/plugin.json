@@ -9,5 +9,5 @@
   "repository": "https://github.com/NoobyNull/Laminark",
   "license": "ISC",
   "keywords": ["memory", "mcp", "sqlite", "knowledge-graph", "semantic-search"],
-  "skills": "../skills/"
+  "skills": "./skills/"
 }
