@@ -70,10 +70,10 @@ For each observation, determine:
    - "problem": error, bug, failure, or obstacle encountered
    - "solution": fix, resolution, workaround, or decision that resolved something
 
-3. debug_signal (always, even for noise): Is this related to debugging?
-   - is_error: Does this contain an error message, test failure, build failure, or exception?
+3. debug_signal (always, even for noise): Is this related to ACTIVE debugging (the developer hit an actual error)?
+   - is_error: Did an actual error/failure OCCUR in this observation? An error message, stack trace, test failure, or build failure that happened RIGHT NOW. NOT research about errors — searching for "reconnection problems" or reading docs about error handling is NOT is_error. The tool itself must have failed or produced an error.
    - is_resolution: Does this indicate a successful fix, passing test, or resolved error?
-   - waypoint_hint: If debug-related, what type? "error" (hit an error), "attempt" (trying a fix), "failure" (fix didn't work), "success" (something passed), "pivot" (changing approach), "revert" (undoing a change), "discovery" (learned something), "resolution" (final fix). null if not debug-related.
+   - waypoint_hint: If debug-related, what type? "error" (an actual error occurred), "attempt" (trying a fix), "failure" (fix didn't work), "success" (something passed), "pivot" (changing approach), "revert" (undoing a change), "discovery" (learned something new), "resolution" (final fix). null if not debug-related. WebSearch/WebFetch/AskUserQuestion are typically "discovery" or null, NOT "error".
    - confidence: 0.0-1.0 how confident this is debug activity
 
 Return JSON: {"signal": "noise"|"signal", "classification": "discovery"|"problem"|"solution"|null, "reason": "brief", "debug_signal": {"is_error": bool, "is_resolution": bool, "waypoint_hint": "type"|null, "confidence": 0.0-1.0}|null}
