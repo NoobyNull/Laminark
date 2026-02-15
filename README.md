@@ -62,6 +62,35 @@ claude plugin list  # Should show laminark
 
 Laminark will now run in every Claude Code session. Each project's memory is isolated by directory path -- Project A and Project B never share data, but each project remembers across sessions.
 
+### Updating
+
+Check for and install updates:
+
+```bash
+./scripts/update.sh
+# Or: npm run update
+```
+
+The update script will:
+- Check your current version
+- Fetch the latest version from GitHub
+- Prompt before updating
+- Handle EXDEV errors automatically
+
+### Uninstalling
+
+Remove the plugin with optional data cleanup:
+
+```bash
+./scripts/uninstall.sh
+# Or: npm run uninstall
+```
+
+The uninstall script will:
+- Remove the plugin
+- Ask if you want to keep or delete your data
+- Clean up plugin cache
+
 ### Troubleshooting: EXDEV Errors
 
 If you see `EXDEV: cross-device link not permitted` errors:

@@ -27,7 +27,9 @@
     "test:watch": "vitest",
     "prepublishOnly": "npm run build",
     "install:local": "./scripts/local-install.sh",
-    "install:marketplace": "./scripts/install.sh"
+    "install:marketplace": "./scripts/install.sh",
+    "update": "./scripts/update.sh",
+    "uninstall": "./scripts/uninstall.sh"
   },
   "repository": {
     "type": "git",
