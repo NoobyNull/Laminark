@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-t8LZeB-u.mjs";
-import { C as MIGRATIONS, E as debugTimed, S as openDatabase, T as debug, _ as hybridSearch, a as inferScope, b as ObservationRepository, c as getEdgesForNode, d as initGraphSchema, f as insertEdge, g as jaccardSimilarity$1, h as SaveGuard, i as extractServerName, l as getNodeByNameAndType, m as upsertNode, n as NotificationStore, o as inferToolType, p as traverseFrom, r as ResearchBufferRepository, s as countEdgesForNode, t as ToolRegistryRepository, u as getNodesByType, v as SearchEngine, w as runMigrations, x as rowToObservation, y as SessionRepository } from "./tool-registry-BIjd5Evf.mjs";
+import { C as rowToObservation, D as debug, E as runMigrations, O as debugTimed, S as ObservationRepository, T as MIGRATIONS, _ as SaveGuard, a as ResearchBufferRepository, b as SearchEngine, c as inferToolType, d as getNodeByNameAndType, f as getNodesByType, g as upsertNode, h as traverseFrom, i as NotificationStore, l as countEdgesForNode, m as insertEdge, n as PathRepository, o as extractServerName, p as initGraphSchema, r as initPathSchema, s as inferScope, t as ToolRegistryRepository, u as getEdgesForNode, v as jaccardSimilarity$1, w as openDatabase, x as SessionRepository, y as hybridSearch } from "./tool-registry-CZ3mJ4iR.mjs";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -430,19 +430,19 @@ function formatTimelineGroup(date, items) {
 function formatFullItem(obs) {
 	return `--- ${shortId(obs.id)} | ${obs.title ?? "untitled"} | ${obs.createdAt} ---\n${obs.content}`;
 }
-function prependNotifications$5(notificationStore, projectHash, responseText) {
+function prependNotifications$6(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$6(text) {
+function textResponse$7(text) {
 	return { content: [{
 		type: "text",
 		text
 	}] };
 }
-function errorResponse$2(text) {
+function errorResponse$3(text) {
 	return {
 		content: [{
 			type: "text",
@@ -481,13 +481,13 @@ function registerRecall(server, db, projectHash, worker = null, embeddingStore =
 			include_purged: z.boolean().default(false).describe("Include soft-deleted items in results (needed for restore)")
 		}
 	}, async (args) => {
-		const withNotifications = (text) => textResponse$6(prependNotifications$5(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$7(prependNotifications$6(notificationStore, projectHash, text));
 		try {
 			const repo = new ObservationRepository(db, projectHash);
 			const searchEngine = new SearchEngine(db, projectHash);
 			const hasSearch = args.query !== void 0 || args.id !== void 0 || args.title !== void 0;
-			if (args.ids && hasSearch) return errorResponse$2("Provide either a search query or IDs to act on, not both.");
-			if ((args.action === "purge" || args.action === "restore") && !args.ids && !args.id) return errorResponse$2(`Provide ids array or id to specify which memories to ${args.action}.`);
+			if (args.ids && hasSearch) return errorResponse$3("Provide either a search query or IDs to act on, not both.");
+			if ((args.action === "purge" || args.action === "restore") && !args.ids && !args.id) return errorResponse$3(`Provide ids array or id to specify which memories to ${args.action}.`);
 			let observations = [];
 			let searchResults = null;
 			if (args.ids) {
@@ -526,7 +526,7 @@ function registerRecall(server, db, projectHash, worker = null, embeddingStore =
 			if (observations.length === 0) return withNotifications(`No memories found matching '${args.query ?? args.title ?? args.id ?? ""}'. Try broader search terms or check the ID.`);
 			if (args.action === "view") {
 				const originalText = formatViewResponse(observations, searchResults, args.detail, args.id !== void 0).content[0].text;
-				return textResponse$6(prependNotifications$5(notificationStore, projectHash, originalText));
+				return textResponse$7(prependNotifications$6(notificationStore, projectHash, originalText));
 			}
 			if (args.action === "purge") {
 				const targetIds = args.ids ?? (args.id ? [args.id] : []);
@@ -558,11 +558,11 @@ function registerRecall(server, db, projectHash, worker = null, embeddingStore =
 				if (failures.length > 0) msg += ` Not found: ${failures.join(", ")}`;
 				return withNotifications(msg);
 			}
-			return errorResponse$2(`Unknown action: ${args.action}`);
+			return errorResponse$3(`Unknown action: ${args.action}`);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "recall: error", { error: message });
-			return errorResponse$2(`Recall error: ${message}`);
+			return errorResponse$3(`Recall error: ${message}`);
 		}
 	});
 }
@@ -622,7 +622,7 @@ function formatViewResponse(observations, searchResults, detail, isSingleIdLooku
 	}
 	let footer = `---\n${observations.length} result(s) | ~${tokenEstimate} tokens | detail: ${detail}`;
 	if (truncated) footer += " | truncated (use id for full view)";
-	return textResponse$6(`${body}\n${footer}`);
+	return textResponse$7(`${body}\n${footer}`);
 }
 function buildScoreMap(searchResults) {
 	const map = /* @__PURE__ */ new Map();
@@ -785,13 +785,13 @@ function formatStashes(stashes) {
 	if (stashes.length <= 8) return formatDetail(stashes);
 	return formatCompact(stashes);
 }
-function prependNotifications$4(notificationStore, projectHash, responseText) {
+function prependNotifications$5(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$5(text) {
+function textResponse$6(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -813,7 +813,7 @@ function registerTopicContext(server, db, projectHash, notificationStore = null)
 			limit: z.number().int().min(1).max(20).default(5).describe("Max threads to return")
 		}
 	}, async (args) => {
-		const withNotifications = (text) => textResponse$5(prependNotifications$4(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$6(prependNotifications$5(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "topic_context: request", {
 				query: args.query,
@@ -832,7 +832,7 @@ function registerTopicContext(server, db, projectHash, notificationStore = null)
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "topic_context: error", { error: message });
-			return textResponse$5(`Error retrieving context threads: ${message}`);
+			return textResponse$6(`Error retrieving context threads: ${message}`);
 		}
 	});
 }
@@ -937,19 +937,19 @@ function formatAge(isoDate) {
 	const months = Math.floor(days / 30);
 	return `${months} month${months !== 1 ? "s" : ""} ago`;
 }
-function prependNotifications$3(notificationStore, projectHash, responseText) {
+function prependNotifications$4(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$4(text) {
+function textResponse$5(text) {
 	return { content: [{
 		type: "text",
 		text
 	}] };
 }
-function errorResponse$1(text) {
+function errorResponse$2(text) {
 	return {
 		content: [{
 			type: "text",
@@ -977,17 +977,17 @@ function registerQueryGraph(server, db, projectHash, notificationStore = null) {
 			limit: z.number().int().min(1).max(50).default(20).describe("Max root entities to return (default: 20, max: 50)")
 		}
 	}, async (args) => {
-		const withNotifications = (text) => textResponse$4(prependNotifications$3(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$5(prependNotifications$4(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "query_graph: request", {
 				query: args.query,
 				entity_type: args.entity_type,
 				depth: args.depth
 			});
-			if (args.entity_type !== void 0 && !isEntityType(args.entity_type)) return errorResponse$1(`Invalid entity_type "${args.entity_type}". Valid types: ${ENTITY_TYPES.join(", ")}`);
+			if (args.entity_type !== void 0 && !isEntityType(args.entity_type)) return errorResponse$2(`Invalid entity_type "${args.entity_type}". Valid types: ${ENTITY_TYPES.join(", ")}`);
 			const entityType = args.entity_type;
 			if (args.relationship_types) {
-				for (const rt of args.relationship_types) if (!isRelationshipType(rt)) return errorResponse$1(`Invalid relationship_type "${rt}". Valid types: ${RELATIONSHIP_TYPES.join(", ")}`);
+				for (const rt of args.relationship_types) if (!isRelationshipType(rt)) return errorResponse$2(`Invalid relationship_type "${rt}". Valid types: ${RELATIONSHIP_TYPES.join(", ")}`);
 			}
 			const relationshipTypes = args.relationship_types;
 			const rootNodes = [];
@@ -1058,7 +1058,7 @@ function registerQueryGraph(server, db, projectHash, notificationStore = null) {
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "query_graph: error", { error: message });
-			return errorResponse$1(`Graph query error: ${message}`);
+			return errorResponse$2(`Graph query error: ${message}`);
 		}
 	});
 }
@@ -1329,13 +1329,13 @@ function formatStats(stats) {
 	}
 	return lines.join("\n");
 }
-function prependNotifications$2(notificationStore, projectHash, responseText) {
+function prependNotifications$3(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$3(text) {
+function textResponse$4(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1363,24 +1363,24 @@ function registerGraphStats(server, db, projectHash, notificationStore = null) {
 				nodes: stats.total_nodes,
 				edges: stats.total_edges
 			});
-			return textResponse$3(prependNotifications$2(notificationStore, projectHash, formatted));
+			return textResponse$4(prependNotifications$3(notificationStore, projectHash, formatted));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "graph_stats: error", { error: message });
-			return textResponse$3(`Graph stats error: ${message}`);
+			return textResponse$4(`Graph stats error: ${message}`);
 		}
 	});
 }
 
 //#endregion
 //#region src/mcp/tools/status.ts
-function prependNotifications$1(notificationStore, projectHash, responseText) {
+function prependNotifications$2(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$2(text) {
+function textResponse$3(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1394,11 +1394,11 @@ function registerStatus(server, cache, projectHash, notificationStore = null) {
 	}, async () => {
 		try {
 			debug("mcp", "status: request (cached)");
-			return textResponse$2(prependNotifications$1(notificationStore, projectHash, cache.getFormatted()));
+			return textResponse$3(prependNotifications$2(notificationStore, projectHash, cache.getFormatted()));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "status: error", { error: message });
-			return textResponse$2(`Status error: ${message}`);
+			return textResponse$3(`Status error: ${message}`);
 		}
 	});
 }
@@ -1509,13 +1509,13 @@ var StatusCache = class {
 
 //#endregion
 //#region src/mcp/tools/discover-tools.ts
-function textResponse$1(text) {
+function textResponse$2(text) {
 	return { content: [{
 		type: "text",
 		text
 	}] };
 }
-function errorResponse(text) {
+function errorResponse$1(text) {
 	return {
 		content: [{
 			type: "text",
@@ -1524,7 +1524,7 @@ function errorResponse(text) {
 		isError: true
 	};
 }
-function prependNotifications(notificationStore, projectHash, responseText) {
+function prependNotifications$1(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
@@ -1559,7 +1559,7 @@ function registerDiscoverTools(server, toolRegistry, worker, hasVectorSupport, n
 			limit: z.number().int().min(1).max(50).default(20).describe("Maximum results to return (default: 20)")
 		}
 	}, async (args) => {
-		const withNotifications = (text) => textResponse$1(prependNotifications(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$2(prependNotifications$1(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "discover_tools: request", {
 				query: args.query,
@@ -1597,14 +1597,14 @@ function registerDiscoverTools(server, toolRegistry, worker, hasVectorSupport, n
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "discover_tools: error", { error: message });
-			return errorResponse(`Discover tools error: ${message}`);
+			return errorResponse$1(`Discover tools error: ${message}`);
 		}
 	});
 }
 
 //#endregion
 //#region src/mcp/tools/report-tools.ts
-function textResponse(text) {
+function textResponse$1(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1653,7 +1653,7 @@ function registerReportTools(server, toolRegistry, projectHash) {
 				registered,
 				skipped
 			});
-			return textResponse(`Registered ${registered} tools in the tool registry.${skipped > 0 ? ` Skipped ${skipped} Laminark tools (already known).` : ""}`);
+			return textResponse$1(`Registered ${registered} tools in the tool registry.${skipped > 0 ? ` Skipped ${skipped} Laminark tools (already known).` : ""}`);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "report_available_tools: error", { error: message });
@@ -1664,6 +1664,170 @@ function registerReportTools(server, toolRegistry, projectHash) {
 				}],
 				isError: true
 			};
+		}
+	});
+}
+
+//#endregion
+//#region src/mcp/tools/debug-paths.ts
+function prependNotifications(notificationStore, projectHash, responseText) {
+	if (!notificationStore) return responseText;
+	const pending = notificationStore.consumePending(projectHash);
+	if (pending.length === 0) return responseText;
+	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
+}
+function textResponse(text) {
+	return { content: [{
+		type: "text",
+		text
+	}] };
+}
+function errorResponse(text) {
+	return {
+		content: [{
+			type: "text",
+			text
+		}],
+		isError: true
+	};
+}
+function formatKissSummary(raw) {
+	if (!raw) return "KISS summary not yet generated";
+	try {
+		const kiss = JSON.parse(raw);
+		const lines = [];
+		lines.push(`**Next time:** ${kiss.kiss_summary}`);
+		lines.push(`**Root cause:** ${kiss.root_cause}`);
+		lines.push(`**What fixed it:** ${kiss.what_fixed_it}`);
+		lines.push(`**Logical:** ${kiss.dimensions.logical}`);
+		lines.push(`**Programmatic:** ${kiss.dimensions.programmatic}`);
+		lines.push(`**Development:** ${kiss.dimensions.development}`);
+		return lines.join("\n");
+	} catch {
+		return "KISS summary not yet generated";
+	}
+}
+/**
+* Registers four debug path MCP tools on the server.
+*
+* Tools: path_start, path_resolve, path_show, path_list
+*/
+function registerDebugPathTools(server, pathRepo, pathTracker, notificationStore, projectHash) {
+	server.registerTool("path_start", {
+		title: "Start Debug Path",
+		description: "Explicitly start tracking a debug path. Use when auto-detection hasn't triggered but you're actively debugging.",
+		inputSchema: { trigger: z.string().describe("Brief description of the issue being debugged") }
+	}, async (args) => {
+		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
+		try {
+			debug("mcp", "path_start: request", { trigger: args.trigger });
+			const existingPathId = pathTracker.getActivePathId();
+			const pathId = pathTracker.startManually(args.trigger);
+			if (!pathId) return errorResponse("Failed to start debug path");
+			if (existingPathId && existingPathId === pathId) return withNotifications(`Debug path already active: ${pathId}`);
+			return withNotifications(`Debug path started: ${pathId}\nTracking: ${args.trigger}`);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Unknown error";
+			debug("mcp", "path_start: error", { error: message });
+			return errorResponse(`path_start error: ${message}`);
+		}
+	});
+	server.registerTool("path_resolve", {
+		title: "Resolve Debug Path",
+		description: "Explicitly resolve the active debug path with a resolution summary. Use when auto-detection hasn't detected resolution.",
+		inputSchema: { resolution: z.string().describe("What fixed the issue") }
+	}, async (args) => {
+		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
+		try {
+			debug("mcp", "path_resolve: request", { resolution: args.resolution });
+			const pathId = pathTracker.getActivePathId();
+			if (!pathId) return errorResponse("No active debug path to resolve");
+			pathTracker.resolveManually(args.resolution);
+			return withNotifications(`Debug path resolved: ${pathId}\nResolution: ${args.resolution}\nKISS summary generating in background...`);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Unknown error";
+			debug("mcp", "path_resolve: error", { error: message });
+			return errorResponse(`path_resolve error: ${message}`);
+		}
+	});
+	server.registerTool("path_show", {
+		title: "Show Debug Path",
+		description: "Show a debug path with its waypoints and KISS summary.",
+		inputSchema: { path_id: z.string().optional().describe("Path ID to show. Omit for active path.") }
+	}, async (args) => {
+		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
+		try {
+			debug("mcp", "path_show: request", { path_id: args.path_id });
+			let pathData;
+			if (args.path_id) {
+				pathData = pathRepo.getPath(args.path_id);
+				if (!pathData) return errorResponse(`Debug path not found: ${args.path_id}`);
+			} else {
+				pathData = pathRepo.getActivePath();
+				if (!pathData) return errorResponse("No active debug path");
+			}
+			const waypoints = pathRepo.getWaypoints(pathData.id);
+			const lines = [];
+			lines.push(`## Debug Path: ${pathData.id}`);
+			lines.push(`Status: ${pathData.status}`);
+			lines.push(`Started: ${pathData.started_at}`);
+			lines.push(`Trigger: ${pathData.trigger_summary}`);
+			lines.push("");
+			lines.push(`### Waypoints (${waypoints.length})`);
+			for (let i = 0; i < waypoints.length; i++) {
+				const wp = waypoints[i];
+				lines.push(`${i + 1}. [${wp.waypoint_type}] ${wp.summary} (${wp.created_at})`);
+			}
+			lines.push("");
+			lines.push("### Resolution");
+			lines.push(pathData.resolution_summary ?? "Still active");
+			lines.push("");
+			lines.push("### KISS Summary");
+			lines.push(formatKissSummary(pathData.kiss_summary));
+			return withNotifications(lines.join("\n"));
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Unknown error";
+			debug("mcp", "path_show: error", { error: message });
+			return errorResponse(`path_show error: ${message}`);
+		}
+	});
+	server.registerTool("path_list", {
+		title: "List Debug Paths",
+		description: "List recent debug paths, optionally filtered by status.",
+		inputSchema: {
+			status: z.enum([
+				"active",
+				"resolved",
+				"abandoned"
+			]).optional().describe("Filter by status"),
+			limit: z.number().int().min(1).max(50).default(10).describe("Max paths to return")
+		}
+	}, async (args) => {
+		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
+		try {
+			debug("mcp", "path_list: request", {
+				status: args.status,
+				limit: args.limit
+			});
+			let paths = pathRepo.listPaths(args.limit);
+			if (args.status) paths = paths.filter((p) => p.status === args.status);
+			if (paths.length === 0) return withNotifications("No debug paths found");
+			const lines = [];
+			lines.push("## Debug Paths");
+			lines.push("");
+			lines.push("| ID (short) | Status | Trigger | Started | Resolved |");
+			lines.push("|------------|--------|---------|---------|----------|");
+			for (const p of paths) {
+				const shortId = p.id.slice(0, 8);
+				const trigger = p.trigger_summary.length > 50 ? p.trigger_summary.slice(0, 50) + "..." : p.trigger_summary;
+				const resolved = p.resolved_at ?? "-";
+				lines.push(`| ${shortId} | ${p.status} | ${trigger} | ${p.started_at} | ${resolved} |`);
+			}
+			return withNotifications(lines.join("\n"));
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Unknown error";
+			debug("mcp", "path_list: error", { error: message });
+			return errorResponse(`path_list error: ${message}`);
 		}
 	});
 }
@@ -3500,10 +3664,26 @@ function extractJsonFromResponse(text) {
 * Uses a single Haiku call to determine:
 * 1. Whether an observation is noise or signal
 * 2. If signal, what kind of observation it is (discovery/problem/solution)
+* 3. Whether the observation contains debug signals (error/resolution detection)
 *
 * Replaces both the regex-based noise-patterns.ts/signal-classifier.ts and the
 * broken MCP sampling observation-classifier.ts with a single focused LLM call.
 */
+const DebugSignalSchema = z.object({
+	is_error: z.boolean(),
+	is_resolution: z.boolean(),
+	waypoint_hint: z.enum([
+		"error",
+		"attempt",
+		"failure",
+		"success",
+		"pivot",
+		"revert",
+		"discovery",
+		"resolution"
+	]).nullable(),
+	confidence: z.number()
+}).nullable();
 const ClassificationSchema = z.object({
 	signal: z.enum(["noise", "signal"]),
 	classification: z.enum([
@@ -3511,9 +3691,10 @@ const ClassificationSchema = z.object({
 		"problem",
 		"solution"
 	]).nullable(),
-	reason: z.string()
+	reason: z.string(),
+	debug_signal: DebugSignalSchema.default(null)
 });
-const SYSTEM_PROMPT$2 = `You classify developer observations for a knowledge management system.
+const SYSTEM_PROMPT$3 = `You classify developer observations for a knowledge management system.
 
 For each observation, determine:
 1. signal: Is this noise or signal?
@@ -3525,8 +3706,14 @@ For each observation, determine:
    - "problem": error, bug, failure, or obstacle encountered
    - "solution": fix, resolution, workaround, or decision that resolved something
 
-Return JSON: {"signal": "noise"|"signal", "classification": "discovery"|"problem"|"solution"|null, "reason": "brief explanation"}
-If noise, classification must be null.
+3. debug_signal (always, even for noise): Is this related to debugging?
+   - is_error: Does this contain an error message, test failure, build failure, or exception?
+   - is_resolution: Does this indicate a successful fix, passing test, or resolved error?
+   - waypoint_hint: If debug-related, what type? "error" (hit an error), "attempt" (trying a fix), "failure" (fix didn't work), "success" (something passed), "pivot" (changing approach), "revert" (undoing a change), "discovery" (learned something), "resolution" (final fix). null if not debug-related.
+   - confidence: 0.0-1.0 how confident this is debug activity
+
+Return JSON: {"signal": "noise"|"signal", "classification": "discovery"|"problem"|"solution"|null, "reason": "brief", "debug_signal": {"is_error": bool, "is_resolution": bool, "waypoint_hint": "type"|null, "confidence": 0.0-1.0}|null}
+If noise, classification must be null. debug_signal can be non-null even for noise (e.g., build failure output is noise but debug-relevant).
 No markdown, no explanation, ONLY the JSON object.`;
 /**
 * Classifies an observation as noise/signal and determines its kind using Haiku.
@@ -3538,7 +3725,7 @@ No markdown, no explanation, ONLY the JSON object.`;
 async function classifyWithHaiku(text, source) {
 	let userContent = text;
 	if (source) userContent = `Source: ${source}\n\nObservation:\n${text}`;
-	const parsed = extractJsonFromResponse(await callHaiku(SYSTEM_PROMPT$2, userContent, 256));
+	const parsed = extractJsonFromResponse(await callHaiku(SYSTEM_PROMPT$3, userContent, 512));
 	return ClassificationSchema.parse(parsed);
 }
 
@@ -3557,7 +3744,7 @@ const EntitySchema = z.object({
 	confidence: z.number().min(0).max(1)
 });
 const EntityArraySchema = z.array(EntitySchema);
-const SYSTEM_PROMPT$1 = `You extract structured entities from developer observations.
+const SYSTEM_PROMPT$2 = `You extract structured entities from developer observations.
 
 Entity types (use ONLY these exact strings):
 - File: file paths (src/foo/bar.ts, package.json, ./config.yml)
@@ -3581,7 +3768,7 @@ Rules:
 * @returns Validated array of extracted entities with type and confidence
 */
 async function extractEntitiesWithHaiku(text) {
-	const parsed = extractJsonFromResponse(await callHaiku(SYSTEM_PROMPT$1, text, 512));
+	const parsed = extractJsonFromResponse(await callHaiku(SYSTEM_PROMPT$2, text, 512));
 	return EntityArraySchema.parse(parsed);
 }
 
@@ -3602,7 +3789,7 @@ const RelationshipSchema = z.object({
 	confidence: z.number().min(0).max(1)
 });
 const RelationshipArraySchema = z.array(RelationshipSchema);
-const SYSTEM_PROMPT = `You infer relationships between entities extracted from a developer observation.
+const SYSTEM_PROMPT$1 = `You infer relationships between entities extracted from a developer observation.
 
 Given observation text and a list of entities, determine which entities are related and how.
 
@@ -3631,7 +3818,7 @@ Rules:
 * @returns Validated array of inferred relationships with type and confidence
 */
 async function inferRelationshipsWithHaiku(text, entities) {
-	const parsed = extractJsonFromResponse(await callHaiku(SYSTEM_PROMPT, `Observation:\n${text}\n\nEntities found:\n${JSON.stringify(entities.map((e) => ({
+	const parsed = extractJsonFromResponse(await callHaiku(SYSTEM_PROMPT$1, `Observation:\n${text}\n\nEntities found:\n${JSON.stringify(entities.map((e) => ({
 		name: e.name,
 		type: e.type
 	})))}`, 512));
@@ -3929,6 +4116,7 @@ var HaikuProcessor = class {
 	intervalMs;
 	batchSize;
 	concurrency;
+	pathTracker;
 	timer = null;
 	constructor(db, projectHash, opts) {
 		this.db = db;
@@ -3936,6 +4124,7 @@ var HaikuProcessor = class {
 		this.intervalMs = opts?.intervalMs ?? 3e4;
 		this.batchSize = opts?.batchSize ?? 10;
 		this.concurrency = opts?.concurrency ?? 3;
+		this.pathTracker = opts?.pathTracker ?? null;
 	}
 	start() {
 		if (this.timer) return;
@@ -3973,6 +4162,15 @@ var HaikuProcessor = class {
 			let classification;
 			try {
 				const result = await classifyWithHaiku(obs.content, obs.source);
+				if (this.pathTracker && result.debug_signal) try {
+					this.pathTracker.processSignal(result.debug_signal, obs.id, obs.content);
+				} catch (pathErr) {
+					const msg = pathErr instanceof Error ? pathErr.message : String(pathErr);
+					debug("haiku", "Path tracking failed (non-fatal)", {
+						id: obs.id,
+						error: msg
+					});
+				}
 				if (result.signal === "noise") {
 					repo.updateClassification(obs.id, "noise");
 					repo.softDelete(obs.id);
@@ -4076,6 +4274,265 @@ var HaikuProcessor = class {
 				error: msg
 			});
 		}
+	}
+};
+
+//#endregion
+//#region src/paths/kiss-summary-agent.ts
+/**
+* KISS summary agent — generates actionable "next time, just do X" summaries.
+*
+* When a debug path resolves, this agent analyzes the waypoints (errors,
+* attempts, failures, resolution) and produces a multi-layer summary:
+*   - kiss_summary: The one-liner takeaway
+*   - root_cause: What actually caused the issue
+*   - what_fixed_it: The specific fix that resolved it
+*   - dimensions: logical, programmatic, development perspectives
+*
+* Uses the shared Haiku client (callHaiku + extractJsonFromResponse) following
+* the same pattern as haiku-classifier-agent.ts.
+*/
+const KissSummarySchema = z.object({
+	kiss_summary: z.string(),
+	root_cause: z.string(),
+	what_fixed_it: z.string(),
+	dimensions: z.object({
+		logical: z.string(),
+		programmatic: z.string(),
+		development: z.string()
+	})
+});
+const SYSTEM_PROMPT = `You analyze completed debug resolution paths and produce actionable summaries.
+
+Given a debug path with its trigger, waypoints (errors, attempts, failures, resolution), and resolution summary, generate:
+
+1. kiss_summary: A "Next time, just do X" one-liner. This is the actionable takeaway a developer should remember.
+2. root_cause: What actually caused the issue (1-2 sentences max).
+3. what_fixed_it: The specific fix or change that resolved it (1-2 sentences max).
+4. dimensions:
+   - logical: What mental model was wrong? What assumption led the developer astray? (1-2 sentences)
+   - programmatic: What code-level change fixed it? Be specific about files, functions, or patterns. (1-2 sentences)
+   - development: What workflow improvement would catch this faster next time? (1-2 sentences)
+
+Keep every field concise. Developers will scan these quickly.
+Return ONLY JSON, no markdown, no explanation.`;
+const KEY_WAYPOINT_TYPES = new Set([
+	"error",
+	"failure",
+	"success",
+	"resolution",
+	"discovery"
+]);
+/**
+* Generates a KISS summary for a resolved debug path.
+*
+* Pre-filters waypoints to key types (error, failure, success, resolution,
+* discovery) and caps at 10 to keep the prompt small. Returns a structured
+* KissSummary with multi-layer dimensions.
+*
+* @param triggerSummary - What started the debug path
+* @param waypoints - All waypoints from the path
+* @param resolutionSummary - How the path was resolved
+* @returns Structured KISS summary with dimensions
+*/
+async function generateKissSummary(triggerSummary, waypoints, resolutionSummary) {
+	const parsed = extractJsonFromResponse(await callHaiku(SYSTEM_PROMPT, `Trigger: ${triggerSummary}
+
+Waypoints:
+${waypoints.filter((w) => KEY_WAYPOINT_TYPES.has(w.waypoint_type)).slice(0, 10).map((w) => `- [${w.waypoint_type}] ${w.summary}`).join("\n")}
+
+Resolution: ${resolutionSummary}`));
+	return KissSummarySchema.parse(parsed);
+}
+
+//#endregion
+//#region src/paths/path-tracker.ts
+var PathTracker = class {
+	state = "idle";
+	errorBuffer = [];
+	consecutiveSuccesses = 0;
+	currentPathId = null;
+	errorThreshold;
+	windowMs;
+	resolutionThreshold;
+	maxWaypoints;
+	constructor(repo, opts) {
+		this.repo = repo;
+		this.errorThreshold = opts?.errorThreshold ?? 3;
+		this.windowMs = opts?.windowMs ?? 300 * 1e3;
+		this.resolutionThreshold = opts?.resolutionThreshold ?? 3;
+		this.maxWaypoints = opts?.maxWaypoints ?? 30;
+		const activePath = this.repo.getActivePath();
+		if (activePath) {
+			this.state = "active_debug";
+			this.currentPathId = activePath.id;
+			debug("paths", "Recovered active path from SQLite", { pathId: activePath.id });
+		}
+	}
+	/**
+	* Process a debug signal from the Haiku classifier.
+	*
+	* Called for every classified observation (both noise and signal).
+	* Drives state transitions and persists waypoints when in active_debug.
+	*/
+	processSignal(signal, observationId, observationContent) {
+		if (signal.confidence < .3) return;
+		const summary = observationContent.substring(0, 200).trim();
+		switch (this.state) {
+			case "idle":
+				this.handleIdle(signal, summary);
+				break;
+			case "potential_debug":
+				this.handlePotentialDebug(signal, summary, observationId);
+				break;
+			case "active_debug":
+				this.handleActiveDebug(signal, summary, observationId);
+				break;
+			case "resolved":
+				this.state = "idle";
+				debug("paths", "Transitioned resolved -> idle");
+				this.handleIdle(signal, summary);
+				break;
+		}
+	}
+	handleIdle(signal, summary) {
+		if (signal.is_error && signal.confidence >= .5) {
+			this.errorBuffer.push({
+				timestamp: Date.now(),
+				summary
+			});
+			this.state = "potential_debug";
+			debug("paths", "Transitioned idle -> potential_debug", { bufferSize: this.errorBuffer.length });
+		}
+	}
+	handlePotentialDebug(signal, summary, observationId) {
+		if (signal.is_error && signal.confidence >= .5) this.errorBuffer.push({
+			timestamp: Date.now(),
+			summary
+		});
+		const cutoff = Date.now() - this.windowMs;
+		this.errorBuffer = this.errorBuffer.filter((e) => e.timestamp >= cutoff);
+		if (this.errorBuffer.length === 0) {
+			this.state = "idle";
+			debug("paths", "Error buffer expired, potential_debug -> idle");
+			return;
+		}
+		if (this.errorBuffer.length >= this.errorThreshold) {
+			const triggerSummary = this.errorBuffer[0].summary;
+			const path = this.repo.createPath(triggerSummary);
+			this.currentPathId = path.id;
+			this.state = "active_debug";
+			this.consecutiveSuccesses = 0;
+			debug("paths", "Debug path confirmed, potential_debug -> active_debug", {
+				pathId: path.id,
+				errorCount: this.errorBuffer.length
+			});
+			for (const entry of this.errorBuffer) this.repo.addWaypoint(path.id, "error", entry.summary, observationId);
+			this.errorBuffer = [];
+		}
+	}
+	handleActiveDebug(signal, summary, observationId) {
+		if (!this.currentPathId) return;
+		if (this.repo.countWaypoints(this.currentPathId) >= this.maxWaypoints) {
+			debug("paths", "Waypoint cap reached, skipping", {
+				pathId: this.currentPathId,
+				cap: this.maxWaypoints
+			});
+			this.updateResolutionCounter(signal, summary, observationId);
+			return;
+		}
+		let waypointType;
+		if (signal.waypoint_hint) waypointType = signal.waypoint_hint;
+		else if (signal.is_error) waypointType = "error";
+		else if (signal.is_resolution) waypointType = "success";
+		else waypointType = "attempt";
+		this.repo.addWaypoint(this.currentPathId, waypointType, summary, observationId);
+		debug("paths", "Waypoint added", {
+			pathId: this.currentPathId,
+			type: waypointType,
+			observationId
+		});
+		this.updateResolutionCounter(signal, summary, observationId);
+	}
+	updateResolutionCounter(signal, summary, observationId) {
+		if (!this.currentPathId) return;
+		if (signal.is_resolution) {
+			this.consecutiveSuccesses++;
+			if (this.consecutiveSuccesses >= this.resolutionThreshold) {
+				if (this.repo.countWaypoints(this.currentPathId) < this.maxWaypoints) this.repo.addWaypoint(this.currentPathId, "resolution", summary, observationId);
+				this.repo.resolvePath(this.currentPathId, summary);
+				debug("paths", "Path auto-resolved", {
+					pathId: this.currentPathId,
+					consecutiveSuccesses: this.consecutiveSuccesses
+				});
+				const savedPathId = this.currentPathId;
+				const savedResolutionSummary = summary;
+				this.generateAndStoreKiss(savedPathId, savedResolutionSummary).catch((err) => {
+					debug("paths", "KISS generation failed (fire-and-forget)", { error: String(err) });
+				});
+				this.state = "idle";
+				this.currentPathId = null;
+				this.consecutiveSuccesses = 0;
+				this.errorBuffer = [];
+			}
+		} else if (signal.is_error) this.consecutiveSuccesses = 0;
+	}
+	/**
+	* Generates and stores a KISS summary for a resolved path.
+	* Non-fatal — failures are logged but do not affect path resolution.
+	*/
+	async generateAndStoreKiss(pathId, resolutionSummary) {
+		try {
+			const path = this.repo.getPath(pathId);
+			if (!path) return;
+			const waypoints = this.repo.getWaypoints(pathId);
+			const kiss = await generateKissSummary(path.trigger_summary, waypoints, resolutionSummary);
+			this.repo.updateKissSummary(pathId, JSON.stringify(kiss));
+			debug("paths", "KISS summary stored", { pathId });
+		} catch (err) {
+			debug("paths", "KISS generation failed", {
+				pathId,
+				error: String(err)
+			});
+		}
+	}
+	/**
+	* Manually starts a debug path. Used by MCP tools.
+	* If already tracking, returns the existing path ID.
+	*/
+	startManually(triggerSummary) {
+		if (this.state === "active_debug" && this.currentPathId) return this.currentPathId;
+		const path = this.repo.createPath(triggerSummary);
+		this.state = "active_debug";
+		this.currentPathId = path.id;
+		this.consecutiveSuccesses = 0;
+		this.errorBuffer = [];
+		debug("paths", "Path started manually", { pathId: path.id });
+		return path.id;
+	}
+	/**
+	* Manually resolves the active debug path. Used by MCP tools.
+	* Adds a resolution waypoint, resolves the path, and fires KISS generation.
+	*/
+	resolveManually(resolutionSummary) {
+		if (!this.currentPathId || this.state !== "active_debug") return;
+		this.repo.addWaypoint(this.currentPathId, "resolution", resolutionSummary);
+		this.repo.resolvePath(this.currentPathId, resolutionSummary);
+		const savedPathId = this.currentPathId;
+		this.generateAndStoreKiss(savedPathId, resolutionSummary).catch((err) => {
+			debug("paths", "KISS generation failed (fire-and-forget)", { error: String(err) });
+		});
+		this.state = "idle";
+		this.currentPathId = null;
+		this.consecutiveSuccesses = 0;
+		this.errorBuffer = [];
+		debug("paths", "Path resolved manually", { pathId: savedPathId });
+	}
+	/**
+	* Returns the active path ID, or null if no path is being tracked.
+	*/
+	getActivePathId() {
+		return this.currentPathId;
 	}
 };
 
@@ -4696,6 +5153,77 @@ apiRoutes.get("/graph/communities", (c) => {
 	});
 });
 /**
+* GET /api/paths
+*
+* Returns a list of recent debug paths for the current project.
+* Query params:
+*   ?limit=20  - max results (default 20, max 50)
+*/
+apiRoutes.get("/paths", (c) => {
+	const db = getDb$1(c);
+	const projectHash = getProjectHash$2(c);
+	if (!projectHash) return c.json({ paths: [] });
+	const limitStr = c.req.query("limit");
+	const limit = limitStr ? Math.min(Math.max(parseInt(limitStr, 10) || 20, 1), 50) : 20;
+	try {
+		const paths = new PathRepository(db, projectHash).listPaths(limit);
+		return c.json({ paths });
+	} catch (err) {
+		console.error("[laminark] Failed to list paths:", err);
+		return c.json({ paths: [] });
+	}
+});
+/**
+* GET /api/paths/active
+*
+* Returns the currently active debug path for the current project.
+*/
+apiRoutes.get("/paths/active", (c) => {
+	const db = getDb$1(c);
+	const projectHash = getProjectHash$2(c);
+	if (!projectHash) return c.json({ path: null });
+	try {
+		const path = new PathRepository(db, projectHash).getActivePath();
+		return c.json({ path });
+	} catch (err) {
+		console.error("[laminark] Failed to get active path:", err);
+		return c.json({ path: null });
+	}
+});
+/**
+* GET /api/paths/:id
+*
+* Returns a single debug path with its waypoints.
+*/
+apiRoutes.get("/paths/:id", (c) => {
+	const db = getDb$1(c);
+	const projectHash = getProjectHash$2(c);
+	const pathId = c.req.param("id");
+	if (!projectHash) return c.json({ error: "Path not found" }, 404);
+	try {
+		const repo = new PathRepository(db, projectHash);
+		const path = repo.getPath(pathId);
+		if (!path) return c.json({ error: "Path not found" }, 404);
+		const waypoints = repo.getWaypoints(pathId);
+		let kissSummary = null;
+		if (path.kiss_summary) try {
+			kissSummary = JSON.parse(path.kiss_summary);
+		} catch {
+			kissSummary = path.kiss_summary;
+		}
+		return c.json({
+			path: {
+				...path,
+				kiss_summary: kissSummary
+			},
+			waypoints
+		});
+	} catch (err) {
+		console.error("[laminark] Failed to get path:", err);
+		return c.json({ error: "Path not found" }, 404);
+	}
+});
+/**
 * Finds connected components in the graph via BFS.
 * Shared by /api/graph/analysis and /api/graph/communities.
 */
@@ -5112,6 +5640,7 @@ function startWebServer(app, port = 37820) {
 const noGui = process.argv.includes("--no_gui");
 const db = openDatabase(getDatabaseConfig());
 initGraphSchema(db.db);
+initPathSchema(db.db);
 const projectHash = getProjectHash(process.cwd());
 let toolRegistry = null;
 try {
@@ -5242,10 +5771,14 @@ if (toolRegistry) {
 	registerDiscoverTools(server, toolRegistry, worker, db.hasVectorSupport, notificationStore, projectHash);
 	registerReportTools(server, toolRegistry, projectHash);
 }
+const pathRepo = new PathRepository(db.db, projectHash);
+const pathTracker = new PathTracker(pathRepo);
+registerDebugPathTools(server, pathRepo, pathTracker, notificationStore, projectHash);
 const haikuProcessor = new HaikuProcessor(db.db, projectHash, {
 	intervalMs: 3e4,
 	batchSize: 10,
-	concurrency: 3
+	concurrency: 3,
+	pathTracker
 });
 startServer(server).then(() => {
 	haikuProcessor.start();

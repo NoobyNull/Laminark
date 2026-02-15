@@ -80,6 +80,7 @@ function debugTimed(category, message, fn) {
 * Migration 017: Tool usage events table for per-event temporal tracking.
 * Migration 018: Tool registry FTS5 + vec0 tables for hybrid search on tool descriptions.
 * Migration 019: Add status column (active/stale/demoted) to tool_registry for staleness management.
+* Migration 020: Debug path tables (debug_paths + path_waypoints) for resolution path tracking.
 */
 const MIGRATIONS = [
 	{
@@ -541,6 +542,41 @@ const MIGRATIONS = [
 		up: `
       ALTER TABLE tool_registry ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
       CREATE INDEX idx_tool_registry_status ON tool_registry(status);
+    `
+	},
+	{
+		version: 20,
+		name: "create_debug_path_tables",
+		up: `
+      CREATE TABLE IF NOT EXISTS debug_paths (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'resolved', 'abandoned')),
+        trigger_summary TEXT NOT NULL,
+        resolution_summary TEXT,
+        kiss_summary TEXT,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        resolved_at TEXT,
+        project_hash TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS path_waypoints (
+        id TEXT PRIMARY KEY,
+        path_id TEXT NOT NULL REFERENCES debug_paths(id) ON DELETE CASCADE,
+        observation_id TEXT,
+        waypoint_type TEXT NOT NULL CHECK(waypoint_type IN ('error', 'attempt', 'failure', 'success', 'pivot', 'revert', 'discovery', 'resolution')),
+        sequence_order INTEGER NOT NULL,
+        summary TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_debug_paths_project_status
+        ON debug_paths(project_hash, status);
+
+      CREATE INDEX IF NOT EXISTS idx_debug_paths_started
+        ON debug_paths(started_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_path_waypoints_path_order
+        ON path_waypoints(path_id, sequence_order);
     `
 	}
 ];
@@ -1860,6 +1896,249 @@ var NotificationStore = class {
 };
 
 //#endregion
+//#region src/paths/schema.ts
+const PATH_SCHEMA_DDL = `
+  CREATE TABLE IF NOT EXISTS debug_paths (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'resolved', 'abandoned')),
+    trigger_summary TEXT NOT NULL,
+    resolution_summary TEXT,
+    kiss_summary TEXT,
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT,
+    project_hash TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS path_waypoints (
+    id TEXT PRIMARY KEY,
+    path_id TEXT NOT NULL REFERENCES debug_paths(id) ON DELETE CASCADE,
+    observation_id TEXT,
+    waypoint_type TEXT NOT NULL CHECK(waypoint_type IN ('error', 'attempt', 'failure', 'success', 'pivot', 'revert', 'discovery', 'resolution')),
+    sequence_order INTEGER NOT NULL,
+    summary TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_debug_paths_project_status
+    ON debug_paths(project_hash, status);
+
+  CREATE INDEX IF NOT EXISTS idx_debug_paths_started
+    ON debug_paths(started_at DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_path_waypoints_path_order
+    ON path_waypoints(path_id, sequence_order);
+`;
+/**
+* Initializes debug path tables if they do not exist.
+* Safe to call multiple times (all statements use IF NOT EXISTS).
+*/
+function initPathSchema(db) {
+	db.exec(PATH_SCHEMA_DDL);
+}
+
+//#endregion
+//#region src/paths/path-repository.ts
+var PathRepository = class {
+	db;
+	projectHash;
+	stmtCreatePath;
+	stmtResolvePath;
+	stmtAbandonPath;
+	stmtGetActivePath;
+	stmtGetPath;
+	stmtListPaths;
+	stmtUpdateKiss;
+	stmtFindRecentActive;
+	stmtListByStatus;
+	stmtAddWaypoint;
+	stmtGetWaypoints;
+	stmtCountWaypoints;
+	stmtMaxSequence;
+	constructor(db, projectHash) {
+		this.db = db;
+		this.projectHash = projectHash;
+		this.stmtCreatePath = db.prepare(`
+      INSERT INTO debug_paths (id, status, trigger_summary, started_at, project_hash)
+      VALUES (?, 'active', ?, datetime('now'), ?)
+    `);
+		this.stmtResolvePath = db.prepare(`
+      UPDATE debug_paths
+      SET status = 'resolved', resolution_summary = ?, resolved_at = datetime('now')
+      WHERE id = ? AND project_hash = ?
+    `);
+		this.stmtAbandonPath = db.prepare(`
+      UPDATE debug_paths
+      SET status = 'abandoned', resolved_at = datetime('now')
+      WHERE id = ? AND project_hash = ?
+    `);
+		this.stmtGetActivePath = db.prepare(`
+      SELECT * FROM debug_paths
+      WHERE project_hash = ? AND status = 'active'
+      ORDER BY started_at DESC
+      LIMIT 1
+    `);
+		this.stmtGetPath = db.prepare(`
+      SELECT * FROM debug_paths
+      WHERE id = ? AND project_hash = ?
+    `);
+		this.stmtListPaths = db.prepare(`
+      SELECT * FROM debug_paths
+      WHERE project_hash = ?
+      ORDER BY started_at DESC
+      LIMIT ?
+    `);
+		this.stmtFindRecentActive = db.prepare(`
+      SELECT * FROM debug_paths
+      WHERE project_hash = ? AND status = 'active'
+        AND started_at > datetime('now', '-24 hours')
+      ORDER BY started_at DESC
+      LIMIT 1
+    `);
+		this.stmtListByStatus = db.prepare(`
+      SELECT * FROM debug_paths
+      WHERE project_hash = ? AND status = ?
+      ORDER BY started_at DESC
+      LIMIT ?
+    `);
+		this.stmtUpdateKiss = db.prepare(`
+      UPDATE debug_paths SET kiss_summary = ? WHERE id = ? AND project_hash = ?
+    `);
+		this.stmtAddWaypoint = db.prepare(`
+      INSERT INTO path_waypoints (id, path_id, observation_id, waypoint_type, sequence_order, summary, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    `);
+		this.stmtGetWaypoints = db.prepare(`
+      SELECT * FROM path_waypoints
+      WHERE path_id = ?
+      ORDER BY sequence_order ASC
+    `);
+		this.stmtCountWaypoints = db.prepare(`
+      SELECT COUNT(*) AS count FROM path_waypoints
+      WHERE path_id = ?
+    `);
+		this.stmtMaxSequence = db.prepare(`
+      SELECT COALESCE(MAX(sequence_order), 0) AS max_seq FROM path_waypoints
+      WHERE path_id = ?
+    `);
+	}
+	/**
+	* Creates a new active debug path.
+	* Generates a UUID id, sets status='active' and started_at=now.
+	*/
+	createPath(triggerSummary) {
+		const id = randomBytes(16).toString("hex");
+		this.stmtCreatePath.run(id, triggerSummary, this.projectHash);
+		return this.getPath(id);
+	}
+	/**
+	* Resolves a debug path with a resolution summary.
+	* Sets status='resolved', resolved_at=now.
+	*/
+	resolvePath(pathId, resolutionSummary) {
+		this.stmtResolvePath.run(resolutionSummary, pathId, this.projectHash);
+	}
+	/**
+	* Abandons a debug path.
+	* Sets status='abandoned', resolved_at=now.
+	*/
+	abandonPath(pathId) {
+		this.stmtAbandonPath.run(pathId, this.projectHash);
+	}
+	/**
+	* Returns the active path for this project (at most one active at a time).
+	* Returns null if no active path exists.
+	*/
+	getActivePath() {
+		const row = this.stmtGetActivePath.get(this.projectHash);
+		return row ? rowToDebugPath(row) : null;
+	}
+	/**
+	* Gets a debug path by ID, scoped to this project.
+	* Returns null if not found.
+	*/
+	getPath(pathId) {
+		const row = this.stmtGetPath.get(pathId, this.projectHash);
+		return row ? rowToDebugPath(row) : null;
+	}
+	/**
+	* Lists recent paths for this project, ordered by started_at DESC.
+	* Default limit is 20.
+	*/
+	listPaths(limit = 20) {
+		return this.stmtListPaths.all(this.projectHash, limit).map(rowToDebugPath);
+	}
+	/**
+	* Finds a recently active path (started within the last 24 hours).
+	* Used for cross-session path linking — detects paths that may need
+	* continuation from a prior session.
+	*/
+	findRecentActivePath() {
+		const row = this.stmtFindRecentActive.get(this.projectHash);
+		return row ? rowToDebugPath(row) : null;
+	}
+	/**
+	* Lists paths filtered by status, ordered by started_at DESC.
+	* Useful for filtering to resolved/active/abandoned paths specifically.
+	*/
+	listPathsByStatus(status, limit = 20) {
+		return this.stmtListByStatus.all(this.projectHash, status, limit).map(rowToDebugPath);
+	}
+	/**
+	* Updates the kiss_summary column for a resolved debug path.
+	* Stores the full KissSummary JSON string.
+	*/
+	updateKissSummary(pathId, kissSummary) {
+		this.stmtUpdateKiss.run(kissSummary, pathId, this.projectHash);
+	}
+	/**
+	* Adds a waypoint to a debug path.
+	* Auto-increments sequence_order based on existing waypoints.
+	*/
+	addWaypoint(pathId, type, summary, observationId) {
+		const id = randomBytes(16).toString("hex");
+		const { max_seq } = this.stmtMaxSequence.get(pathId);
+		const sequenceOrder = max_seq + 1;
+		this.stmtAddWaypoint.run(id, pathId, observationId ?? null, type, sequenceOrder, summary);
+		return this.getWaypoints(pathId).find((w) => w.id === id);
+	}
+	/**
+	* Returns all waypoints for a path, ordered by sequence_order ASC.
+	*/
+	getWaypoints(pathId) {
+		return this.stmtGetWaypoints.all(pathId).map(rowToPathWaypoint);
+	}
+	/**
+	* Counts waypoints for a path. Used for cap enforcement (max 30 per path).
+	*/
+	countWaypoints(pathId) {
+		return this.stmtCountWaypoints.get(pathId).count;
+	}
+};
+function rowToDebugPath(row) {
+	return {
+		id: row.id,
+		status: row.status,
+		trigger_summary: row.trigger_summary,
+		resolution_summary: row.resolution_summary,
+		kiss_summary: row.kiss_summary,
+		started_at: row.started_at,
+		resolved_at: row.resolved_at,
+		project_hash: row.project_hash
+	};
+}
+function rowToPathWaypoint(row) {
+	return {
+		id: row.id,
+		path_id: row.path_id,
+		observation_id: row.observation_id,
+		waypoint_type: row.waypoint_type,
+		sequence_order: row.sequence_order,
+		summary: row.summary,
+		created_at: row.created_at
+	};
+}
+
+//#endregion
 //#region src/storage/tool-registry.ts
 /**
 * Repository for tool registry CRUD operations.
@@ -2372,5 +2651,5 @@ var ToolRegistryRepository = class {
 };
 
 //#endregion
-export { MIGRATIONS as C, debugTimed as E, openDatabase as S, debug as T, hybridSearch as _, inferScope as a, ObservationRepository as b, getEdgesForNode as c, initGraphSchema as d, insertEdge as f, jaccardSimilarity as g, SaveGuard as h, extractServerName as i, getNodeByNameAndType as l, upsertNode as m, NotificationStore as n, inferToolType as o, traverseFrom as p, ResearchBufferRepository as r, countEdgesForNode as s, ToolRegistryRepository as t, getNodesByType as u, SearchEngine as v, runMigrations as w, rowToObservation as x, SessionRepository as y };
-//# sourceMappingURL=tool-registry-BIjd5Evf.mjs.map
+export { rowToObservation as C, debug as D, runMigrations as E, debugTimed as O, ObservationRepository as S, MIGRATIONS as T, SaveGuard as _, ResearchBufferRepository as a, SearchEngine as b, inferToolType as c, getNodeByNameAndType as d, getNodesByType as f, upsertNode as g, traverseFrom as h, NotificationStore as i, countEdgesForNode as l, insertEdge as m, PathRepository as n, extractServerName as o, initGraphSchema as p, initPathSchema as r, inferScope as s, ToolRegistryRepository as t, getEdgesForNode as u, jaccardSimilarity as v, openDatabase as w, SessionRepository as x, hybridSearch as y };
+//# sourceMappingURL=tool-registry-CZ3mJ4iR.mjs.map

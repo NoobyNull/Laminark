@@ -1,5 +1,5 @@
 import { i as getProjectHash, n as getDatabaseConfig } from "../config-t8LZeB-u.mjs";
-import { S as openDatabase, T as debug, a as inferScope, b as ObservationRepository, h as SaveGuard, i as extractServerName, l as getNodeByNameAndType, n as NotificationStore, o as inferToolType, p as traverseFrom, r as ResearchBufferRepository, t as ToolRegistryRepository, v as SearchEngine, x as rowToObservation, y as SessionRepository } from "../tool-registry-BIjd5Evf.mjs";
+import { C as rowToObservation, D as debug, S as ObservationRepository, _ as SaveGuard, a as ResearchBufferRepository, b as SearchEngine, c as inferToolType, d as getNodeByNameAndType, h as traverseFrom, i as NotificationStore, n as PathRepository, o as extractServerName, r as initPathSchema, s as inferScope, t as ToolRegistryRepository, v as jaccardSimilarity, w as openDatabase, x as SessionRepository } from "../tool-registry-CZ3mJ4iR.mjs";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
@@ -916,7 +916,7 @@ function detectRemovedTools(toolRegistry, scannedTools, projectHash) {
 *
 * @returns Context string to write to stdout, or null if no context available
 */
-function handleSessionStart(input, sessionRepo, db, projectHash, toolRegistry) {
+function handleSessionStart(input, sessionRepo, db, projectHash, toolRegistry, pathRepo) {
 	const sessionId = input.session_id;
 	if (!sessionId) {
 		debug("session", "SessionStart missing session_id, skipping");
@@ -970,7 +970,7 @@ function handleSessionStart(input, sessionRepo, db, projectHash, toolRegistry) {
 		debug("session", "Pattern pre-computation failed (non-fatal)");
 	}
 	const startTime = Date.now();
-	const context = assembleSessionContext(db, projectHash, toolRegistry);
+	let context = assembleSessionContext(db, projectHash, toolRegistry);
 	const elapsed = Date.now() - startTime;
 	if (elapsed > 500) debug("session", "Context assembly slow", {
 		elapsed,
@@ -981,6 +981,26 @@ function handleSessionStart(input, sessionRepo, db, projectHash, toolRegistry) {
 		contextLength: context.length,
 		elapsed
 	});
+	if (pathRepo) try {
+		const activePath = pathRepo.findRecentActivePath();
+		if (activePath) {
+			const ageMs = Date.now() - new Date(activePath.started_at).getTime();
+			if (ageMs > 1440 * 60 * 1e3) {
+				pathRepo.abandonPath(activePath.id);
+				debug("session", "Auto-abandoned stale debug path", {
+					pathId: activePath.id,
+					ageMs
+				});
+			} else {
+				const waypoints = pathRepo.getWaypoints(activePath.id);
+				const lastWaypoint = waypoints[waypoints.length - 1];
+				const pathContext = `\n[Laminark] Active debug path carried over from prior session:\n  Issue: ${activePath.trigger_summary}\n  Waypoints: ${waypoints.length}\n  Last activity: ${lastWaypoint?.summary?.slice(0, 100) ?? "none"}\n  Use path_show to see full path, or path_resolve to close it.\n`;
+				context = context + pathContext;
+			}
+		}
+	} catch {
+		debug("session", "Cross-session path check failed (non-fatal)");
+	}
 	return context + (toolRegistry ? "\nCall report_available_tools with all your tools (built-in and MCP) so Laminark can index them for discovery." : "");
 }
 /**
@@ -1349,6 +1369,67 @@ function shouldAdmit(toolName, content) {
 }
 
 //#endregion
+//#region src/paths/path-recall.ts
+/**
+* Path recall — finds relevant past resolved debug paths based on text similarity.
+*
+* Used by the PreToolUse hook to surface "you've seen this before" context
+* when new debugging starts on similar issues.
+*
+* Implements INTEL-03: proactive path recall via Jaccard similarity matching.
+*/
+/**
+* Finds past resolved debug paths similar to the current context text.
+*
+* Computes Jaccard similarity against both trigger_summary and resolution_summary
+* of recent resolved paths, taking the max score. Filters to paths scoring >= 0.25
+* and returns the top `limit` results sorted by similarity descending.
+*/
+function findSimilarPaths(pathRepo, currentContext, limit = 3) {
+	const resolvedPaths = pathRepo.listPaths(50).filter((p) => p.status === "resolved");
+	if (resolvedPaths.length === 0) return [];
+	const scored = [];
+	for (const path of resolvedPaths) {
+		const triggerScore = jaccardSimilarity(currentContext, path.trigger_summary);
+		const resolutionScore = jaccardSimilarity(currentContext, path.resolution_summary ?? "");
+		const similarity = Math.max(triggerScore, resolutionScore);
+		if (similarity >= .25) {
+			let kissSummary = null;
+			if (path.kiss_summary) try {
+				const parsed = JSON.parse(path.kiss_summary);
+				kissSummary = parsed.next_time ?? parsed.root_cause ?? null;
+			} catch {
+				kissSummary = null;
+			}
+			scored.push({
+				path,
+				similarity,
+				kissSummary
+			});
+		}
+	}
+	scored.sort((a, b) => b.similarity - a.similarity);
+	return scored.slice(0, limit);
+}
+/**
+* Formats path recall results into a compact string for context injection.
+*
+* Returns empty string if no results. Caps total output to 600 chars.
+*/
+function formatPathRecall(results) {
+	if (results.length === 0) return "";
+	const lines = ["[Laminark] Similar past debug paths found:"];
+	for (const r of results) {
+		const trigger = r.path.trigger_summary.slice(0, 80);
+		lines.push(`- ${trigger} (similarity: ${r.similarity.toFixed(2)})`);
+		lines.push(`  KISS: ${r.kissSummary ?? "No summary available"}`);
+	}
+	const output = lines.join("\n");
+	if (output.length > 600) return output.slice(0, 597) + "...";
+	return output;
+}
+
+//#endregion
 //#region src/hooks/pre-tool-context.ts
 /** Tools where we skip context injection entirely. */
 const SKIP_TOOLS = new Set([
@@ -1431,7 +1512,7 @@ function truncate(text, max) {
 * Returns a formatted context string to inject via stdout, or null if
 * no relevant context was found.
 */
-function handlePreToolUse(input, db, projectHash) {
+function handlePreToolUse(input, db, projectHash, pathRepo) {
 	const toolName = input.tool_name;
 	if (!toolName) return null;
 	if (isLaminarksOwnTool(toolName)) return null;
@@ -1473,6 +1554,15 @@ function handlePreToolUse(input, db, projectHash) {
 		}
 	} catch {
 		debug("hook", "PreToolUse graph lookup failed");
+	}
+	if (pathRepo) try {
+		const toolOutput = toolInput.content ?? toolInput.command ?? query ?? "";
+		if (toolOutput.length > 20) {
+			const recall = formatPathRecall(findSimilarPaths(pathRepo, toolOutput, 2));
+			if (recall) lines.push(recall);
+		}
+	} catch {
+		debug("hook", "PreToolUse path recall failed");
 	}
 	if (lines.length === 0) return null;
 	let target = query;
@@ -1992,9 +2082,14 @@ async function main() {
 		try {
 			toolRegistry = new ToolRegistryRepository(laminarkDb.db);
 		} catch {}
+		let pathRepo;
+		try {
+			initPathSchema(laminarkDb.db);
+			pathRepo = new PathRepository(laminarkDb.db, projectHash);
+		} catch {}
 		switch (eventName) {
 			case "PreToolUse": {
-				const preContext = handlePreToolUse(input, laminarkDb.db, projectHash);
+				const preContext = handlePreToolUse(input, laminarkDb.db, projectHash, pathRepo);
 				if (preContext) process.stdout.write(preContext);
 				break;
 			}
@@ -2003,7 +2098,7 @@ async function main() {
 				processPostToolUseFiltered(input, obsRepo, researchBuffer, toolRegistry, projectHash, laminarkDb.db);
 				break;
 			case "SessionStart": {
-				const context = handleSessionStart(input, sessionRepo, laminarkDb.db, projectHash, toolRegistry);
+				const context = handleSessionStart(input, sessionRepo, laminarkDb.db, projectHash, toolRegistry, pathRepo);
 				if (context) process.stdout.write(context);
 				break;
 			}
