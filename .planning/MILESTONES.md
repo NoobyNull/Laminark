@@ -46,5 +46,25 @@
 - Migrated from @anthropic-ai/sdk to @anthropic-ai/claude-agent-sdk for subscription-based auth (no API key needed)
 - Full test coverage maintained: 727 tests across 46 files, zero failures
 
+### v2.2 — Debug Resolution Paths
+
+**Completed:** 2026-02-14
+**Phases:** 19-21 (9 plans)
+**Last phase number:** 21
+
+**Delivered:**
+- Automatic debug path detection from error patterns without manual intervention
+- Debug journey captured as ordered waypoints (error, attempt, failure, success, pivot, revert, discovery, resolution)
+- Automatic path resolution detection when consecutive success signals meet threshold
+- SQLite persistence with dedicated debug_paths and path_waypoints tables
+- KISS summaries for resolved paths ("next time, just do X") with multi-layer dimensions (logical, programmatic, development)
+- Proactive recall of relevant past debug paths during new debugging sessions
+- Cross-session path linking for continued debugging across Claude Code sessions
+- MCP tools for explicit path lifecycle control (start, resolve, show, list)
+- D3 breadcrumb trail visualization with animated dashed lines overlaid on knowledge graph
+- Color-coded waypoint markers (error: red, attempt: yellow, resolution: green)
+- Path detail panel with ordered waypoint timeline and KISS summary display
+- Toggle control for showing/hiding path overlay without affecting knowledge graph
+
 ---
 

@@ -45,11 +45,14 @@
 
 </details>
 
+<details>
+<summary>✅ v2.2 Debug Resolution Paths (Phases 19-21) — SHIPPED 2026-02-14</summary>
+
 - [x] Phase 19: Path Detection & Storage (3/3 plans) — completed 2026-02-14
-
 - [x] Phase 20: Intelligence & MCP Tools (3/3 plans) — completed 2026-02-14
-
 - [x] Phase 21: Graph Visualization (3/3 plans) — completed 2026-02-14
+
+</details>
 
 ## Progress
 

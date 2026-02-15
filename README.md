@@ -69,6 +69,18 @@ npm run build
 npm test
 ```
 
+## Release History
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
+
+**Latest Releases:**
+- **v2.2** (2026-02-14) - Debug Resolution Paths with KISS summaries and breadcrumb visualization
+- **v2.1** (2026-02-14) - Agent SDK Migration with Haiku intelligence
+- **v2.0** (2026-02-10) - Global Tool Intelligence
+- **v1.0** (2026-02-09) - Persistent Adaptive Memory
+
+See [.planning/MILESTONES.md](.planning/MILESTONES.md) for comprehensive milestone documentation.
+
 ## License
 
 ISC
