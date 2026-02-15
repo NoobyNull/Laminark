@@ -225,10 +225,11 @@ function connectSSE() {
     recordEventReceived();
   });
 
-  // Helper: only dispatch SSE events that belong to the currently selected project.
-  // Events without projectHash are dropped (all broadcasts now include it).
+  // Helper: dispatch SSE events that belong to the currently selected project.
+  // Events with a mismatched projectHash are dropped; events without projectHash
+  // are allowed through (server may not always tag them, e.g. older builds).
   function dispatchIfCurrentProject(eventName, data) {
-    if (!data.projectHash || data.projectHash !== window.laminarkState.currentProject) return;
+    if (data.projectHash && data.projectHash !== window.laminarkState.currentProject) return;
     document.dispatchEvent(new CustomEvent(eventName, { detail: data }));
   }
 
@@ -248,36 +249,6 @@ function connectSSE() {
     var data = JSON.parse(e.data);
     recordEventReceived();
     dispatchIfCurrentProject('laminark:topic_shift', data);
-  });
-
-  eventSource.addEventListener('session_start', function (e) {
-    var data = JSON.parse(e.data);
-    recordEventReceived();
-    dispatchIfCurrentProject('laminark:session_start', data);
-  });
-
-  eventSource.addEventListener('session_end', function (e) {
-    var data = JSON.parse(e.data);
-    recordEventReceived();
-    dispatchIfCurrentProject('laminark:session_end', data);
-  });
-
-  eventSource.addEventListener('path_started', function (e) {
-    var data = JSON.parse(e.data);
-    recordEventReceived();
-    document.dispatchEvent(new CustomEvent('laminark:path_started', { detail: data }));
-  });
-
-  eventSource.addEventListener('path_waypoint', function (e) {
-    var data = JSON.parse(e.data);
-    recordEventReceived();
-    document.dispatchEvent(new CustomEvent('laminark:path_waypoint', { detail: data }));
-  });
-
-  eventSource.addEventListener('path_resolved', function (e) {
-    var data = JSON.parse(e.data);
-    recordEventReceived();
-    document.dispatchEvent(new CustomEvent('laminark:path_resolved', { detail: data }));
   });
 
   eventSource.onerror = function () {
