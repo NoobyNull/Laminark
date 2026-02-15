@@ -37,8 +37,6 @@ esac
 
 # Update version in all files
 sed -i "s/\"version\": \"$CURRENT\"/\"version\": \"$NEXT\"/" \
-  "$ROOT/package.json" \
-  "$ROOT/.claude-plugin/plugin.json" \
-  "$ROOT/.claude-plugin/marketplace.json"
+  "$ROOT/package.json"
 
 echo "$NEXT"

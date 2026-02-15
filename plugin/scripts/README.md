@@ -52,7 +52,7 @@ When starting a **new phase** or **milestone**, manually run:
 
 Then commit and push:
 ```bash
-git add package.json .claude-plugin/plugin.json .claude-plugin/marketplace.json
+git add package.json
 git commit -m "chore: bump to vX.Y.0 for phase Z"
 git push
 ```
