@@ -10,12 +10,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
-    "dist",
-    "hooks",
-    "scripts",
-    "ui",
-    ".claude-plugin",
-    ".mcp.json"
+    "plugin",
+    ".claude-plugin"
   ],
   "engines": {
     "node": ">=22.0.0"

@@ -5,7 +5,7 @@ export default defineConfig({
   format: ['esm'],
   dts: true,
   clean: true,
-  outDir: 'dist',
+  outDir: 'plugin/dist',
   outputOptions: {
     entryFileNames: '[name].js',
   },
