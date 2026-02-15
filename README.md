@@ -73,11 +73,13 @@ npm test
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 
+**Versioning:** Laminark uses `MILESTONE.PHASE.SEQUENTIAL` format (e.g., v2.21.0) aligned with GSD workflow phases.
+
 **Latest Releases:**
-- **v2.2** (2026-02-14) - Debug Resolution Paths with KISS summaries and breadcrumb visualization
-- **v2.1** (2026-02-14) - Agent SDK Migration with Haiku intelligence
-- **v2.0** (2026-02-10) - Global Tool Intelligence
-- **v1.0** (2026-02-09) - Persistent Adaptive Memory
+- **v2.21.0** (2026-02-14) - Phase 21: Graph Visualization (Milestone v2.2 complete)
+- **v2.18.0** (2026-02-14) - Phase 18: Agent SDK Migration (Milestone v2.1 complete)
+- **v2.16.0** (2026-02-10) - Phase 16: Staleness Management (Milestone v2.0 complete)
+- **v1.8.0** (2026-02-09) - Phase 8: Web Visualization (Milestone v1.0 complete)
 
 See [.planning/MILESTONES.md](.planning/MILESTONES.md) for comprehensive milestone documentation.
 
