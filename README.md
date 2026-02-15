@@ -16,6 +16,27 @@ Persistent adaptive memory for Claude Code. Automatically captures observations 
 
 User-level installation is recommended. This enables Laminark across all your projects with data automatically isolated per project directory.
 
+### UI Installation (Easiest)
+
+To install via Claude Code's UI (`/plugin` command), first set up TMPDIR to avoid EXDEV errors:
+
+```bash
+# One-time setup - run this once
+git clone https://github.com/NoobyNull/Laminark.git
+cd Laminark
+./scripts/setup-tmpdir.sh
+
+# Then restart your terminal and restart Claude Code
+```
+
+After setup, you can install/update via Claude's UI:
+1. In Claude Code, type `/plugin`
+2. Select "Add marketplace"
+3. Enter `NoobyNull/Laminark`
+4. Click "Install"
+
+**Why this is needed:** Systems with separate filesystems for `/home/` and `/tmp/` (common with btrfs, Docker, or separate partitions) encounter EXDEV errors during plugin installation. Setting TMPDIR fixes this globally.
+
 ### Local Installation (Development)
 
 For local development or testing:
@@ -97,7 +118,20 @@ If you see `EXDEV: cross-device link not permitted` errors:
 
 **Cause:** Your `/home/` and `/tmp/` directories are on different filesystems (common with btrfs, Docker, or separate partitions).
 
-**Solution:** Use the installation scripts (`./scripts/local-install.sh` or `./scripts/install.sh`) which automatically handle this. Or manually set TMPDIR before installation (see Manual Installation above).
+**Solutions (choose one):**
+
+1. **For UI installation** - Run the setup script once:
+   ```bash
+   ./scripts/setup-tmpdir.sh
+   # Then restart terminal and Claude Code
+   ```
+   This configures TMPDIR globally, allowing you to use Claude's `/plugin` UI.
+
+2. **For command-line installation** - Use our scripts:
+   ```bash
+   ./scripts/local-install.sh  # or ./scripts/install.sh
+   ```
+   These scripts handle EXDEV automatically without global configuration.
 
 ## Why User-Level?
 
