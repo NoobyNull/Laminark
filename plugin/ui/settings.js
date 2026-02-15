@@ -638,9 +638,29 @@
       radio.addEventListener('change', refreshStats);
     });
 
+    // Show current project name in danger zone scope label
+    updateResetScopeProjectName();
+    var projectSelector = document.getElementById('project-selector');
+    if (projectSelector) {
+      projectSelector.addEventListener('change', updateResetScopeProjectName);
+    }
+
     // Config sections
     initTopicDetection();
     initGraphExtraction();
+  }
+
+  function updateResetScopeProjectName() {
+    var el = document.getElementById('reset-scope-project-name');
+    if (!el) return;
+    var select = document.getElementById('project-selector');
+    if (select && select.selectedOptions && select.selectedOptions[0]) {
+      el.textContent = select.selectedOptions[0].textContent;
+    } else if (window.laminarkState && window.laminarkState.currentProject) {
+      el.textContent = window.laminarkState.currentProject.substring(0, 8) + '...';
+    } else {
+      el.textContent = 'unknown';
+    }
   }
 
   window.laminarkSettings = {
