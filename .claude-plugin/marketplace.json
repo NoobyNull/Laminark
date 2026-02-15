@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "laminark",
-      "source": "npm:laminark",
+      "source": "./plugin",
       "description": "Persistent adaptive memory for Claude Code. Automatic observation capture, semantic search, topic detection, knowledge graph, and web visualization.",
       "version": "2.21.6",
       "category": "productivity"
