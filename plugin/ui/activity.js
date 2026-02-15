@@ -182,7 +182,7 @@
     });
 
     // Clear feed when project changes
-    var projectSelect = document.getElementById('project-select');
+    var projectSelect = document.getElementById('project-selector');
     if (projectSelect) {
       projectSelect.addEventListener('change', clearFeed);
     }

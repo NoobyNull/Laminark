@@ -228,30 +228,35 @@ function connectSSE() {
   eventSource.addEventListener('new_observation', function (e) {
     var data = JSON.parse(e.data);
     recordEventReceived();
+    if (data.projectHash && data.projectHash !== window.laminarkState.currentProject) return;
     document.dispatchEvent(new CustomEvent('laminark:new_observation', { detail: data }));
   });
 
   eventSource.addEventListener('entity_updated', function (e) {
     var data = JSON.parse(e.data);
     recordEventReceived();
+    if (data.projectHash && data.projectHash !== window.laminarkState.currentProject) return;
     document.dispatchEvent(new CustomEvent('laminark:entity_updated', { detail: data }));
   });
 
   eventSource.addEventListener('topic_shift', function (e) {
     var data = JSON.parse(e.data);
     recordEventReceived();
+    if (data.projectHash && data.projectHash !== window.laminarkState.currentProject) return;
     document.dispatchEvent(new CustomEvent('laminark:topic_shift', { detail: data }));
   });
 
   eventSource.addEventListener('session_start', function (e) {
     var data = JSON.parse(e.data);
     recordEventReceived();
+    if (data.projectHash && data.projectHash !== window.laminarkState.currentProject) return;
     document.dispatchEvent(new CustomEvent('laminark:session_start', { detail: data }));
   });
 
   eventSource.addEventListener('session_end', function (e) {
     var data = JSON.parse(e.data);
     recordEventReceived();
+    if (data.projectHash && data.projectHash !== window.laminarkState.currentProject) return;
     document.dispatchEvent(new CustomEvent('laminark:session_end', { detail: data }));
   });
 
@@ -1500,11 +1505,8 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
   });
 
-  document.addEventListener('laminark:new_observation', function (e) {
-    var data = e.detail;
-    // Only refresh if observation belongs to current project
-    if (data && data.projectHash && data.projectHash !== window.laminarkState.currentProject) return;
-    // Refresh observation counts by reloading graph data
+  document.addEventListener('laminark:new_observation', function () {
+    // Refresh observation counts by reloading graph data (already project-filtered at SSE dispatch)
     if (window.laminarkGraph) {
       var filters = getActiveFilters();
       window.laminarkGraph.loadGraphData(filters ? { type: filters.join(',') } : undefined);
