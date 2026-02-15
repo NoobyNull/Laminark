@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-t8LZeB-u.mjs";
-import { C as rowToObservation, D as debug, E as runMigrations, O as debugTimed, S as ObservationRepository, T as MIGRATIONS, _ as SaveGuard, a as ResearchBufferRepository, b as SearchEngine, c as inferToolType, d as getNodeByNameAndType, f as getNodesByType, g as upsertNode, h as traverseFrom, i as NotificationStore, l as countEdgesForNode, m as insertEdge, n as PathRepository, o as extractServerName, p as initGraphSchema, r as initPathSchema, s as inferScope, t as ToolRegistryRepository, u as getEdgesForNode, v as jaccardSimilarity$1, w as openDatabase, x as SessionRepository, y as hybridSearch } from "./tool-registry-CZ3mJ4iR.mjs";
+import { C as rowToObservation, D as debug, E as runMigrations, O as debugTimed, S as ObservationRepository, T as MIGRATIONS, _ as SaveGuard, a as ResearchBufferRepository, b as SearchEngine, c as inferToolType, d as getNodeByNameAndType, f as getNodesByType, g as upsertNode, h as traverseFrom, i as NotificationStore, l as countEdgesForNode, m as insertEdge, n as PathRepository, o as extractServerName, p as initGraphSchema, r as initPathSchema, s as inferScope, t as ToolRegistryRepository, u as getEdgesForNode, v as jaccardSimilarity$1, w as openDatabase, x as SessionRepository, y as hybridSearch } from "./tool-registry-OWRDibx0.mjs";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -4148,16 +4148,25 @@ var HaikuProcessor = class {
 	}
 	async processOnce() {
 		if (!isHaikuEnabled()) return;
-		const repo = new ObservationRepository(this.db, this.projectHash);
-		const unclassified = repo.listUnclassified(this.batchSize);
+		const unclassified = ObservationRepository.listAllUnclassified(this.db, this.batchSize);
 		if (unclassified.length === 0) return;
 		debug("haiku", "Processing unclassified observations", { count: unclassified.length });
-		for (let i = 0; i < unclassified.length; i += this.concurrency) {
-			const batch = unclassified.slice(i, i + this.concurrency);
-			await Promise.all(batch.map((obs) => this.processOne(obs, repo)));
+		const byProject = /* @__PURE__ */ new Map();
+		for (const obs of unclassified) {
+			const hash = obs.projectHash;
+			if (!byProject.has(hash)) byProject.set(hash, []);
+			byProject.get(hash).push(obs);
+		}
+		for (const [hash, projectObs] of byProject) {
+			const repo = new ObservationRepository(this.db, hash);
+			for (let i = 0; i < projectObs.length; i += this.concurrency) {
+				const batch = projectObs.slice(i, i + this.concurrency);
+				await Promise.all(batch.map((obs) => this.processOne(obs, repo, hash)));
+			}
 		}
 	}
-	async processOne(obs, repo) {
+	async processOne(obs, repo, obsProjectHash) {
+		const projectHash = obsProjectHash ?? this.projectHash;
 		try {
 			let classification;
 			try {
@@ -4212,7 +4221,7 @@ var HaikuProcessor = class {
 					name: entity.name,
 					metadata: { confidence: entity.confidence },
 					observation_ids: [String(obs.id)],
-					project_hash: this.projectHash
+					project_hash: projectHash
 				});
 				persistedNodes.push(node);
 			} catch {
@@ -4224,7 +4233,8 @@ var HaikuProcessor = class {
 					label: node.name,
 					type: node.type,
 					observationCount: 1,
-					createdAt: (/* @__PURE__ */ new Date()).toISOString()
+					createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+					projectHash
 				});
 				debug("haiku", "Entities persisted", {
 					id: obs.id,
@@ -4249,7 +4259,7 @@ var HaikuProcessor = class {
 							type: rel.type,
 							weight: rel.confidence,
 							metadata: { source: "haiku" },
-							project_hash: this.projectHash
+							project_hash: projectHash
 						});
 						affectedNodeIds.add(sourceNode.id);
 						affectedNodeIds.add(targetNode.id);

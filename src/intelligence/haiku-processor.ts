@@ -90,8 +90,10 @@ export class HaikuProcessor {
   async processOnce(): Promise<void> {
     if (!isHaikuEnabled()) return;
 
-    const repo = new ObservationRepository(this.db, this.projectHash);
-    const unclassified = repo.listUnclassified(this.batchSize);
+    // Query unclassified observations across ALL projects to avoid missing
+    // observations when the MCP server's project hash doesn't match the
+    // actual project (e.g., server started from plugin install directory).
+    const unclassified = ObservationRepository.listAllUnclassified(this.db, this.batchSize);
 
     if (unclassified.length === 0) return;
 
@@ -99,18 +101,29 @@ export class HaikuProcessor {
       count: unclassified.length,
     });
 
-    // Process up to `concurrency` observations in parallel
-    const chunks: typeof unclassified = [];
-    for (let i = 0; i < unclassified.length; i += this.concurrency) {
-      const batch = unclassified.slice(i, i + this.concurrency);
-      await Promise.all(batch.map((obs) => this.processOne(obs, repo)));
+    // Group by project hash so each gets the correct ObservationRepository
+    const byProject = new Map<string, typeof unclassified>();
+    for (const obs of unclassified) {
+      const hash = obs.projectHash;
+      if (!byProject.has(hash)) byProject.set(hash, []);
+      byProject.get(hash)!.push(obs);
+    }
+
+    for (const [hash, projectObs] of byProject) {
+      const repo = new ObservationRepository(this.db, hash);
+      for (let i = 0; i < projectObs.length; i += this.concurrency) {
+        const batch = projectObs.slice(i, i + this.concurrency);
+        await Promise.all(batch.map((obs) => this.processOne(obs, repo, hash)));
+      }
     }
   }
 
   private async processOne(
     obs: { id: string; content: string; source: string },
     repo: ObservationRepository,
+    obsProjectHash?: string,
   ): Promise<void> {
+    const projectHash = obsProjectHash ?? this.projectHash;
     try {
       // Step 1: Classify via Haiku
       let classification: string;
@@ -183,7 +196,7 @@ export class HaikuProcessor {
             name: entity.name,
             metadata: { confidence: entity.confidence },
             observation_ids: [String(obs.id)],
-            project_hash: this.projectHash,
+            project_hash: projectHash,
           });
           persistedNodes.push(node);
         } catch {
@@ -201,6 +214,7 @@ export class HaikuProcessor {
             type: node.type,
             observationCount: 1,
             createdAt: new Date().toISOString(),
+            projectHash,
           });
         }
 
@@ -236,7 +250,7 @@ export class HaikuProcessor {
                 type: rel.type,
                 weight: rel.confidence,
                 metadata: { source: 'haiku' },
-                project_hash: this.projectHash,
+                project_hash: projectHash,
               });
               affectedNodeIds.add(sourceNode.id);
               affectedNodeIds.add(targetNode.id);

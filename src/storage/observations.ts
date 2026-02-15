@@ -306,6 +306,21 @@ export class ObservationRepository {
   }
 
   /**
+   * Lists unclassified observations across ALL projects.
+   * Used by HaikuProcessor to avoid missing observations from other projects.
+   */
+  static listAllUnclassified(db: import('better-sqlite3').Database, limit: number = 20): Observation[] {
+    const sql = `
+      SELECT * FROM observations
+      WHERE classification IS NULL AND deleted_at IS NULL
+      ORDER BY created_at ASC
+      LIMIT ?
+    `;
+    const rows = db.prepare(sql).all(limit) as ObservationRow[];
+    return rows.map(rowToObservation);
+  }
+
+  /**
    * Fetches observations surrounding a given timestamp for classification context.
    * Returns observations regardless of classification status.
    */

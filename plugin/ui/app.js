@@ -322,6 +322,9 @@ async function initProjectSelector() {
     // Reload all data for the new project
     if (window.laminarkGraph && window.laminarkState.graphInitialized) {
       window.laminarkGraph.loadGraphData();
+      if (window.laminarkGraph.loadPathOverlay) {
+        window.laminarkGraph.loadPathOverlay();
+      }
     }
     if (window.laminarkTimeline && window.laminarkState.timelineInitialized) {
       window.laminarkTimeline.loadTimelineData();
@@ -1481,7 +1484,8 @@ document.addEventListener('DOMContentLoaded', async function () {
   document.addEventListener('laminark:entity_updated', function (e) {
     if (!window.laminarkGraph) return;
     var data = e.detail;
-    if (data && data.id) {
+    // Only add entities belonging to the currently selected project
+    if (data && data.id && (!data.projectHash || data.projectHash === window.laminarkState.currentProject)) {
       window.laminarkGraph.queueBatchUpdate({
         type: 'addNode',
         data: {
