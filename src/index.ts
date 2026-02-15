@@ -203,6 +203,7 @@ async function processUnembedded(): Promise<void> {
               toTopic: null,
               timestamp: new Date().toISOString(),
               confidence: null,
+              projectHash,
             });
           }
         } catch (topicErr) {

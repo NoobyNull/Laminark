@@ -122,6 +122,12 @@
     var config = EVENT_CONFIG[eventName];
     if (!config) return;
 
+    // Filter out events from other projects
+    if (detail.projectHash && window.laminarkState && window.laminarkState.currentProject &&
+        detail.projectHash !== window.laminarkState.currentProject) {
+      return;
+    }
+
     var item = {
       icon: config.icon,
       label: config.label,
@@ -174,6 +180,12 @@
         addItem(eventName, e.detail || {});
       });
     });
+
+    // Clear feed when project changes
+    var projectSelect = document.getElementById('project-select');
+    if (projectSelect) {
+      projectSelect.addEventListener('change', clearFeed);
+    }
 
     renderFeed();
   }
