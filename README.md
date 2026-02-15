@@ -12,32 +12,63 @@ Persistent adaptive memory for Claude Code. Automatically captures observations 
 - Web UI for browsing observations and graph
 - Duplicate detection and secret redaction
 
-## Installation (Recommended: User-Level Plugin)
+## Installation
 
 User-level installation is recommended. This enables Laminark across all your projects with data automatically isolated per project directory.
 
-```bash
-# Install as a Claude Code plugin (user-level)
-claude plugin add /path/to/Laminark
-```
+### Local Installation (Development)
 
-Or if installing from a clone:
+For local development or testing:
 
 ```bash
 git clone https://github.com/NoobyNull/Laminark.git
 cd Laminark
 npm install
 npm run build
-claude plugin add .
+./scripts/local-install.sh
 ```
 
-After installation, enable the plugin:
+### Marketplace Installation (End Users)
+
+```bash
+./scripts/install.sh
+# Or: curl -fsSL https://raw.githubusercontent.com/NoobyNull/Laminark/master/scripts/install.sh | bash
+```
+
+### Manual Installation (Advanced)
+
+If you need manual control or encounter issues:
+
+```bash
+# Set TMPDIR to avoid cross-device errors
+export TMPDIR=~/.claude/tmp
+mkdir -p "$TMPDIR"
+claude plugin add /path/to/Laminark
+```
+
+### Post-Installation
+
+Enable the plugin:
 
 ```bash
 claude plugin enable laminark
 ```
 
+Verify installation:
+
+```bash
+claude plugin list  # Should show laminark
+```
+
 Laminark will now run in every Claude Code session. Each project's memory is isolated by directory path -- Project A and Project B never share data, but each project remembers across sessions.
+
+### Troubleshooting: EXDEV Errors
+
+If you see `EXDEV: cross-device link not permitted` errors:
+
+**Cause:** Your `/home/` and `/tmp/` directories are on different filesystems (common with btrfs, Docker, or separate partitions).
+
+**Solution:** Use the installation scripts (`./scripts/local-install.sh` or `./scripts/install.sh`) which automatically handle this. Or manually set TMPDIR before installation (see Manual Installation above).
 
 ## Why User-Level?
 

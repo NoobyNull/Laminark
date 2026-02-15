@@ -25,7 +25,9 @@
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "install:local": "./scripts/local-install.sh",
+    "install:marketplace": "./scripts/install.sh"
   },
   "repository": {
     "type": "git",
