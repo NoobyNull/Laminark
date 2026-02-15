@@ -1,157 +1,190 @@
 # Architecture
 
-**Analysis Date:** 2026-02-08
+**Analysis Date:** 2026-02-14
 
 ## Pattern Overview
 
-**Overall:** Repository Pattern with Database-First Design
+**Overall:** Event-driven multi-agent memory system with layered background processing
 
 **Key Characteristics:**
-- Single SQLite database with project-scoped multi-tenancy via `project_hash`
-- Repository classes encapsulate all data access with prepared statements
-- Strict separation between database layer (snake_case) and application layer (camelCase)
-- No ORM - direct SQL with better-sqlite3 for synchronous operations
+- MCP server exposes tools to Claude Code, hook handler captures tool execution events
+- Multiple background agents process observations asynchronously (embedding, classification, graph extraction, curation)
+- SQLite with WAL mode provides single-writer, multi-reader concurrency between processes
+- Graceful degradation at every layer (vector search, worker thread, Haiku API)
 
 ## Layers
 
-**Storage Layer:**
-- Purpose: Direct database operations, schema migrations, and SQLite configuration
+**Hook Handler (CLI Entry Point):**
+- Purpose: Capture tool execution events from Claude Code hook system
+- Location: `src/hooks/handler.ts`, `src/hooks/`
+- Contains: Event processing pipeline, filters (privacy, admission, self-referential), research buffer routing
+- Depends on: Storage layer, no MCP SDK (cold start optimization)
+- Used by: Claude Code hook system (stdin JSON → stdout context injection)
+
+**MCP Server (Tool Provider):**
+- Purpose: Expose memory operations as MCP tools for Claude to invoke
+- Location: `src/mcp/server.ts`, `src/mcp/tools/`
+- Contains: 9 tool implementations (recall, save-memory, topic-context, query-graph, graph-stats, status, discover-tools, report-tools, debug-paths)
+- Depends on: Storage layer, background agents (worker, status cache)
+- Used by: Claude Code via MCP protocol (stdio transport)
+
+**Storage Layer (Data Access):**
+- Purpose: Database operations scoped to projects
 - Location: `src/storage/`
-- Contains: Database connection, migrations, repository classes, search engine
-- Depends on: better-sqlite3, sqlite-vec, Node.js crypto/fs/path
-- Used by: Application entry point (`src/index.ts`)
+- Contains: Repository pattern (observations, sessions, embeddings, research-buffer, stash-manager, threshold-store, notifications, tool-registry)
+- Depends on: SQLite database, migrations system
+- Used by: All layers (hooks, MCP tools, background agents)
 
-**Repository Classes:**
-- Purpose: Domain-specific data access with automatic project scoping
-- Location: `src/storage/observations.ts`, `src/storage/sessions.ts`, `src/storage/search.ts`
-- Contains: ObservationRepository, SessionRepository, SearchEngine
-- Depends on: Database instance, shared types
-- Used by: Future MCP server (Phase 2), application consumers
+**Background Agents (Async Processing):**
+- Purpose: Continuous processing of observations without blocking main request paths
+- Location: `src/analysis/`, `src/intelligence/`, `src/graph/`
+- Contains: AnalysisWorker (embeddings via worker thread), HaikuProcessor (classification + entity/relationship extraction), CurationAgent (graph maintenance), TopicShiftHandler (topic detection)
+- Depends on: Storage layer, external APIs (Anthropic Haiku)
+- Used by: Main server (src/index.ts) via timer-based polling
 
-**Shared Layer:**
-- Purpose: Type definitions and configuration utilities
-- Location: `src/shared/`
-- Contains: TypeScript interfaces, Zod schemas, config helpers
-- Depends on: Zod, Node.js crypto/fs/os
-- Used by: Storage layer, application consumers
+**Web Visualization (UI Server):**
+- Purpose: Real-time graph and observation visualization
+- Location: `src/web/server.ts`, `src/web/routes/`
+- Contains: Hono REST API + SSE streaming, static file serving
+- Depends on: Storage layer (read-only queries)
+- Used by: Browser clients (separate HTTP server on port 37820)
 
-**Entry Point:**
-- Purpose: Public API surface for npm package
-- Location: `src/index.ts`
-- Contains: Re-exports from storage and shared layers
-- Depends on: Storage layer
-- Used by: External consumers via `@laminark/memory` package
+**Routing Intelligence (Tool Suggestion):**
+- Purpose: Learn from usage patterns and suggest relevant tools
+- Location: `src/routing/`
+- Contains: ConversationRouter, intent-patterns, heuristic-fallback
+- Depends on: Tool registry, observation context
+- Used by: Hook handler (PostToolUse evaluation)
+
+**Path Debugging (Reasoning Traces):**
+- Purpose: Track multi-step reasoning paths for debugging
+- Location: `src/paths/`
+- Contains: PathTracker, PathRepository, KISS summary agent
+- Depends on: Haiku for summarization
+- Used by: HaikuProcessor (classification signals), debug-paths tool
 
 ## Data Flow
 
-**Observation Creation Flow:**
+**Observation Capture Flow (Hook Handler → Storage):**
 
-1. Consumer calls `ObservationRepository.create(input)` with application-layer types
-2. Input validated at runtime via Zod schema (`ObservationInsertSchema`)
-3. Generate random ID using `randomBytes(16).toString('hex')`
-4. Convert Float32Array embedding to Buffer for SQLite storage
-5. Execute prepared INSERT statement with project_hash scoping
-6. Fetch created row from database (includes auto-generated timestamps, rowid)
-7. Map snake_case row to camelCase Observation via `rowToObservation()`
-8. Return typed Observation to consumer
+1. Claude Code executes tool (Read/Write/Edit/Bash)
+2. Hook handler receives PostToolUse event via stdin
+3. Tool registry records usage (DISC-05 organic discovery)
+4. Self-referential filter skips Laminark's own tools
+5. Privacy filter checks file exclusions and redacts secrets
+6. Research tools (Read/Glob/Grep) → research buffer (not full observations)
+7. Extract observation text from tool response
+8. Admission filter rejects noise content
+9. Save guard prevents duplicates (content similarity)
+10. Store to observations table (ObservationRepository)
+11. Routing evaluation suggests tools based on context
 
-**Search Flow:**
+**Embedding & Topic Shift Flow (Background Loop):**
 
-1. Consumer calls `SearchEngine.searchKeyword(query)` or `searchByPrefix(prefix)`
-2. Query sanitized to prevent FTS5 injection (remove operators, special chars)
-3. Execute prepared statement with FTS5 MATCH and project_hash scoping
-4. FTS5 returns BM25 rank (negative values) and HTML snippets
-5. JOIN with observations table to get full row data
-6. Map rows to SearchResult[] with absolute rank scores
-7. Return results ordered by relevance (best match first)
+1. 5-second timer finds unembedded observations
+2. AnalysisWorker.embed() sends text to worker thread
+3. Worker returns Float32Array embedding (384 dimensions for MiniLM, 768 for ONNX)
+4. Store embedding in vec0 virtual table (sqlite-vec)
+5. SSE broadcast to web clients (new observation event)
+6. TopicShiftHandler evaluates embedding distance from session centroid
+7. If shift detected → stash old observations, queue notification
+8. SSE broadcast topic shift event
 
-**Database Initialization Flow:**
+**Knowledge Graph Extraction Flow (HaikuProcessor):**
 
-1. Application calls `openDatabase(config)` with path and timeout
-2. Create database directory if missing (`mkdirSync`)
-3. Open connection with better-sqlite3
-4. Set PRAGMAs in critical order: WAL mode first, then synchronous, cache, foreign keys
-5. Attempt to load sqlite-vec extension (graceful degradation if missing)
-6. Run schema migrations via `runMigrations(db, hasVectorSupport)`
-7. Return `LaminarkDatabase` wrapper with close/checkpoint methods
+1. 30-second timer finds unclassified observations
+2. HaikuProcessor batch processes (concurrency: 3)
+3. Haiku classifier: noise vs signal, discovery/problem/solution
+4. If noise → soft delete observation (deleted_at timestamp)
+5. If signal → Haiku entity agent extracts entities (Project/File/Decision/Problem/Solution/Reference)
+6. Quality gate validates entities (length, taxonomy compliance)
+7. Upsert nodes to knowledge_graph_nodes table
+8. Haiku relationship agent infers edges (related_to/solved_by/caused_by/modifies/informed_by/references/verified_by/preceded_by)
+9. Insert edges to knowledge_graph_edges table
+10. Constraint enforcement (max 50 edges per node)
+
+**Curation Flow (Background Maintenance):**
+
+1. 5-minute timer triggers CurationAgent
+2. Merge near-duplicate observations (fuzzy dedup)
+3. Deduplicate entities (case-insensitive, abbreviations, paths)
+4. Enforce max degree constraint (approaching 50 edges)
+5. Staleness sweep (flag contradictions)
+6. Low-value pruning (short + unlinked + old + auto-captured)
+7. Temporal decay (reduce edge weights over time, delete aged-out edges)
+8. SSE broadcast curation complete event
+9. StatusCache marked dirty for next refresh
 
 **State Management:**
-- No in-memory state - database is source of truth
-- Prepared statements cached in repository constructors (better-sqlite3 best practice)
-- WAL mode provides concurrency without application-level locking
+- Stateless request handling (each MCP tool call is independent)
+- Session state tracked in sessions table (session_id from hook events)
+- Background agent state in-memory (timers, worker thread handles)
+- Adaptive thresholds persisted to threshold_store table (cold start seeding)
 
 ## Key Abstractions
 
-**LaminarkDatabase:**
-- Purpose: Lifecycle wrapper around better-sqlite3 connection
-- Examples: `src/storage/database.ts`
-- Pattern: Facade with explicit resource management (close, checkpoint)
+**Observation:**
+- Purpose: Unit of captured knowledge from tool executions
+- Examples: `src/storage/observations.ts`, `src/shared/types.ts`
+- Pattern: Repository with project scoping, soft deletes, FTS5 full-text search
 
 **Repository Pattern:**
-- Purpose: Project-scoped data access with prepared statements
-- Examples: `src/storage/observations.ts`, `src/storage/sessions.ts`
-- Pattern: Constructor receives `db` and `projectHash`, all queries auto-scoped
+- Purpose: Project-scoped database access with prepared statements
+- Examples: `src/storage/observations.ts`, `src/storage/sessions.ts`, `src/storage/embeddings.ts`, `src/storage/tool-registry.ts`
+- Pattern: Constructor receives db + projectHash, all queries automatically scoped
 
-**Type Mapping:**
-- Purpose: Convert between database snake_case and application camelCase
-- Examples: `rowToObservation()` in `src/shared/types.ts`, `rowToSession()` in `src/storage/sessions.ts`
-- Pattern: Explicit mapping functions that handle Buffer ↔ Float32Array conversion
+**Background Agent:**
+- Purpose: Timer-based asynchronous processing with error isolation
+- Examples: `src/analysis/worker-bridge.ts`, `src/intelligence/haiku-processor.ts`, `src/graph/curation-agent.ts`
+- Pattern: start()/stop() lifecycle, try/catch isolation, non-fatal degradation
 
-**Migration System:**
-- Purpose: Versioned schema evolution with conditional features
-- Examples: `src/storage/migrations.ts`
-- Pattern: Array of `{version, name, up}` migrations applied in transaction
+**Knowledge Graph:**
+- Purpose: Typed entity-relationship model with fixed taxonomy
+- Examples: `src/graph/types.ts` (6 entity types, 8 relationship types), `src/graph/schema.ts`
+- Pattern: Const arrays + union types (not enums), runtime validation with type guards
+
+**Filter Pipeline:**
+- Purpose: Multi-stage validation before storing observations
+- Examples: `src/hooks/handler.ts` processPostToolUseFiltered
+- Pattern: Early return on rejection, composable filters (privacy → admission → save guard)
 
 ## Entry Points
 
-**Package Entry Point:**
+**MCP Server Entry:**
 - Location: `src/index.ts`
-- Triggers: Import/require of `@laminark/memory` package
-- Responsibilities: Re-export public API (repositories, types, config helpers)
+- Triggers: Claude Code starts MCP server via stdio
+- Responsibilities: Initialize database, start background agents (worker, HaikuProcessor, CurationAgent), register MCP tools, optionally start web server
 
-**CLI Entry Point:**
-- Location: `dist/index.js` (compiled from `src/index.ts`)
-- Triggers: `laminark-server` command (bin configuration in package.json)
-- Responsibilities: Future MCP server startup (Phase 2 - not yet implemented)
+**Hook Handler Entry:**
+- Location: `src/hooks/handler.ts` (exported as `laminark-hook` binary)
+- Triggers: Claude Code hook events (PreToolUse, PostToolUse, SessionStart, SessionEnd, Stop)
+- Responsibilities: Process hook JSON from stdin, apply filter pipeline, write to database, optionally write context to stdout (PreToolUse, SessionStart)
 
-**Database Initialization:**
-- Location: `src/storage/database.ts` - `openDatabase()`
-- Triggers: First call from application code
-- Responsibilities: Create connection, run migrations, configure SQLite
-
-**Repository Instantiation:**
-- Location: Repository constructors in `src/storage/observations.ts`, `src/storage/sessions.ts`, `src/storage/search.ts`
-- Triggers: Manual instantiation by consumer (e.g., `new ObservationRepository(db, projectHash)`)
-- Responsibilities: Prepare all SQL statements once, scope all queries to project
+**Web Server Entry:**
+- Location: `src/web/server.ts`
+- Triggers: Main server starts web server on port 37820 (unless --no_gui flag)
+- Responsibilities: Serve static UI, expose REST API, stream SSE events
 
 ## Error Handling
 
-**Strategy:** Fail-fast with descriptive errors, graceful degradation for optional features
+**Strategy:** Graceful degradation with extensive try/catch isolation
 
 **Patterns:**
-- Runtime validation: Zod schemas throw ZodError on invalid input (`ObservationInsertSchema.parse()`)
-- Database errors: better-sqlite3 throws on SQL errors (e.g., constraint violations, busy database)
-- Feature detection: sqlite-vec loading wrapped in try-catch, sets `hasVectorSupport` flag
-- WAL checkpoint failures: Ignored in `close()` to ensure cleanup continues
-- Missing entities: Return `null` (e.g., `getById()`) or empty array (e.g., `list()`) rather than throwing
-- Query sanitization: FTS5 search returns empty array for invalid queries rather than throwing
+- Background agents never crash main process (timer callbacks wrapped in .catch())
+- Worker thread failures → keyword-only mode (no vector search)
+- sqlite-vec load failure → keyword-only mode
+- Haiku API failures → observation stays unclassified (retried next cycle)
+- Tool registry/research buffer missing (pre-migration) → skip functionality
+- Hook handler errors logged via debug, always exit 0 (non-zero exit surfaces errors to Claude)
 
 ## Cross-Cutting Concerns
 
-**Logging:** Console.warn for non-critical issues (e.g., WAL mode not active), no structured logging yet
+**Logging:** Debug function with category tags (mcp, db, hook, embed, haiku, obs), controlled by LAMINARK_DEBUG env var
 
-**Validation:** Zod schemas at input boundaries (`ObservationInsertSchema`), runtime parsing before database writes
+**Validation:** Zod schemas at API boundaries (ObservationInsert, tool input schemas), runtime type guards for graph types
 
-**Authentication:** Not implemented - repository pattern assumes trusted caller with valid `projectHash`
-
-**Project Isolation:** Every query scoped to `project_hash` via prepared statement parameters, prevents cross-project data leaks
-
-**Concurrency:** SQLite WAL mode + busy_timeout (5000ms) handles concurrent access, no application-level locking needed
-
-**Resource Management:** Explicit `close()` method on LaminarkDatabase, consumers responsible for cleanup
-
-**Data Integrity:** Foreign keys enabled, soft deletes via `deleted_at` timestamp, transactional migrations
+**Authentication:** None (local-only MCP server, stdio transport, no network exposure)
 
 ---
 
-*Architecture analysis: 2026-02-08*
+*Architecture analysis: 2026-02-14*

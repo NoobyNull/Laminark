@@ -1,6 +1,6 @@
 # Testing Patterns
 
-**Analysis Date:** 2026-02-08
+**Analysis Date:** 2026-02-14
 
 ## Test Framework
 
@@ -9,48 +9,58 @@
 - Config: `vitest.config.ts`
 
 **Assertion Library:**
-- Vitest built-in assertions (Jest-compatible API)
+- Vitest built-in (Jest-compatible API)
 
 **Run Commands:**
 ```bash
-npm test                 # Run all tests once
-npm run test:watch       # Watch mode
+npm test                # Run all tests once
+npm run test:watch      # Watch mode
+# No coverage command in package.json
 ```
 
-**Coverage:**
-```bash
-# No coverage command configured in package.json
-# Can be added with: vitest run --coverage
+**Framework Configuration:**
+```typescript
+// vitest.config.ts
+export default defineConfig({
+  test: {
+    globals: true,
+    include: ['src/**/*.test.ts'],
+  },
+});
 ```
 
 ## Test File Organization
 
 **Location:**
-- Co-located with source in `__tests__/` subdirectories
-- Example: `src/storage/__tests__/database.test.ts` tests `src/storage/database.ts`
+- Co-located with source code in `__tests__/` directories
+- Pattern: `src/{module}/__tests__/{name}.test.ts`
+
+**Examples:**
+- `src/analysis/__tests__/embedder.test.ts` tests `src/analysis/embedder.ts`
+- `src/hooks/__tests__/handler.test.ts` tests `src/hooks/handler.ts`
+- `src/graph/__tests__/temporal.test.ts` tests `src/graph/temporal.ts`
 
 **Naming:**
-- Pattern: `*.test.ts` suffix
-- Descriptive names matching the module under test (e.g., `database.test.ts`, `repositories.test.ts`, `search.test.ts`)
-- Specialized test files: `concurrency.test.ts`, `crash-recovery.test.ts`, `persistence.test.ts`
+- Test files: `*.test.ts` suffix
+- One test file per source module (matching source filename)
+- Exception: `src/context/injection.test.ts` (co-located, no `__tests__/` directory)
 
 **Structure:**
 ```
-src/storage/
-├── database.ts
-├── observations.ts
-├── sessions.ts
-├── search.ts
-└── __tests__/
-    ├── database.test.ts
-    ├── repositories.test.ts
-    ├── search.test.ts
-    ├── concurrency.test.ts
-    ├── crash-recovery.test.ts
-    ├── persistence.test.ts
-    ├── test-utils.ts
-    ├── concurrent-writer.ts
-    └── crash-writer.ts
+src/
+├── analysis/
+│   ├── __tests__/
+│   │   ├── embedder.test.ts
+│   │   ├── hybrid-selector.test.ts
+│   │   └── piggyback.test.ts
+│   ├── embedder.ts
+│   └── hybrid-selector.ts
+├── hooks/
+│   ├── __tests__/
+│   │   ├── handler.test.ts
+│   │   ├── capture.test.ts
+│   │   └── ...
+│   └── handler.ts
 ```
 
 ## Test Structure
@@ -59,305 +69,281 @@ src/storage/
 ```typescript
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
-describe('ComponentName', () => {
-  let tmp: string;
-  let config: DatabaseConfig;
-  let ldb: LaminarkDatabase;
+describe('Feature or Function Name', () => {
+  // Setup/teardown
+  let db: Database.Database;
+  let tmpDir: string;
 
   beforeEach(() => {
-    // Setup: create temp database
-    tmp = mkdtempSync(join(tmpdir(), 'laminark-test-'));
-    config = { dbPath: join(tmp, 'test.db'), busyTimeout: 5000 };
-    ldb = openDatabase(config);
+    const setup = setupDb();
+    db = setup.db;
+    tmpDir = setup.tmpDir;
   });
 
   afterEach(() => {
-    // Teardown: close database and clean up temp files
-    try {
-      ldb?.close();
-    } catch {
-      // already closed
-    }
-    rmSync(tmp, { recursive: true, force: true });
+    db?.close();
+    rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('describes expected behavior in present tense', () => {
+  // Test cases
+  it('describes expected behavior', () => {
     // Arrange
-    const repo = new ObservationRepository(ldb.db, 'test-project');
+    const input = 'test data';
 
     // Act
-    const result = repo.create({ content: 'Test observation' });
+    const result = functionUnderTest(input);
 
     // Assert
-    expect(result).toBeDefined();
-    expect(result.content).toBe('Test observation');
+    expect(result).toBe(expected);
   });
 });
 ```
 
 **Patterns:**
-- Each test file has one or more `describe` blocks
-- Each feature or method gets its own `describe` block
-- Setup in `beforeEach`, teardown in `afterEach`
-- Tests follow Arrange-Act-Assert pattern (not explicitly commented)
-- Test names are descriptive sentences (e.g., `'creates observations and lists them'`)
+- Top-level `describe()` blocks for major features or classes
+- Nested `describe()` blocks for grouping related behaviors (rare)
+- Section separators using comments:
+```typescript
+// =============================================================================
+// Test Helpers
+// =============================================================================
+
+// =============================================================================
+// Recency Score Tests
+// =============================================================================
+```
+- `beforeEach` / `afterEach` for setup/teardown (database instances, temp files)
+- Test names follow "it describes the expected behavior" pattern (no "should" prefix)
+
+**Example from `src/graph/__tests__/temporal.test.ts`:**
+```typescript
+describe('calculateRecencyScore', () => {
+  it('returns 1.0 for an observation created just now', () => {
+    const now = new Date();
+    const score = calculateRecencyScore(now.toISOString(), now);
+    expect(score).toBe(1.0);
+  });
+
+  it('returns approximately 0.5 for an observation 7 days old', () => {
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const score = calculateRecencyScore(sevenDaysAgo.toISOString(), now);
+    expect(score).toBeCloseTo(0.5, 1);
+  });
+});
+```
 
 ## Mocking
 
-**Framework:**
-- No mocking framework used (vitest has built-in mocking, but not used in this codebase)
+**Framework:** Vitest built-in (`vi` utilities)
 
 **Patterns:**
-- Real dependencies preferred over mocks (integration testing approach)
-- No mocks for database operations
-- Temporary databases for test isolation (each test gets its own SQLite file)
+```typescript
+import { vi } from 'vitest';
+
+// Mock interfaces/implementations
+const mockStashManager: StashManager = {
+  create: vi.fn().mockResolvedValue({ id: 'test-id', /* ... */ }),
+  // ...
+};
+
+// Verify calls
+expect(mockStashManager.create).toHaveBeenCalledWith(expect.objectContaining({
+  kind: 'context',
+}));
+```
 
 **What to Mock:**
-- Not applicable in current codebase
+- External dependencies not under test (repositories, stores)
+- Expensive operations (LLM calls, file I/O in isolated tests)
+- Side effects (console output, network calls)
 
 **What NOT to Mock:**
-- Database operations (use real SQLite in temp directories)
-- File system operations (use real temp directories)
-- Better-sqlite3 database driver (use real instance)
+- Database operations in integration tests (use real SQLite in temp directory)
+- Simple pure functions (test directly)
+- TypeScript type system (prefer real implementations where possible)
 
 ## Fixtures and Factories
 
 **Test Data:**
-- Helper functions create realistic test data:
-  ```typescript
-  function seedObservations() {
-    const repoA = new ObservationRepository(ldb.db, 'aaa');
-    const repoB = new ObservationRepository(ldb.db, 'bbb');
-
-    repoA.create({
-      content: 'Implementing user authentication with JWT tokens',
-    });
-    repoA.create({
-      content: 'Database schema design for observations table',
-    });
-    // ...
-  }
-  ```
-- Inline fixture data in tests (no separate fixture files)
-- Test utilities for common setup patterns
+```typescript
+// Helper functions for test data creation
+function insertObservation(
+  db: Database.Database,
+  opts: { id: string; content: string; createdAt: string; projectHash?: string },
+): void {
+  db.prepare(
+    `INSERT INTO observations (id, project_hash, content, source, created_at, updated_at)
+     VALUES (?, ?, ?, 'test', ?, ?)`,
+  ).run(
+    opts.id,
+    opts.projectHash ?? 'test-project',
+    opts.content,
+    opts.createdAt,
+    opts.createdAt,
+  );
+}
+```
 
 **Location:**
-- Test utilities: `src/storage/__tests__/test-utils.ts`
-- Example utility:
-  ```typescript
-  export function createTempDb(): {
-    config: DatabaseConfig;
-    cleanup: () => void;
-  } {
-    const tmp = mkdtempSync(join(tmpdir(), 'laminark-acceptance-'));
-    const config: DatabaseConfig = {
-      dbPath: join(tmp, 'test.db'),
-      busyTimeout: 5000,
-    };
-    const cleanup = () => {
-      rmSync(tmp, { recursive: true, force: true });
-    };
-    return { config, cleanup };
-  }
-  ```
+- Co-located in test files as helper functions (e.g., `insertObservation()`, `setupDb()`)
+- Shared test utilities in `src/storage/__tests__/test-utils.ts`:
+```typescript
+export function createTempDb(): {
+  config: DatabaseConfig;
+  cleanup: () => void;
+}
+```
+
+**Pattern:**
+- Factory functions return both resource and cleanup callback
+- Use descriptive defaults (`projectHash ?? 'test-project'`)
+- Minimal viable data (only required fields)
 
 ## Coverage
 
-**Requirements:**
-- No explicit coverage threshold configured
-- Test files excluded from compilation: `"exclude": ["node_modules", "dist", "**/*.test.ts"]` in `tsconfig.json`
+**Requirements:** None enforced (no coverage commands in `package.json`)
 
 **View Coverage:**
-```bash
-# Not configured by default
-# Can be run with: npx vitest run --coverage
-```
-
-**Coverage Approach:**
-- Comprehensive test coverage evident from test files
-- Each public method has multiple test cases
-- Edge cases explicitly tested (e.g., project isolation, null returns, soft deletes)
+- Not configured in project
 
 ## Test Types
 
 **Unit Tests:**
-- Test individual functions and methods in isolation
-- Examples: `database.test.ts` tests PRAGMA settings, migration application
-- Focus: Correctness of single components
+- Test individual functions in isolation
+- Examples: `embedder.test.ts`, `temporal.test.ts`
+- Mock external dependencies
+- Fast execution (no real I/O)
 
 **Integration Tests:**
 - Test multiple components working together
-- Examples: `repositories.test.ts` tests repositories with real database, `search.test.ts` tests search with FTS5
-- Focus: Component interactions and data flow
-
-**System Tests:**
-- Test real-world scenarios with multiple processes
-- Examples: `concurrency.test.ts` tests multi-process database access, `crash-recovery.test.ts` tests resilience
-- Focus: Concurrency, durability, crash recovery
-- Uses `fork()` to spawn separate Node.js processes
-
-**E2E Tests:**
-- Not applicable (library/storage layer, no end-to-end UI/API)
-
-## Common Patterns
-
-**Database Setup:**
+- Examples: `handler.test.ts`, `graph-wiring-integration.test.ts`
+- Use real database instances in temp directories
+- Clean up resources in `afterEach`
+- Pattern:
 ```typescript
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'laminark-test-'));
-  config = { dbPath: join(tmp, 'test.db'), busyTimeout: 5000 };
-  ldb = openDatabase(config);
+  ({ config, cleanup } = createTempDb());
+  laminarkDb = openDatabase(config);
+  repo = new Repository(laminarkDb.db, projectHash);
 });
 
 afterEach(() => {
+  laminarkDb.close();
+  cleanup();
+});
+```
+
+**E2E Tests:**
+- Not detected in codebase
+
+## Common Patterns
+
+**Async Testing:**
+```typescript
+it('creates and initializes an embedding engine', async () => {
+  const engine = await createEmbeddingEngine();
+  expect(engine).toBeDefined();
+});
+
+it('LocalOnnxEngine.embed() returns null when not initialized', async () => {
+  const engine = new LocalOnnxEngine();
+  const result = await engine.embed('test text');
+  expect(result).toBeNull();
+});
+```
+
+**Error Testing:**
+```typescript
+it('produces no observation for .env file', () => {
+  processPostToolUseFiltered(
+    {
+      session_id: 'sess-4',
+      cwd: '/tmp',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Write',
+      tool_input: {
+        file_path: '/project/.env',
+        content: 'DATABASE_URL=postgres://localhost/db',
+      },
+    },
+    obsRepo,
+  );
+
+  const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
+  expect(observations).toHaveLength(0);
+});
+```
+
+**Parametric Testing:**
+```typescript
+it('produces monotonically decreasing values for older observations', () => {
+  const now = new Date();
+  const scores: number[] = [];
+  for (let days = 0; days <= 30; days += 5) {
+    const date = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    scores.push(calculateRecencyScore(date.toISOString(), now));
+  }
+
+  for (let i = 1; i < scores.length; i++) {
+    expect(scores[i]).toBeLessThan(scores[i - 1]);
+  }
+});
+```
+
+**Database Testing:**
+```typescript
+it('stores observation for Write tool with clean content', () => {
+  processPostToolUseFiltered(
+    {
+      session_id: 'sess-1',
+      cwd: '/tmp',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Write',
+      tool_input: { file_path: '/src/app.ts', content: 'const x = 1;' },
+    },
+    obsRepo,
+  );
+
+  const observations = obsRepo.list({ limit: 10, includeUnclassified: true });
+  expect(observations).toHaveLength(1);
+  expect(observations[0].source).toBe('hook:Write');
+  expect(observations[0].content).toContain('[Write] Created /src/app.ts');
+  expect(observations[0].content).toContain('const x = 1;');
+});
+```
+
+**Assertions:**
+- Exact equality: `expect(x).toBe(y)`
+- Deep equality: `expect(x).toEqual(y)`
+- Array length: `expect(arr).toHaveLength(n)`
+- Approximate numbers: `expect(num).toBeCloseTo(target, precision)`
+- Truthiness: `expect(x).toBeTruthy()` / `expect(x).toBeFalsy()`
+- Null checks: `expect(x).toBeNull()` / `expect(x).not.toBeNull()`
+- Type checks: `expect(typeof x).toBe('function')`
+- Object shape: `expect(obj).toMatchObject({ key: value })`
+- Containment: `expect(str).toContain('substring')`
+
+**Test Lifecycle:**
+- `beforeEach` creates isolated test environments (temp databases)
+- `afterEach` cleans up resources (close DB, remove temp files)
+- Try-catch in cleanup for robustness:
+```typescript
+afterEach(() => {
   try {
-    ldb?.close();
+    db?.close();
   } catch {
     // already closed
   }
-  rmSync(tmp, { recursive: true, force: true });
+  rmSync(tmpDir, { recursive: true, force: true });
 });
 ```
 
-**Testing Null Returns:**
-```typescript
-it('getById returns null for non-existent observation', () => {
-  const repo = new ObservationRepository(ldb.db, 'aaa');
-  expect(repo.getById('nonexistent')).toBeNull();
-});
-```
-
-**Testing Project Isolation:**
-```typescript
-it('enforces project isolation - project B cannot see project A data', () => {
-  const repoA = new ObservationRepository(ldb.db, 'aaa');
-  const repoB = new ObservationRepository(ldb.db, 'bbb');
-
-  repoA.create({ content: 'Project A data' });
-
-  expect(repoB.list()).toHaveLength(0);
-  expect(repoB.count()).toBe(0);
-});
-```
-
-**Testing with Type Assertions:**
-```typescript
-const row = ldb.db
-  .prepare('SELECT version, name FROM _migrations')
-  .all() as { version: number; name: string }[];
-
-expect(rows[0]).toEqual({ version: 1, name: 'create_observations' });
-```
-
-**Testing Array Operations:**
-```typescript
-it('list returns results ordered by created_at DESC', () => {
-  const repo = new ObservationRepository(ldb.db, 'aaa');
-
-  const obs1 = repo.create({ content: 'First' });
-  const obs2 = repo.create({ content: 'Second' });
-  const obs3 = repo.create({ content: 'Third' });
-
-  const all = repo.list();
-  expect(all[0].id).toBe(obs3.id); // Most recent first
-  expect(all[2].id).toBe(obs1.id); // Oldest last
-});
-```
-
-**Testing Floating Point Values:**
-```typescript
-it('embedding roundtrip: Float32Array -> Buffer -> Float32Array', () => {
-  const originalEmbedding = new Float32Array([0.1, 0.2, 0.3, -0.5, 1.0]);
-  const created = repo.create({
-    content: 'Test',
-    embedding: originalEmbedding,
-  });
-
-  for (let i = 0; i < originalEmbedding.length; i++) {
-    expect(created.embedding![i]).toBeCloseTo(originalEmbedding[i], 5);
-  }
-});
-```
-
-**Testing Exceptions:**
-```typescript
-it('query with special characters is safely handled', () => {
-  const search = new SearchEngine(ldb.db, 'aaa');
-
-  expect(() => search.searchKeyword('"')).not.toThrow();
-  expect(() => search.searchKeyword('()')).not.toThrow();
-  expect(() => search.searchKeyword('***')).not.toThrow();
-});
-```
-
-**Testing Multi-Process Operations:**
-```typescript
-it('handles concurrent writes from multiple processes', async () => {
-  const { config, cleanup } = createTempDb();
-
-  // Spawn 3 concurrent writer processes
-  const writers = [
-    fork(writerPath, ['0', config.dbPath, '10']),
-    fork(writerPath, ['1', config.dbPath, '10']),
-    fork(writerPath, ['2', config.dbPath, '10']),
-  ];
-
-  // Wait for all to complete
-  await Promise.all(writers.map(waitForExit));
-
-  // Verify all writes succeeded
-  const ldb = openDatabase(config);
-  const repo = new ObservationRepository(ldb.db, 'concurrent-test');
-  expect(repo.count()).toBe(30);
-
-  ldb.close();
-  cleanup();
-}, 30000); // 30-second timeout for process tests
-```
-
-## Test Organization Guidelines
-
-**Test Naming:**
-- Use descriptive sentences that explain expected behavior
-- Start with the action or condition being tested
-- Use present tense (e.g., `'creates'`, `'returns'`, `'enforces'`)
-- Include context when needed (e.g., `'project isolation: project B cannot see project A results'`)
-
-**Test Independence:**
-- Each test creates its own temporary database
-- No shared state between tests
-- Tests can run in any order
-
-**Test Focus:**
-- One logical assertion per test (may have multiple `expect()` calls for related checks)
-- Test both success and failure paths
-- Test edge cases explicitly
-
-**Describe Block Organization:**
-- Top-level `describe` per class or module
-- Nested `describe` blocks for related functionality (e.g., `describe('migrations')`)
-- Shared setup/teardown at appropriate level
-
-## Specialized Testing Patterns
-
-**Concurrency Testing:**
-- Uses Node.js `fork()` to spawn separate processes
-- Each process writes to same database file
-- Verifies SQLite WAL mode handles concurrent access
-- Located in `src/storage/__tests__/concurrency.test.ts`
-
-**Crash Recovery Testing:**
-- Spawns process that writes data and crashes mid-operation
-- Verifies database remains consistent after crash
-- Tests WAL recovery mechanisms
-- Located in `src/storage/__tests__/crash-recovery.test.ts`
-
-**Persistence Testing:**
-- Tests data survives close/reopen cycles
-- Verifies migrations don't re-run
-- Tests FTS5 index persistence
-- Located in `src/storage/__tests__/persistence.test.ts`
+**Environment Isolation:**
+- Each test suite creates its own temporary database: `mkdtempSync(join(tmpdir(), 'laminark-test-'))`
+- Tests use distinct `projectHash` values to avoid cross-contamination
+- Database migrations run fresh for each test database
 
 ---
 
-*Testing analysis: 2026-02-08*
+*Testing analysis: 2026-02-14*
