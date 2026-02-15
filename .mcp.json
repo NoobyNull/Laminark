@@ -3,9 +3,9 @@
     "laminark": {
       "command": "bash",
       "args": [
-        "./scripts/ensure-deps.sh",
+        "${CLAUDE_PLUGIN_ROOT}/scripts/ensure-deps.sh",
         "node",
-        "./dist/index.js"
+        "${CLAUDE_PLUGIN_ROOT}/dist/index.js"
       ]
     }
   }
