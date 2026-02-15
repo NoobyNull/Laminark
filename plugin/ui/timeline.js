@@ -98,7 +98,7 @@ async function loadTimelineData(range) {
   sessionsContainer.innerHTML = '';
 
   if (!data.sessions.length && !data.observations.length) {
-    showEmptyState(sessionsContainer);
+    showTimelineEmptyState(sessionsContainer);
     return;
   }
 
@@ -403,7 +403,7 @@ function createTopicShiftMarker(shift) {
  * Show the empty state message.
  * @param {HTMLElement} container
  */
-function showEmptyState(container) {
+function showTimelineEmptyState(container) {
   var msg = document.createElement('p');
   msg.className = 'empty-state';
   msg.textContent = 'No sessions recorded yet. Timeline will populate as you use Claude.';

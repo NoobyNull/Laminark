@@ -682,11 +682,11 @@ async function loadGraphData(filters) {
     edgeData = [];
     renderGraph();
     updateGraphStats(0, 0);
-    showEmptyState();
+    showGraphEmptyState();
     return { nodeCount: 0, edgeCount: 0 };
   }
 
-  hideEmptyState();
+  hideGraphEmptyState();
 
   // Build data arrays
   nodeData = data.nodes.map(function (node) {
@@ -757,7 +757,7 @@ function addNode(nodeDataIn) {
       createdAt: nodeDataIn.createdAt,
       hidden: false,
     });
-    hideEmptyState();
+    hideGraphEmptyState();
   }
 
   renderGraph();
@@ -804,7 +804,7 @@ function removeElements(ids) {
   renderGraph();
   updateGraphStatsFromData();
 
-  if (nodeData.length === 0) showEmptyState();
+  if (nodeData.length === 0) showGraphEmptyState();
 }
 
 // ---------------------------------------------------------------------------
@@ -967,7 +967,7 @@ function updateFilterCounts() {
 // Empty state
 // ---------------------------------------------------------------------------
 
-function showEmptyState() {
+function showGraphEmptyState() {
   if (!containerEl) return;
   var existing = containerEl.querySelector('.graph-empty-state');
   if (existing) { existing.style.display = ''; return; }
@@ -978,7 +978,7 @@ function showEmptyState() {
   containerEl.appendChild(msg);
 }
 
-function hideEmptyState() {
+function hideGraphEmptyState() {
   if (!containerEl) return;
   var existing = containerEl.querySelector('.graph-empty-state');
   if (existing) existing.style.display = 'none';
@@ -1450,7 +1450,7 @@ function flushBatchUpdates() {
   batchFlushTimer = null;
 
   if (newNodes > 0 || newEdges > 0) {
-    hideEmptyState();
+    hideGraphEmptyState();
     renderGraph();
     if (!isStaticLayout && simulation) simulation.alpha(0.3).restart();
     console.log('[laminark:graph] Batch update: added ' + newNodes + ' nodes, ' + newEdges + ' edges');
