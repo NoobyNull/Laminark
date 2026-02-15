@@ -1,9 +1,8 @@
 #!/bin/bash
-# Local installation wrapper for Laminark plugin.
-# Works around EXDEV (cross-device rename) errors on btrfs subvolumes,
-# separate /tmp partitions, and other cross-device setups.
+# Local development installation for Laminark
+# Uses npm link + MCP server registration + hooks pointing at repo dist/
 #
-# Usage: ./scripts/local-install.sh [path-to-laminark]
+# Usage: ./plugin/scripts/local-install.sh [path-to-laminark]
 #   Default path: current directory (.)
 
 set -e
@@ -22,8 +21,8 @@ echo ""
 echo "Installing from: $PLUGIN_PATH"
 
 # Validate prerequisites
-if [ ! -d "$PLUGIN_PATH/dist" ]; then
-  echo "Error: dist/ directory not found in $PLUGIN_PATH"
+if [ ! -d "$PLUGIN_PATH/plugin/dist" ]; then
+  echo "Error: plugin/dist/ directory not found in $PLUGIN_PATH"
   echo "Please run 'npm install && npm run build' first"
   exit 1
 fi
@@ -37,67 +36,77 @@ fi
 # Get version from package.json
 if [ -f "$PLUGIN_PATH/package.json" ]; then
   NEW_VERSION=$(grep '"version"' "$PLUGIN_PATH/package.json" | head -1 | sed -E 's/.*"version": "([^"]+)".*/\1/')
-  echo "Version to install: v$NEW_VERSION"
-else
-  NEW_VERSION="unknown"
+  echo "Version: v$NEW_VERSION"
 fi
 
-# Check if already installed
-if claude plugin list 2>/dev/null | grep -q "laminark"; then
-  CURRENT_VERSION=$(claude plugin list 2>/dev/null | grep "laminark" | awk '{print $2}' || echo "unknown")
-  echo "Currently installed: v$CURRENT_VERSION"
-  echo ""
-
-  if [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
-    echo "Same version is already installed."
-    read -p "Reinstall anyway? (y/N): " -n 1 -r
-    echo ""
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-      echo "Installation cancelled."
-      exit 0
-    fi
-  else
-    echo "An existing version is installed."
-    read -p "Update from v$CURRENT_VERSION to v$NEW_VERSION? (Y/n): " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Nn]$ ]]; then
-      echo "Installation cancelled."
-      exit 0
-    fi
-  fi
-
-  echo "Removing existing installation..."
-  TMPDIR="$SAFE_TMP" claude plugin remove laminark 2>/dev/null || true
-fi
-
-# Set up safe temp directory on same filesystem as ~/.claude/
-CLAUDE_DIR="${CLAUDE_HOME:-$HOME/.claude}"
-SAFE_TMP="$CLAUDE_DIR/tmp"
-
+# Step 1: npm link from repo root
 echo ""
-echo "Creating temporary directory: $SAFE_TMP"
-mkdir -p "$SAFE_TMP"
+echo "Linking package globally..."
+cd "$PLUGIN_PATH"
+npm link
+echo "✓ npm link complete"
 
-# Run claude plugin add with TMPDIR override
-echo "Running: claude plugin add $PLUGIN_PATH"
-TMPDIR="$SAFE_TMP" claude plugin add "$PLUGIN_PATH"
-STATUS=$?
+# Step 2: Register MCP server
+echo ""
+echo "Registering MCP server with Claude Code..."
+claude mcp add-json laminark '{"command":"laminark-server"}' -s user
+echo "✓ MCP server registered"
 
-# Clean up
-rm -rf "$SAFE_TMP"
+# Step 3: Configure hooks using repo's dist/hooks/handler.js
+echo ""
+echo "Configuring hooks (dev mode - pointing at repo)..."
+SETTINGS_FILE="${CLAUDE_HOME:-$HOME/.claude}/settings.json"
+HANDLER_PATH="$PLUGIN_PATH/plugin/dist/hooks/handler.js"
 
-if [ $STATUS -eq 0 ]; then
-  echo ""
-  echo "✓ Laminark plugin installed successfully!"
-  echo ""
-  echo "Next steps:"
-  echo "  1. Enable the plugin: claude plugin enable laminark"
-  echo "  2. Start a new Claude Code session"
-  echo "  3. Verify with: /mcp (should show laminark tools)"
-else
-  echo ""
-  echo "✗ Installation failed with exit code $STATUS"
-  exit $STATUS
-fi
+node -e '
+const fs = require("fs");
+const settingsPath = process.argv[1];
+const handlerPath = process.argv[2];
+const hookCmd = `node "${handlerPath}"`;
+
+let settings = {};
+if (fs.existsSync(settingsPath)) {
+  settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+}
+
+if (!settings.hooks) settings.hooks = {};
+
+const hookEvents = {
+  SessionStart: { type: "command", command: hookCmd, statusMessage: "Loading Laminark memory context...", timeout: 10 },
+  PreToolUse:   { type: "command", command: hookCmd, timeout: 2 },
+  PostToolUse:  { type: "command", command: hookCmd, async: true, timeout: 30 },
+  PostToolUseFailure: { type: "command", command: hookCmd, async: true, timeout: 30 },
+  Stop:         { type: "command", command: hookCmd, async: true, timeout: 15 },
+  SessionEnd:   { type: "command", command: hookCmd, async: true, timeout: 15 }
+};
+
+for (const [event, hookConfig] of Object.entries(hookEvents)) {
+  if (!settings.hooks[event]) settings.hooks[event] = [];
+
+  // Remove any existing laminark hooks for this event
+  settings.hooks[event] = settings.hooks[event].filter(entry =>
+    !(entry.hooks && entry.hooks.some(h => h.command && h.command.includes("laminark")))
+  );
+
+  // Add the dev hook
+  settings.hooks[event].push({
+    hooks: [hookConfig]
+  });
+}
+
+fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+' "$SETTINGS_FILE" "$HANDLER_PATH"
+
+echo "✓ Hooks configured (dev: $HANDLER_PATH)"
+
+# Done
+echo ""
+echo "✓ Laminark v$NEW_VERSION installed locally!"
+echo ""
+echo "Next steps:"
+echo "  1. Start a new Claude Code session"
+echo "  2. Verify with: /mcp (should show laminark tools)"
+echo ""
+echo "To switch to production install: npm install -g laminark && ./plugin/scripts/install.sh"
 
 exit 0

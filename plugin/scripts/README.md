@@ -1,5 +1,23 @@
 # Scripts
 
+## Installation Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `install.sh` | Full install: npm global + MCP server + hooks |
+| `local-install.sh` | Dev install: npm link + MCP server + hooks (points at repo) |
+| `update.sh` | Update: `npm update -g laminark` |
+| `uninstall.sh` | Remove MCP server, hooks, and npm package |
+| `verify-install.sh` | Check installation status |
+
+## How It Works
+
+Laminark installs via three steps:
+
+1. **npm package** — `npm install -g laminark` puts `laminark-server` and `laminark-hook` on PATH
+2. **MCP server** — `claude mcp add-json` registers the MCP server in `~/.claude/settings.json`
+3. **Hooks** — Hook entries are merged into `~/.claude/settings.json` to capture session events
+
 ## Version Bumping
 
 Laminark uses `MILESTONE.PHASE.SEQUENTIAL` versioning aligned with GSD (Get Shit Done) workflow.

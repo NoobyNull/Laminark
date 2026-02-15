@@ -22,10 +22,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build",
-    "install:local": "./scripts/local-install.sh",
-    "install:marketplace": "./scripts/install.sh",
-    "update": "./scripts/update.sh",
-    "uninstall": "./scripts/uninstall.sh"
+    "install:local": "./plugin/scripts/local-install.sh",
+    "install:global": "./plugin/scripts/install.sh",
+    "update": "./plugin/scripts/update.sh",
+    "uninstall": "./plugin/scripts/uninstall.sh",
+    "verify": "./plugin/scripts/verify-install.sh"
   },
   "repository": {
     "type": "git",

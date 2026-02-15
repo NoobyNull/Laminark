@@ -14,28 +14,25 @@ Persistent adaptive memory for Claude Code. Automatically captures observations 
 
 ## Installation
 
-User-level installation is recommended. This enables Laminark across all your projects with data automatically isolated per project directory.
-
-### UI Installation (Easiest)
-
-To install via Claude Code's UI (`/plugin` command), first set up TMPDIR to avoid EXDEV errors:
+### Quick Install (Recommended)
 
 ```bash
-# One-time setup - run this once
-git clone https://github.com/NoobyNull/Laminark.git
-cd Laminark
-./scripts/setup-tmpdir.sh
-
-# Then restart your terminal and restart Claude Code
+npm install -g laminark
 ```
 
-After setup, you can install/update via Claude's UI:
-1. In Claude Code, type `/plugin`
-2. Select "Add marketplace"
-3. Enter `NoobyNull/Laminark`
-4. Click "Install"
+Then configure Claude Code:
 
-**Why this is needed:** Systems with separate filesystems for `/home/` and `/tmp/` (common with btrfs, Docker, or separate partitions) encounter EXDEV errors during plugin installation. Setting TMPDIR fixes this globally.
+```bash
+# Clone repo for install scripts (or download just the scripts)
+git clone https://github.com/NoobyNull/Laminark.git
+cd Laminark
+./plugin/scripts/install.sh
+```
+
+The install script will:
+1. Install `laminark` globally via npm (if not already installed)
+2. Register the MCP server with `claude mcp add-json`
+3. Configure hooks in `~/.claude/settings.json`
 
 ### Local Installation (Development)
 
@@ -46,92 +43,56 @@ git clone https://github.com/NoobyNull/Laminark.git
 cd Laminark
 npm install
 npm run build
-./scripts/local-install.sh
+./plugin/scripts/local-install.sh
 ```
 
-### Marketplace Installation (End Users)
-
-```bash
-./scripts/install.sh
-# Or: curl -fsSL https://raw.githubusercontent.com/NoobyNull/Laminark/master/scripts/install.sh | bash
-```
+This uses `npm link` so changes to the repo are reflected immediately after rebuilding.
 
 ### Manual Installation (Advanced)
 
-If you need manual control or encounter issues:
+If you need manual control:
 
 ```bash
-# Set TMPDIR to avoid cross-device errors
-export TMPDIR=~/.claude/tmp
-mkdir -p "$TMPDIR"
-claude plugin add /path/to/Laminark
+# Install the package
+npm install -g laminark
+
+# Register MCP server
+claude mcp add-json laminark '{"command":"laminark-server"}' -s user
+
+# Configure hooks manually in ~/.claude/settings.json
+# (see plugin/hooks/hooks.json for the hook structure)
 ```
 
 ### Post-Installation
 
-Enable the plugin:
-
-```bash
-claude plugin enable laminark
-```
-
 Verify installation:
 
 ```bash
-claude plugin list  # Should show laminark
+./plugin/scripts/verify-install.sh
 ```
 
 Laminark will now run in every Claude Code session. Each project's memory is isolated by directory path -- Project A and Project B never share data, but each project remembers across sessions.
 
 ### Updating
 
-Check for and install updates:
-
 ```bash
-./scripts/update.sh
-# Or: npm run update
+npm update -g laminark
+# Or: ./plugin/scripts/update.sh
 ```
-
-The update script will:
-- Check your current version
-- Fetch the latest version from GitHub
-- Prompt before updating
-- Handle EXDEV errors automatically
 
 ### Uninstalling
 
-Remove the plugin with optional data cleanup:
+Remove Laminark with optional data cleanup:
 
 ```bash
-./scripts/uninstall.sh
-# Or: npm run uninstall
+./plugin/scripts/uninstall.sh
 ```
 
 The uninstall script will:
-- Remove the plugin
-- Ask if you want to keep or delete your data
-- Clean up plugin cache
-
-### Troubleshooting: EXDEV Errors
-
-If you see `EXDEV: cross-device link not permitted` errors:
-
-**Cause:** Your `/home/` and `/tmp/` directories are on different filesystems (common with btrfs, Docker, or separate partitions).
-
-**Solutions (choose one):**
-
-1. **For UI installation** - Run the setup script once:
-   ```bash
-   ./scripts/setup-tmpdir.sh
-   # Then restart terminal and Claude Code
-   ```
-   This configures TMPDIR globally, allowing you to use Claude's `/plugin` UI.
-
-2. **For command-line installation** - Use our scripts:
-   ```bash
-   ./scripts/local-install.sh  # or ./scripts/install.sh
-   ```
-   These scripts handle EXDEV automatically without global configuration.
+- Remove the MCP server registration
+- Remove hooks from `~/.claude/settings.json`
+- Uninstall the npm package
+- Optionally delete your data
 
 ## Why User-Level?
 
