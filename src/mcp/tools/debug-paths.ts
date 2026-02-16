@@ -16,6 +16,7 @@ import type { ProjectHashRef } from '../../shared/types.js';
 import type { NotificationStore } from '../../storage/notifications.js';
 import type { PathRepository } from '../../paths/path-repository.js';
 import type { PathTracker } from '../../paths/path-tracker.js';
+import { loadToolVerbosityConfig, verboseResponse } from '../../config/tool-verbosity-config.js';
 
 // =============================================================================
 // Response Helpers
@@ -127,9 +128,11 @@ export function registerDebugPathTools(
           return withNotifications(`Debug path already active: ${pathId}`);
         }
 
-        return withNotifications(
+        return withNotifications(verboseResponse(
+          'Debug path started.',
+          `Debug path started: ${pathId}`,
           `Debug path started: ${pathId}\nTracking: ${args.trigger}`,
-        );
+        ));
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Unknown error';
@@ -172,9 +175,11 @@ export function registerDebugPathTools(
 
         pathTracker.resolveManually(args.resolution);
 
-        return withNotifications(
+        return withNotifications(verboseResponse(
+          'Debug path resolved.',
+          `Debug path resolved: ${pathId}`,
           `Debug path resolved: ${pathId}\nResolution: ${args.resolution}\nKISS summary generating in background...`,
-        );
+        ));
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'Unknown error';
@@ -224,9 +229,25 @@ export function registerDebugPathTools(
           }
         }
 
+        const verbosity = loadToolVerbosityConfig().level;
+
+        if (verbosity === 1) {
+          return withNotifications(`Showing debug path: ${pathData.status}`);
+        }
+
         const waypoints = pathRepo.getWaypoints(pathData.id);
 
-        // Build formatted output
+        if (verbosity === 2) {
+          // Standard: key fields
+          const lines: string[] = [];
+          lines.push(`## Debug Path: ${pathData.id}`);
+          lines.push(`**Status:** ${pathData.status} | **Trigger:** ${pathData.trigger_summary}`);
+          lines.push(`Waypoints: ${waypoints.length}`);
+          if (pathData.resolution_summary) lines.push(`Resolution: ${pathData.resolution_summary}`);
+          return withNotifications(lines.join('\n'));
+        }
+
+        // Verbose: full output
         const lines: string[] = [];
         lines.push(`## Debug Path: ${pathData.id}`);
         lines.push(`Status: ${pathData.status}`);
@@ -311,26 +332,44 @@ export function registerDebugPathTools(
           return withNotifications('No debug paths found');
         }
 
-        // Format as text table
+        const verbosity = loadToolVerbosityConfig().level;
+
+        if (verbosity === 1) {
+          return withNotifications(`${paths.length} debug paths found`);
+        }
+
         const lines: string[] = [];
         lines.push('## Debug Paths');
         lines.push('');
-        lines.push(
-          '| ID (short) | Status | Trigger | Started | Resolved |',
-        );
-        lines.push(
-          '|------------|--------|---------|---------|----------|',
-        );
 
-        for (const p of paths) {
-          const shortId = p.id.slice(0, 8);
-          const trigger = p.trigger_summary.length > 50
-            ? p.trigger_summary.slice(0, 50) + '...'
-            : p.trigger_summary;
-          const resolved = p.resolved_at ?? '-';
+        if (verbosity === 2) {
+          // Standard: compact table
+          lines.push('| Status | Trigger |');
+          lines.push('|--------|---------|');
+          for (const p of paths) {
+            const trigger = p.trigger_summary.length > 60
+              ? p.trigger_summary.slice(0, 60) + '...'
+              : p.trigger_summary;
+            lines.push(`| ${p.status} | ${trigger} |`);
+          }
+        } else {
+          // Verbose: full table
           lines.push(
-            `| ${shortId} | ${p.status} | ${trigger} | ${p.started_at} | ${resolved} |`,
+            '| ID (short) | Status | Trigger | Started | Resolved |',
           );
+          lines.push(
+            '|------------|--------|---------|---------|----------|',
+          );
+          for (const p of paths) {
+            const shortId = p.id.slice(0, 8);
+            const trigger = p.trigger_summary.length > 50
+              ? p.trigger_summary.slice(0, 50) + '...'
+              : p.trigger_summary;
+            const resolved = p.resolved_at ?? '-';
+            lines.push(
+              `| ${shortId} | ${p.status} | ${trigger} | ${p.started_at} | ${resolved} |`,
+            );
+          }
         }
 
         return withNotifications(lines.join('\n'));

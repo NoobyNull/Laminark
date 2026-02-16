@@ -10,6 +10,7 @@ import type { AnalysisWorker } from '../../analysis/worker-bridge.js';
 import type { EmbeddingStore } from '../../storage/embeddings.js';
 import { SaveGuard } from '../../hooks/save-guard.js';
 import type { StatusCache } from '../status-cache.js';
+import { verboseResponse } from '../../config/tool-verbosity-config.js';
 
 /**
  * Generates a title from observation content.
@@ -108,7 +109,11 @@ export function registerSaveMemory(
         statusCache?.markDirty();
 
         // Prepend any pending notifications to the response
-        let responseText = `Saved memory "${resolvedTitle}" (id: ${obs.id})`;
+        let responseText = verboseResponse(
+          'Memory saved.',
+          `Saved "${resolvedTitle}"`,
+          `Saved memory "${resolvedTitle}" (id: ${obs.id})`,
+        );
         if (notificationStore) {
           const pending = notificationStore.consumePending(projectHash);
           if (pending.length > 0) {

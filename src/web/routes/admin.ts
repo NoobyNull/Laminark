@@ -13,6 +13,8 @@ import type BetterSqlite3 from 'better-sqlite3';
 import { getConfigDir } from '../../shared/config.js';
 import { loadTopicDetectionConfig } from '../../config/topic-detection-config.js';
 import { loadGraphExtractionConfig } from '../../config/graph-extraction-config.js';
+import { loadCrossAccessConfig, saveCrossAccessConfig, resetCrossAccessConfig } from '../../config/cross-access.js';
+import { loadToolVerbosityConfig, saveToolVerbosityConfig, resetToolVerbosityConfig } from '../../config/tool-verbosity-config.js';
 
 type AppEnv = {
   Variables: {
@@ -262,4 +264,63 @@ adminRoutes.put('/config/graph-extraction', async (c) => {
   const validated = loadGraphExtractionConfig();
   writeFileSync(configPath, JSON.stringify(validated, null, 2), 'utf-8');
   return c.json(validated);
+});
+
+// =========================================================================
+// Cross-Project Access Config
+// =========================================================================
+
+adminRoutes.get('/config/cross-access', (c) => {
+  const project = c.req.query('project');
+  if (!project) return c.json({ error: 'project query parameter is required' }, 400);
+  return c.json(loadCrossAccessConfig(project));
+});
+
+adminRoutes.put('/config/cross-access', async (c) => {
+  const project = c.req.query('project');
+  if (!project) return c.json({ error: 'project query parameter is required' }, 400);
+
+  const body = await c.req.json();
+
+  if (body && body.__reset === true) {
+    resetCrossAccessConfig(project);
+    return c.json(loadCrossAccessConfig(project));
+  }
+
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return c.json({ error: 'Request body must be a JSON object' }, 400);
+  }
+
+  saveCrossAccessConfig(project, { readableProjects: body.readableProjects || [] });
+  return c.json(loadCrossAccessConfig(project));
+});
+
+// =========================================================================
+// Tool Response Verbosity Config
+// =========================================================================
+
+adminRoutes.get('/config/tool-verbosity', (c) => {
+  return c.json(loadToolVerbosityConfig());
+});
+
+adminRoutes.put('/config/tool-verbosity', async (c) => {
+  const body = await c.req.json();
+
+  if (body && body.__reset === true) {
+    const config = resetToolVerbosityConfig();
+    saveToolVerbosityConfig(config);
+    return c.json(config);
+  }
+
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return c.json({ error: 'Request body must be a JSON object' }, 400);
+  }
+
+  const level = body.level;
+  if (level !== 1 && level !== 2 && level !== 3) {
+    return c.json({ error: 'level must be 1, 2, or 3' }, 400);
+  }
+
+  saveToolVerbosityConfig({ level });
+  return c.json(loadToolVerbosityConfig());
 });

@@ -9,6 +9,7 @@ import { assembleSessionContext } from '../context/injection.js';
 import { scanConfigForTools } from './config-scanner.js';
 import { extractPatterns, storePrecomputedPatterns } from '../routing/intent-patterns.js';
 import type { PathRepository } from '../paths/path-repository.js';
+import type { BranchRepository } from '../branches/branch-repository.js';
 import { debug } from '../shared/debug.js';
 
 /**
@@ -87,6 +88,7 @@ export function handleSessionStart(
   projectHash: string,
   toolRegistry?: ToolRegistryRepository,
   pathRepo?: PathRepository,
+  branchRepo?: BranchRepository,
 ): string | null {
   const sessionId = input.session_id as string | undefined;
 
@@ -200,6 +202,23 @@ export function handleSessionStart(
       }
     } catch {
       debug('session', 'Cross-session path check failed (non-fatal)');
+    }
+  }
+
+  // BRANCH-01: Check for active thought branch from prior sessions
+  if (branchRepo) {
+    try {
+      const activeBranch = branchRepo.findRecentActiveBranch();
+      if (activeBranch) {
+        const title = activeBranch.title ?? activeBranch.id.slice(0, 12);
+        const branchContext = `\n[Laminark] Active work branch carried over:\n` +
+          `  ${title} (${activeBranch.branch_type})\n` +
+          `  Stage: ${activeBranch.arc_stage} | Observations: ${activeBranch.observation_count}\n` +
+          `  Use query_branches to see all branches.\n`;
+        context = context + branchContext;
+      }
+    } catch {
+      debug('session', 'Cross-session branch check failed (non-fatal)');
     }
   }
 

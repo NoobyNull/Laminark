@@ -15,6 +15,7 @@ import { ConversationRouter } from '../routing/conversation-router.js';
 import { inferToolType, inferScope, extractServerName } from './tool-name-parser.js';
 import { PathRepository } from '../paths/path-repository.js';
 import { initPathSchema } from '../paths/schema.js';
+import { BranchRepository } from '../branches/branch-repository.js';
 import { debug } from '../shared/debug.js';
 
 /**
@@ -280,6 +281,12 @@ async function main(): Promise<void> {
     } catch {
       // debug_paths table may not exist yet
     }
+    let branchRepo: BranchRepository | undefined;
+    try {
+      branchRepo = new BranchRepository(laminarkDb.db, projectHash);
+    } catch {
+      // thought_branches table may not exist yet before migration 21
+    }
 
     switch (eventName) {
       case 'PreToolUse': {
@@ -292,7 +299,7 @@ async function main(): Promise<void> {
         processPostToolUseFiltered(input, obsRepo, researchBuffer, toolRegistry, projectHash, laminarkDb.db);
         break;
       case 'SessionStart': {
-        const context = handleSessionStart(input, sessionRepo, laminarkDb.db, projectHash, toolRegistry, pathRepo);
+        const context = handleSessionStart(input, sessionRepo, laminarkDb.db, projectHash, toolRegistry, pathRepo, branchRepo);
         // SessionStart is synchronous -- stdout is injected into Claude's context window
         if (context) {
           process.stdout.write(context);

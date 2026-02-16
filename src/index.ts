@@ -22,6 +22,9 @@ import { StatusCache } from './mcp/status-cache.js';
 import { registerDiscoverTools } from './mcp/tools/discover-tools.js';
 import { registerReportTools } from './mcp/tools/report-tools.js';
 import { registerDebugPathTools } from './mcp/tools/debug-paths.js';
+import { registerThoughtBranchTools } from './mcp/tools/thought-branches.js';
+import { BranchRepository } from './branches/branch-repository.js';
+import { BranchTracker } from './branches/branch-tracker.js';
 import { AnalysisWorker } from './analysis/worker-bridge.js';
 import { EmbeddingStore } from './storage/embeddings.js';
 import { ObservationRepository } from './storage/observations.js';
@@ -324,11 +327,24 @@ const pathRepo = new PathRepository(db.db, projectHashRef.current);
 const pathTracker = new PathTracker(pathRepo);
 registerDebugPathTools(server, pathRepo, pathTracker, notificationStore, projectHashRef);
 
+// Branch tracking (thought branch auto-detection)
+let branchRepo: BranchRepository | null = null;
+let branchTracker: BranchTracker | null = null;
+try {
+  branchRepo = new BranchRepository(db.db, projectHashRef.current);
+  branchTracker = new BranchTracker(branchRepo, db.db, projectHashRef.current);
+  const obsRepoForBranches = new ObservationRepository(db.db, projectHashRef.current);
+  registerThoughtBranchTools(server, branchRepo, obsRepoForBranches, notificationStore, projectHashRef);
+} catch {
+  debug('mcp', 'Branch tracking not available (pre-migration-21)');
+}
+
 const haikuProcessor = new HaikuProcessor(db.db, projectHashRef.current, {
   intervalMs: 30_000,
   batchSize: 10,
   concurrency: 3,
   pathTracker,
+  branchTracker,
 });
 
 startServer(server).then(() => {

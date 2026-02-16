@@ -607,6 +607,289 @@
   }
 
   // =========================================================================
+  // Cross-Project Access Config
+  // =========================================================================
+
+  var caReadable = []; // current readable project hashes
+
+  async function loadCrossAccessConfig() {
+    var project = getProjectHash();
+    if (!project) return;
+    try {
+      var res = await fetch('/api/admin/config/cross-access?project=' + encodeURIComponent(project));
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var config = await res.json();
+      caReadable = config.readableProjects || [];
+      populateCrossAccessLists();
+    } catch (err) {
+      console.error('[laminark] Failed to load cross-access config:', err);
+    }
+  }
+
+  function getAllProjects() {
+    var select = document.getElementById('project-selector');
+    if (!select) return [];
+    var projects = [];
+    for (var i = 0; i < select.options.length; i++) {
+      projects.push({
+        hash: select.options[i].value,
+        name: select.options[i].textContent,
+      });
+    }
+    return projects;
+  }
+
+  function populateCrossAccessLists() {
+    var currentProject = getProjectHash();
+    var allProjects = getAllProjects();
+    var availableList = document.getElementById('ca-available');
+    var readableList = document.getElementById('ca-readable');
+    if (!availableList || !readableList) return;
+
+    availableList.innerHTML = '';
+    readableList.innerHTML = '';
+
+    var readableSet = new Set(caReadable);
+
+    allProjects.forEach(function (p) {
+      if (p.hash === currentProject) return; // skip self
+      if (readableSet.has(p.hash)) {
+        readableList.appendChild(createCrossAccessItem(p, 'remove'));
+      } else {
+        availableList.appendChild(createCrossAccessItem(p, 'add'));
+      }
+    });
+
+    // Update status badge
+    var badge = document.getElementById('ca-status');
+    if (badge) {
+      var count = caReadable.length;
+      badge.textContent = count + ' project' + (count !== 1 ? 's' : '');
+      badge.className = 'config-section-status ' + (count > 0 ? 'enabled' : 'disabled');
+    }
+  }
+
+  function createCrossAccessItem(project, action) {
+    var li = document.createElement('li');
+    li.className = 'cross-access-item';
+    li.setAttribute('data-hash', project.hash);
+
+    var nameSpan = document.createElement('span');
+    nameSpan.className = 'cross-access-item-name';
+    nameSpan.textContent = project.name;
+    nameSpan.title = project.hash;
+    li.appendChild(nameSpan);
+
+    var btn = document.createElement('button');
+    if (action === 'add') {
+      btn.className = 'cross-access-add-btn';
+      btn.innerHTML = '&#9654;'; // right arrow
+      btn.title = 'Add to readable projects';
+      btn.addEventListener('click', function () {
+        caReadable.push(project.hash);
+        populateCrossAccessLists();
+      });
+    } else {
+      btn.className = 'cross-access-remove-btn';
+      btn.innerHTML = '&times;';
+      btn.title = 'Remove from readable projects';
+      btn.addEventListener('click', function () {
+        caReadable = caReadable.filter(function (h) { return h !== project.hash; });
+        populateCrossAccessLists();
+      });
+    }
+    li.appendChild(btn);
+
+    return li;
+  }
+
+  async function saveCrossAccessConfig() {
+    var project = getProjectHash();
+    if (!project) return null;
+    try {
+      var res = await fetch('/api/admin/config/cross-access?project=' + encodeURIComponent(project), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ readableProjects: caReadable }),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var config = await res.json();
+      caReadable = config.readableProjects || [];
+      populateCrossAccessLists();
+      return config;
+    } catch (err) {
+      console.error('[laminark] Failed to save cross-access config:', err);
+      return null;
+    }
+  }
+
+  function initCrossAccess() {
+    // Collapsible section
+    var header = document.querySelector('[data-config-toggle="cross-access"]');
+    if (header) {
+      header.addEventListener('click', function () {
+        document.getElementById('cross-access-section').classList.toggle('collapsed');
+      });
+    }
+
+    // Save button
+    var saveBtn = document.getElementById('ca-save');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async function () {
+        var result = await saveCrossAccessConfig();
+        if (result) showSuccessMessage('Cross-project access settings saved.');
+      });
+    }
+
+    // Reset to defaults
+    var defaultsBtn = document.getElementById('ca-defaults');
+    if (defaultsBtn) {
+      var caResetTimer = null;
+      defaultsBtn.addEventListener('click', async function () {
+        if (defaultsBtn.classList.contains('confirming')) {
+          clearTimeout(caResetTimer);
+          defaultsBtn.classList.remove('confirming');
+          defaultsBtn.textContent = 'Reset to Defaults';
+          var project = getProjectHash();
+          if (!project) return;
+          try {
+            var res = await fetch('/api/admin/config/cross-access?project=' + encodeURIComponent(project), {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ __reset: true }),
+            });
+            if (res.ok) {
+              var config = await res.json();
+              caReadable = config.readableProjects || [];
+              populateCrossAccessLists();
+              showSuccessMessage('Cross-project access reset to defaults.');
+            }
+          } catch (err) {
+            console.error('[laminark] Failed to reset cross-access config:', err);
+          }
+        } else {
+          defaultsBtn.classList.add('confirming');
+          defaultsBtn.textContent = 'Confirm?';
+          caResetTimer = setTimeout(function () {
+            defaultsBtn.classList.remove('confirming');
+            defaultsBtn.textContent = 'Reset to Defaults';
+          }, 3000);
+        }
+      });
+    }
+
+    loadCrossAccessConfig();
+
+    // Reload when project changes
+    var projectSelector = document.getElementById('project-selector');
+    if (projectSelector) {
+      projectSelector.addEventListener('change', function () {
+        loadCrossAccessConfig();
+      });
+    }
+  }
+
+  // =========================================================================
+  // Tool Response Verbosity Config
+  // =========================================================================
+
+  var LEVEL_LABELS = { 1: 'Minimal', 2: 'Standard', 3: 'Verbose' };
+
+  function populateToolVerbosity(config) {
+    var levelBtns = document.querySelectorAll('#tv-level .config-radio');
+    levelBtns.forEach(function (btn) {
+      btn.classList.toggle('active', btn.getAttribute('data-value') === String(config.level));
+    });
+    var badge = document.getElementById('tv-status');
+    if (badge) {
+      badge.textContent = LEVEL_LABELS[config.level] || 'Standard';
+      badge.className = 'config-section-status enabled';
+    }
+  }
+
+  async function loadToolVerbosityConfig() {
+    try {
+      var res = await fetch('/api/admin/config/tool-verbosity');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var config = await res.json();
+      populateToolVerbosity(config);
+    } catch (err) {
+      console.error('[laminark] Failed to load tool verbosity config:', err);
+    }
+  }
+
+  async function saveToolVerbosityConfig(data) {
+    try {
+      var res = await fetch('/api/admin/config/tool-verbosity', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var config = await res.json();
+      populateToolVerbosity(config);
+      return config;
+    } catch (err) {
+      console.error('[laminark] Failed to save tool verbosity config:', err);
+      return null;
+    }
+  }
+
+  function initToolVerbosity() {
+    // Collapsible section
+    var header = document.querySelector('[data-config-toggle="tool-verbosity"]');
+    if (header) {
+      header.addEventListener('click', function () {
+        document.getElementById('tool-verbosity-section').classList.toggle('collapsed');
+      });
+    }
+
+    // Level radio buttons
+    var levelBtns = document.querySelectorAll('#tv-level .config-radio');
+    levelBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        levelBtns.forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+      });
+    });
+
+    // Save button
+    var saveBtn = document.getElementById('tv-save');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async function () {
+        var activeBtn = document.querySelector('#tv-level .config-radio.active');
+        var level = activeBtn ? parseInt(activeBtn.getAttribute('data-value'), 10) : 2;
+        var result = await saveToolVerbosityConfig({ level: level });
+        if (result) showSuccessMessage('Tool verbosity settings saved.');
+      });
+    }
+
+    // Reset to defaults
+    var defaultsBtn = document.getElementById('tv-defaults');
+    if (defaultsBtn) {
+      var tvResetTimer = null;
+      defaultsBtn.addEventListener('click', async function () {
+        if (defaultsBtn.classList.contains('confirming')) {
+          clearTimeout(tvResetTimer);
+          defaultsBtn.classList.remove('confirming');
+          defaultsBtn.textContent = 'Reset to Defaults';
+          var result = await saveToolVerbosityConfig({ __reset: true });
+          if (result) showSuccessMessage('Tool verbosity reset to defaults.');
+        } else {
+          defaultsBtn.classList.add('confirming');
+          defaultsBtn.textContent = 'Confirm?';
+          tvResetTimer = setTimeout(function () {
+            defaultsBtn.classList.remove('confirming');
+            defaultsBtn.textContent = 'Reset to Defaults';
+          }, 3000);
+        }
+      });
+    }
+
+    loadToolVerbosityConfig();
+  }
+
+  // =========================================================================
   // Init
   // =========================================================================
 
@@ -653,8 +936,10 @@
     }
 
     // Config sections
+    initToolVerbosity();
     initTopicDetection();
     initGraphExtraction();
+    initCrossAccess();
   }
 
   function updateResetScopeProjectName() {

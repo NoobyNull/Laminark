@@ -26,6 +26,7 @@ import { broadcast } from '../web/routes/sse.js';
 import { debug } from '../shared/debug.js';
 import type { EntityType } from '../graph/types.js';
 import type { PathTracker } from '../paths/path-tracker.js';
+import type { BranchTracker } from '../branches/branch-tracker.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,6 +37,7 @@ interface HaikuProcessorOptions {
   batchSize?: number;
   concurrency?: number;
   pathTracker?: PathTracker;
+  branchTracker?: BranchTracker;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +51,7 @@ export class HaikuProcessor {
   private readonly batchSize: number;
   private readonly concurrency: number;
   private readonly pathTracker: PathTracker | null;
+  private readonly branchTracker: BranchTracker | null;
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
@@ -62,6 +65,7 @@ export class HaikuProcessor {
     this.batchSize = opts?.batchSize ?? 10;
     this.concurrency = opts?.concurrency ?? 3;
     this.pathTracker = opts?.pathTracker ?? null;
+    this.branchTracker = opts?.branchTracker ?? null;
   }
 
   start(): void {
@@ -116,6 +120,16 @@ export class HaikuProcessor {
         await Promise.all(batch.map((obs) => this.processOne(obs, repo, hash)));
       }
     }
+
+    // Step 4: Branch maintenance
+    if (this.branchTracker) {
+      try {
+        await this.branchTracker.runMaintenance();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debug('haiku', 'Branch maintenance error (non-fatal)', { error: msg });
+      }
+    }
   }
 
   private async processOne(
@@ -138,6 +152,24 @@ export class HaikuProcessor {
           } catch (pathErr) {
             const msg = pathErr instanceof Error ? pathErr.message : String(pathErr);
             debug('haiku', 'Path tracking failed (non-fatal)', { id: obs.id, error: msg });
+          }
+        }
+
+        // Step 1.6: Feed to branch tracker
+        if (this.branchTracker) {
+          try {
+            this.branchTracker.processObservation({
+              id: obs.id,
+              content: obs.content,
+              source: obs.source,
+              projectHash: obsProjectHash ?? this.projectHash,
+              sessionId: undefined,
+              classification: result.classification,
+              createdAt: new Date().toISOString(),
+            });
+          } catch (branchErr) {
+            const msg = branchErr instanceof Error ? branchErr.message : String(branchErr);
+            debug('haiku', 'Branch tracking failed (non-fatal)', { id: obs.id, error: msg });
           }
         }
 

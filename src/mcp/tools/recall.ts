@@ -19,6 +19,7 @@ import {
   TOKEN_BUDGET,
 } from '../token-budget.js';
 import type { StatusCache } from '../status-cache.js';
+import { loadToolVerbosityConfig } from '../../config/tool-verbosity-config.js';
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -334,13 +335,36 @@ export function registerRecall(
 
         // --- VIEW ---
         if (args.action === 'view') {
+          const verbosity = loadToolVerbosityConfig().level;
+
+          if (verbosity === 1) {
+            // Minimal: just count
+            const searchTerm = args.query ?? args.title ?? 'query';
+            return textResponse(
+              prependNotifications(notificationStore, projectHash,
+                `Found ${observations.length} memories matching "${searchTerm}"`),
+            );
+          }
+
+          if (verbosity === 2) {
+            // Standard: title-only numbered list
+            const lines = observations.map((obs, i) => {
+              const title = obs.title ?? 'untitled';
+              return `${i + 1}. ${title}`;
+            });
+            const footer = `\n---\n${observations.length} result(s)`;
+            return textResponse(
+              prependNotifications(notificationStore, projectHash, lines.join('\n') + footer),
+            );
+          }
+
+          // Verbose (level 3): full output (current behavior)
           const viewResponse = formatViewResponse(
             observations,
             searchResults,
             args.detail,
             args.id !== undefined,
           );
-          // Prepend notifications to view response text
           const originalText = viewResponse.content[0].text;
           return textResponse(prependNotifications(notificationStore, projectHash, originalText));
         }

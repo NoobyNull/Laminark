@@ -987,6 +987,335 @@ apiRoutes.get('/paths/:id', (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// Tool topology endpoints
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/tools
+ *
+ * Returns all tools from tool_registry with usage stats.
+ */
+apiRoutes.get('/tools', (c) => {
+  const db = getDb(c);
+
+  interface ToolRow {
+    id: number;
+    name: string;
+    tool_type: string;
+    scope: string;
+    status: string;
+    usage_count: number;
+    server_name: string | null;
+    description: string | null;
+    last_used_at: string | null;
+    discovered_at: string;
+  }
+
+  let tools: ToolRow[] = [];
+  try {
+    tools = db.prepare(`
+      SELECT id, name, tool_type, scope, status, usage_count, server_name, description, last_used_at, discovered_at
+      FROM tool_registry
+      ORDER BY usage_count DESC, discovered_at DESC
+    `).all() as ToolRow[];
+  } catch { /* table may not exist */ }
+
+  return c.json({
+    tools: tools.map(t => ({
+      id: t.id,
+      name: t.name,
+      toolType: t.tool_type,
+      scope: t.scope,
+      status: t.status,
+      usageCount: t.usage_count,
+      serverName: t.server_name,
+      description: t.description,
+      lastUsedAt: t.last_used_at,
+      discoveredAt: t.discovered_at,
+    })),
+  });
+});
+
+/**
+ * GET /api/tools/flows
+ *
+ * Returns edges for the tool topology graph:
+ * 1. Pre-computed routing_patterns (preceding_tools -> target_tool)
+ * 2. Pairwise co-occurrence from tool_usage_events session sequences
+ */
+apiRoutes.get('/tools/flows', (c) => {
+  const db = getDb(c);
+  const projectFilter = getProjectHash(c);
+
+  interface FlowEdge {
+    source: string;
+    target: string;
+    frequency: number;
+    edgeType: 'pattern' | 'session';
+  }
+
+  const edges: FlowEdge[] = [];
+  const edgeKey = new Set<string>();
+
+  // 1. routing_patterns edges
+  try {
+    let sql = 'SELECT target_tool, preceding_tools, frequency FROM routing_patterns';
+    const params: unknown[] = [];
+    if (projectFilter) {
+      sql += ' WHERE project_hash = ?';
+      params.push(projectFilter);
+    }
+    sql += ' ORDER BY frequency DESC LIMIT 200';
+
+    const rows = db.prepare(sql).all(...params) as Array<{
+      target_tool: string;
+      preceding_tools: string;
+      frequency: number;
+    }>;
+
+    for (const row of rows) {
+      let preceding: string[];
+      try {
+        preceding = JSON.parse(row.preceding_tools);
+      } catch {
+        preceding = [];
+      }
+      for (const src of preceding) {
+        const key = src + '->' + row.target_tool;
+        if (!edgeKey.has(key)) {
+          edgeKey.add(key);
+          edges.push({
+            source: src,
+            target: row.target_tool,
+            frequency: row.frequency,
+            edgeType: 'pattern',
+          });
+        }
+      }
+    }
+  } catch { /* table may not exist */ }
+
+  // 2. Session co-occurrence: consecutive tool pairs within sessions
+  try {
+    let sql = `
+      SELECT session_id, tool_name, created_at
+      FROM tool_usage_events
+      WHERE session_id IS NOT NULL
+    `;
+    const params: unknown[] = [];
+    if (projectFilter) {
+      sql += ' AND project_hash = ?';
+      params.push(projectFilter);
+    }
+    sql += ' ORDER BY session_id, created_at ASC LIMIT 5000';
+
+    const rows = db.prepare(sql).all(...params) as Array<{
+      session_id: string;
+      tool_name: string;
+      created_at: string;
+    }>;
+
+    // Group by session and extract consecutive pairs
+    const pairFreq = new Map<string, number>();
+    let prevSession = '';
+    let prevTool = '';
+    for (const row of rows) {
+      if (row.session_id === prevSession && prevTool && prevTool !== row.tool_name) {
+        const key = prevTool + '->' + row.tool_name;
+        pairFreq.set(key, (pairFreq.get(key) || 0) + 1);
+      }
+      prevSession = row.session_id;
+      prevTool = row.tool_name;
+    }
+
+    for (const [key, freq] of pairFreq) {
+      if (!edgeKey.has(key) && freq >= 2) {
+        edgeKey.add(key);
+        const [source, target] = key.split('->');
+        edges.push({ source, target, frequency: freq, edgeType: 'session' });
+      }
+    }
+  } catch { /* table may not exist */ }
+
+  return c.json({ edges });
+});
+
+/**
+ * GET /api/tools/:name/stats
+ *
+ * Returns detailed stats for a single tool.
+ */
+apiRoutes.get('/tools/:name/stats', (c) => {
+  const db = getDb(c);
+  const toolName = c.req.param('name');
+  const projectFilter = getProjectHash(c);
+
+  // Base tool info
+  interface ToolRow {
+    id: number;
+    name: string;
+    tool_type: string;
+    scope: string;
+    status: string;
+    usage_count: number;
+    server_name: string | null;
+    description: string | null;
+    last_used_at: string | null;
+    discovered_at: string;
+  }
+
+  let tool: ToolRow | undefined;
+  try {
+    tool = db.prepare(
+      'SELECT id, name, tool_type, scope, status, usage_count, server_name, description, last_used_at, discovered_at FROM tool_registry WHERE name = ? ORDER BY usage_count DESC LIMIT 1'
+    ).get(toolName) as ToolRow | undefined;
+  } catch { /* table may not exist */ }
+
+  if (!tool) {
+    return c.json({ error: 'Tool not found' }, 404);
+  }
+
+  // Success rate from recent events
+  let successRate: number | null = null;
+  let totalEvents = 0;
+  try {
+    let sql = 'SELECT success FROM tool_usage_events WHERE tool_name = ?';
+    const params: unknown[] = [toolName];
+    if (projectFilter) {
+      sql += ' AND project_hash = ?';
+      params.push(projectFilter);
+    }
+    sql += ' ORDER BY created_at DESC LIMIT 50';
+    const events = db.prepare(sql).all(...params) as Array<{ success: number }>;
+    totalEvents = events.length;
+    if (totalEvents > 0) {
+      const successes = events.filter(e => e.success === 1).length;
+      successRate = successes / totalEvents;
+    }
+  } catch { /* table may not exist */ }
+
+  // Sessions used in
+  let sessionsUsedIn = 0;
+  try {
+    let sql = 'SELECT COUNT(DISTINCT session_id) as cnt FROM tool_usage_events WHERE tool_name = ? AND session_id IS NOT NULL';
+    const params: unknown[] = [toolName];
+    if (projectFilter) {
+      sql += ' AND project_hash = ?';
+      params.push(projectFilter);
+    }
+    const row = db.prepare(sql).get(...params) as { cnt: number } | undefined;
+    sessionsUsedIn = row?.cnt ?? 0;
+  } catch { /* table may not exist */ }
+
+  // Top co-occurring tools (tools used in same sessions)
+  let coOccurring: Array<{ name: string; count: number }> = [];
+  try {
+    let sql = `
+      SELECT e2.tool_name as name, COUNT(*) as count
+      FROM tool_usage_events e1
+      JOIN tool_usage_events e2
+        ON e1.session_id = e2.session_id AND e1.tool_name != e2.tool_name
+      WHERE e1.tool_name = ? AND e1.session_id IS NOT NULL
+    `;
+    const params: unknown[] = [toolName];
+    if (projectFilter) {
+      sql += ' AND e1.project_hash = ?';
+      params.push(projectFilter);
+    }
+    sql += ' GROUP BY e2.tool_name ORDER BY count DESC LIMIT 10';
+    coOccurring = db.prepare(sql).all(...params) as Array<{ name: string; count: number }>;
+  } catch { /* table may not exist */ }
+
+  return c.json({
+    tool: {
+      id: tool.id,
+      name: tool.name,
+      toolType: tool.tool_type,
+      scope: tool.scope,
+      status: tool.status,
+      usageCount: tool.usage_count,
+      serverName: tool.server_name,
+      description: tool.description,
+      lastUsedAt: tool.last_used_at,
+      discoveredAt: tool.discovered_at,
+    },
+    successRate,
+    totalEvents,
+    sessionsUsedIn,
+    coOccurring,
+  });
+});
+
+/**
+ * GET /api/tools/sessions
+ *
+ * Returns recent session tool sequences for the flow strip.
+ */
+apiRoutes.get('/tools/sessions', (c) => {
+  const db = getDb(c);
+  const projectFilter = getProjectHash(c);
+  const limitStr = c.req.query('limit');
+  const limit = limitStr ? Math.min(parseInt(limitStr, 10) || 10, 30) : 10;
+
+  interface SessionToolRow {
+    session_id: string;
+    tool_name: string;
+    created_at: string;
+  }
+
+  let sessions: Array<{ sessionId: string; tools: Array<{ name: string; time: string }> }> = [];
+  try {
+    // Get recent sessions that have tool events
+    let sessionSql = `
+      SELECT DISTINCT session_id FROM tool_usage_events
+      WHERE session_id IS NOT NULL
+    `;
+    const sessionParams: unknown[] = [];
+    if (projectFilter) {
+      sessionSql += ' AND project_hash = ?';
+      sessionParams.push(projectFilter);
+    }
+    sessionSql += ' ORDER BY created_at DESC LIMIT ?';
+    sessionParams.push(limit);
+
+    const sessionIds = db.prepare(sessionSql).all(...sessionParams) as Array<{ session_id: string }>;
+
+    if (sessionIds.length > 0) {
+      const placeholders = sessionIds.map(() => '?').join(', ');
+      const ids = sessionIds.map(s => s.session_id);
+
+      const eventRows = db.prepare(`
+        SELECT session_id, tool_name, created_at
+        FROM tool_usage_events
+        WHERE session_id IN (${placeholders})
+        ORDER BY session_id, created_at ASC
+      `).all(...ids) as SessionToolRow[];
+
+      // Group by session
+      const sessionMap = new Map<string, Array<{ name: string; time: string }>>();
+      for (const row of eventRows) {
+        if (!sessionMap.has(row.session_id)) {
+          sessionMap.set(row.session_id, []);
+        }
+        sessionMap.get(row.session_id)!.push({
+          name: row.tool_name,
+          time: row.created_at,
+        });
+      }
+
+      sessions = sessionIds
+        .filter(s => sessionMap.has(s.session_id))
+        .map(s => ({
+          sessionId: s.session_id,
+          tools: sessionMap.get(s.session_id)!,
+        }));
+    }
+  } catch { /* table may not exist */ }
+
+  return c.json({ sessions });
+});
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

@@ -1,3 +1,4 @@
+import * as better_sqlite30 from "better-sqlite3";
 import Database from "better-sqlite3";
 import { z } from "zod";
 
@@ -135,6 +136,11 @@ declare class ObservationRepository {
    */
   listUnclassified(limit?: number): Observation[];
   /**
+   * Lists unclassified observations across ALL projects.
+   * Used by HaikuProcessor to avoid missing observations from other projects.
+   */
+  static listAllUnclassified(db: better_sqlite30.Database, limit?: number): Observation[];
+  /**
    * Fetches observations surrounding a given timestamp for classification context.
    * Returns observations regardless of classification status.
    */
@@ -167,4 +173,4 @@ declare class ObservationRepository {
 }
 //#endregion
 export { SearchResult as a, ObservationInsert as i, DatabaseConfig as n, Session as o, Observation as r, ObservationRepository as t };
-//# sourceMappingURL=observations-Ch0nc47i.d.mts.map
+//# sourceMappingURL=observations-DUHXy7Lm.d.mts.map

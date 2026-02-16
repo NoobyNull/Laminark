@@ -14,6 +14,7 @@ window.laminarkState = {
   timeline: null,
   graphInitialized: false,
   timelineInitialized: false,
+  toolsInitialized: false,
   currentProject: null,
 };
 
@@ -364,6 +365,11 @@ function initNavigation() {
           window.laminarkGraph.initGraph('cy');
           window.laminarkGraph.loadGraphData();
           window.laminarkState.graphInitialized = true;
+        }
+      } else if (targetView === 'tools-view' && !window.laminarkState.toolsInitialized) {
+        if (window.laminarkTools) {
+          window.laminarkTools.initTools('tools-view');
+          window.laminarkState.toolsInitialized = true;
         }
       }
     });

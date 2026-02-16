@@ -1,5 +1,5 @@
 import { i as getProjectHash, n as getDatabaseConfig } from "../config-t8LZeB-u.mjs";
-import { C as rowToObservation, D as debug, S as ObservationRepository, _ as SaveGuard, a as ResearchBufferRepository, b as SearchEngine, c as inferToolType, d as getNodeByNameAndType, h as traverseFrom, i as NotificationStore, n as PathRepository, o as extractServerName, r as initPathSchema, s as inferScope, t as ToolRegistryRepository, v as jaccardSimilarity, w as openDatabase, x as SessionRepository } from "../tool-registry-CZ3mJ4iR.mjs";
+import { C as ObservationRepository, O as debug, S as SessionRepository, T as openDatabase, a as ResearchBufferRepository, c as inferScope, f as getNodeByNameAndType, g as traverseFrom, i as NotificationStore, l as inferToolType, n as PathRepository, o as BranchRepository, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository, v as SaveGuard, w as rowToObservation, x as SearchEngine, y as jaccardSimilarity } from "../tool-registry-AN2fB4FP.mjs";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
@@ -916,7 +916,7 @@ function detectRemovedTools(toolRegistry, scannedTools, projectHash) {
 *
 * @returns Context string to write to stdout, or null if no context available
 */
-function handleSessionStart(input, sessionRepo, db, projectHash, toolRegistry, pathRepo) {
+function handleSessionStart(input, sessionRepo, db, projectHash, toolRegistry, pathRepo, branchRepo) {
 	const sessionId = input.session_id;
 	if (!sessionId) {
 		debug("session", "SessionStart missing session_id, skipping");
@@ -1000,6 +1000,15 @@ function handleSessionStart(input, sessionRepo, db, projectHash, toolRegistry, p
 		}
 	} catch {
 		debug("session", "Cross-session path check failed (non-fatal)");
+	}
+	if (branchRepo) try {
+		const activeBranch = branchRepo.findRecentActiveBranch();
+		if (activeBranch) {
+			const branchContext = `\n[Laminark] Active work branch carried over:\n  ${activeBranch.title ?? activeBranch.id.slice(0, 12)} (${activeBranch.branch_type})\n  Stage: ${activeBranch.arc_stage} | Observations: ${activeBranch.observation_count}\n  Use query_branches to see all branches.\n`;
+			context = context + branchContext;
+		}
+	} catch {
+		debug("session", "Cross-session branch check failed (non-fatal)");
 	}
 	return context + (toolRegistry ? "\nCall report_available_tools with all your tools (built-in and MCP) so Laminark can index them for discovery." : "");
 }
@@ -2087,6 +2096,10 @@ async function main() {
 			initPathSchema(laminarkDb.db);
 			pathRepo = new PathRepository(laminarkDb.db, projectHash);
 		} catch {}
+		let branchRepo;
+		try {
+			branchRepo = new BranchRepository(laminarkDb.db, projectHash);
+		} catch {}
 		switch (eventName) {
 			case "PreToolUse": {
 				const preContext = handlePreToolUse(input, laminarkDb.db, projectHash, pathRepo);
@@ -2098,7 +2111,7 @@ async function main() {
 				processPostToolUseFiltered(input, obsRepo, researchBuffer, toolRegistry, projectHash, laminarkDb.db);
 				break;
 			case "SessionStart": {
-				const context = handleSessionStart(input, sessionRepo, laminarkDb.db, projectHash, toolRegistry, pathRepo);
+				const context = handleSessionStart(input, sessionRepo, laminarkDb.db, projectHash, toolRegistry, pathRepo, branchRepo);
 				if (context) process.stdout.write(context);
 				break;
 			}

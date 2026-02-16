@@ -578,6 +578,53 @@ const MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS idx_path_waypoints_path_order
         ON path_waypoints(path_id, sequence_order);
     `
+	},
+	{
+		version: 21,
+		name: "create_thought_branch_tables",
+		up: `
+      CREATE TABLE IF NOT EXISTS thought_branches (
+        id TEXT PRIMARY KEY,
+        project_hash TEXT NOT NULL,
+        session_id TEXT,
+        status TEXT NOT NULL DEFAULT 'active'
+          CHECK(status IN ('active', 'completed', 'abandoned', 'merged')),
+        branch_type TEXT NOT NULL DEFAULT 'unknown'
+          CHECK(branch_type IN ('investigation', 'bug_fix', 'feature', 'refactor', 'research', 'unknown')),
+        arc_stage TEXT NOT NULL DEFAULT 'investigation'
+          CHECK(arc_stage IN ('investigation', 'diagnosis', 'planning', 'execution', 'verification', 'completed')),
+        title TEXT,
+        summary TEXT,
+        parent_branch_id TEXT REFERENCES thought_branches(id),
+        linked_debug_path_id TEXT,
+        trigger_source TEXT,
+        trigger_observation_id TEXT,
+        observation_count INTEGER NOT NULL DEFAULT 0,
+        tool_pattern TEXT DEFAULT '{}',
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        ended_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS branch_observations (
+        branch_id TEXT NOT NULL REFERENCES thought_branches(id) ON DELETE CASCADE,
+        observation_id TEXT NOT NULL,
+        sequence_order INTEGER NOT NULL,
+        tool_name TEXT,
+        arc_stage_at_add TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (branch_id, observation_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_thought_branches_project_status
+        ON thought_branches(project_hash, status);
+      CREATE INDEX IF NOT EXISTS idx_thought_branches_session
+        ON thought_branches(session_id);
+      CREATE INDEX IF NOT EXISTS idx_thought_branches_started
+        ON thought_branches(started_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_branch_observations_obs
+        ON branch_observations(observation_id);
+    `
 	}
 ];
 /**
@@ -928,6 +975,18 @@ var ObservationRepository = class {
       ORDER BY created_at ASC
       LIMIT ?
     `).all(this.projectHash, limit).map(rowToObservation);
+	}
+	/**
+	* Lists unclassified observations across ALL projects.
+	* Used by HaikuProcessor to avoid missing observations from other projects.
+	*/
+	static listAllUnclassified(db, limit = 20) {
+		return db.prepare(`
+      SELECT * FROM observations
+      WHERE classification IS NULL AND deleted_at IS NULL
+      ORDER BY created_at ASC
+      LIMIT ?
+    `).all(limit).map(rowToObservation);
 	}
 	/**
 	* Fetches observations surrounding a given timestamp for classification context.
@@ -1791,6 +1850,248 @@ function extractServerName(toolName) {
 }
 
 //#endregion
+//#region src/branches/branch-repository.ts
+var BranchRepository = class {
+	db;
+	projectHash;
+	stmtCreate;
+	stmtComplete;
+	stmtAbandon;
+	stmtGetActive;
+	stmtGetById;
+	stmtList;
+	stmtListByStatus;
+	stmtListByType;
+	stmtUpdateArcStage;
+	stmtUpdateToolPattern;
+	stmtUpdateClassification;
+	stmtUpdateSummary;
+	stmtIncrementObsCount;
+	stmtLinkDebugPath;
+	stmtAddObservation;
+	stmtGetObservations;
+	stmtMaxSequence;
+	stmtFindStale;
+	stmtFindUnclassified;
+	stmtFindRecentCompleted;
+	stmtFindRecentActive;
+	stmtListRecent;
+	constructor(db, projectHash) {
+		this.db = db;
+		this.projectHash = projectHash;
+		this.stmtCreate = db.prepare(`
+      INSERT INTO thought_branches
+        (id, project_hash, session_id, status, trigger_source, trigger_observation_id, started_at)
+      VALUES (?, ?, ?, 'active', ?, ?, datetime('now'))
+    `);
+		this.stmtComplete = db.prepare(`
+      UPDATE thought_branches
+      SET status = 'completed', arc_stage = 'completed', ended_at = datetime('now')
+      WHERE id = ? AND project_hash = ?
+    `);
+		this.stmtAbandon = db.prepare(`
+      UPDATE thought_branches
+      SET status = 'abandoned', ended_at = datetime('now')
+      WHERE id = ? AND project_hash = ?
+    `);
+		this.stmtGetActive = db.prepare(`
+      SELECT * FROM thought_branches
+      WHERE project_hash = ? AND status = 'active'
+      ORDER BY started_at DESC
+      LIMIT 1
+    `);
+		this.stmtGetById = db.prepare(`
+      SELECT * FROM thought_branches
+      WHERE id = ? AND project_hash = ?
+    `);
+		this.stmtList = db.prepare(`
+      SELECT * FROM thought_branches
+      WHERE project_hash = ?
+      ORDER BY started_at DESC
+      LIMIT ?
+    `);
+		this.stmtListByStatus = db.prepare(`
+      SELECT * FROM thought_branches
+      WHERE project_hash = ? AND status = ?
+      ORDER BY started_at DESC
+      LIMIT ?
+    `);
+		this.stmtListByType = db.prepare(`
+      SELECT * FROM thought_branches
+      WHERE project_hash = ? AND branch_type = ?
+      ORDER BY started_at DESC
+      LIMIT ?
+    `);
+		this.stmtUpdateArcStage = db.prepare(`
+      UPDATE thought_branches SET arc_stage = ? WHERE id = ? AND project_hash = ?
+    `);
+		this.stmtUpdateToolPattern = db.prepare(`
+      UPDATE thought_branches SET tool_pattern = ? WHERE id = ? AND project_hash = ?
+    `);
+		this.stmtUpdateClassification = db.prepare(`
+      UPDATE thought_branches SET branch_type = ?, title = ? WHERE id = ? AND project_hash = ?
+    `);
+		this.stmtUpdateSummary = db.prepare(`
+      UPDATE thought_branches SET summary = ? WHERE id = ? AND project_hash = ?
+    `);
+		this.stmtIncrementObsCount = db.prepare(`
+      UPDATE thought_branches SET observation_count = observation_count + 1 WHERE id = ? AND project_hash = ?
+    `);
+		this.stmtLinkDebugPath = db.prepare(`
+      UPDATE thought_branches SET linked_debug_path_id = ? WHERE id = ? AND project_hash = ?
+    `);
+		this.stmtAddObservation = db.prepare(`
+      INSERT OR IGNORE INTO branch_observations
+        (branch_id, observation_id, sequence_order, tool_name, arc_stage_at_add)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+		this.stmtGetObservations = db.prepare(`
+      SELECT * FROM branch_observations
+      WHERE branch_id = ?
+      ORDER BY sequence_order ASC
+    `);
+		this.stmtMaxSequence = db.prepare(`
+      SELECT COALESCE(MAX(sequence_order), 0) AS max_seq FROM branch_observations
+      WHERE branch_id = ?
+    `);
+		this.stmtFindStale = db.prepare(`
+      SELECT * FROM thought_branches
+      WHERE project_hash = ? AND status = 'active'
+        AND started_at < datetime('now', '-24 hours')
+    `);
+		this.stmtFindUnclassified = db.prepare(`
+      SELECT * FROM thought_branches
+      WHERE project_hash = ? AND branch_type = 'unknown'
+        AND observation_count >= 3
+      ORDER BY started_at DESC
+      LIMIT ?
+    `);
+		this.stmtFindRecentCompleted = db.prepare(`
+      SELECT * FROM thought_branches
+      WHERE project_hash = ? AND status = 'completed' AND summary IS NULL
+        AND ended_at > datetime('now', '-1 hour')
+      ORDER BY ended_at DESC
+      LIMIT ?
+    `);
+		this.stmtFindRecentActive = db.prepare(`
+      SELECT * FROM thought_branches
+      WHERE project_hash = ? AND status = 'active'
+        AND started_at > datetime('now', '-24 hours')
+      ORDER BY started_at DESC
+      LIMIT 1
+    `);
+		this.stmtListRecent = db.prepare(`
+      SELECT * FROM thought_branches
+      WHERE project_hash = ?
+        AND started_at > datetime('now', ? || ' hours')
+      ORDER BY started_at DESC
+    `);
+	}
+	createBranch(sessionId, triggerSource, triggerObservationId) {
+		const id = randomBytes(16).toString("hex");
+		this.stmtCreate.run(id, this.projectHash, sessionId, triggerSource, triggerObservationId ?? null);
+		return this.getBranch(id);
+	}
+	completeBranch(branchId) {
+		this.stmtComplete.run(branchId, this.projectHash);
+	}
+	abandonBranch(branchId) {
+		this.stmtAbandon.run(branchId, this.projectHash);
+	}
+	getActiveBranch() {
+		const row = this.stmtGetActive.get(this.projectHash);
+		return row ? rowToBranch(row) : null;
+	}
+	getBranch(branchId) {
+		const row = this.stmtGetById.get(branchId, this.projectHash);
+		return row ? rowToBranch(row) : null;
+	}
+	listBranches(limit = 20) {
+		return this.stmtList.all(this.projectHash, limit).map(rowToBranch);
+	}
+	listByStatus(status, limit = 20) {
+		return this.stmtListByStatus.all(this.projectHash, status, limit).map(rowToBranch);
+	}
+	listByType(branchType, limit = 20) {
+		return this.stmtListByType.all(this.projectHash, branchType, limit).map(rowToBranch);
+	}
+	updateArcStage(branchId, stage) {
+		this.stmtUpdateArcStage.run(stage, branchId, this.projectHash);
+	}
+	updateToolPattern(branchId, pattern) {
+		this.stmtUpdateToolPattern.run(JSON.stringify(pattern), branchId, this.projectHash);
+	}
+	updateClassification(branchId, branchType, title) {
+		this.stmtUpdateClassification.run(branchType, title, branchId, this.projectHash);
+	}
+	updateSummary(branchId, summary) {
+		this.stmtUpdateSummary.run(summary, branchId, this.projectHash);
+	}
+	linkDebugPath(branchId, debugPathId) {
+		this.stmtLinkDebugPath.run(debugPathId, branchId, this.projectHash);
+	}
+	addObservation(branchId, observationId, toolName, arcStage) {
+		const { max_seq } = this.stmtMaxSequence.get(branchId);
+		this.stmtAddObservation.run(branchId, observationId, max_seq + 1, toolName, arcStage);
+		this.stmtIncrementObsCount.run(branchId, this.projectHash);
+	}
+	getObservations(branchId) {
+		return this.stmtGetObservations.all(branchId).map(rowToBranchObservation);
+	}
+	findStaleBranches() {
+		return this.stmtFindStale.all(this.projectHash).map(rowToBranch);
+	}
+	findUnclassifiedBranches(limit = 5) {
+		return this.stmtFindUnclassified.all(this.projectHash, limit).map(rowToBranch);
+	}
+	findRecentCompletedUnsummarized(limit = 3) {
+		return this.stmtFindRecentCompleted.all(this.projectHash, limit).map(rowToBranch);
+	}
+	findRecentActiveBranch() {
+		const row = this.stmtFindRecentActive.get(this.projectHash);
+		return row ? rowToBranch(row) : null;
+	}
+	listRecentBranches(hours) {
+		return this.stmtListRecent.all(this.projectHash, `-${hours}`).map(rowToBranch);
+	}
+};
+function rowToBranch(row) {
+	let toolPattern = {};
+	try {
+		toolPattern = JSON.parse(row.tool_pattern);
+	} catch {}
+	return {
+		id: row.id,
+		project_hash: row.project_hash,
+		session_id: row.session_id,
+		status: row.status,
+		branch_type: row.branch_type,
+		arc_stage: row.arc_stage,
+		title: row.title,
+		summary: row.summary,
+		parent_branch_id: row.parent_branch_id,
+		linked_debug_path_id: row.linked_debug_path_id,
+		trigger_source: row.trigger_source,
+		trigger_observation_id: row.trigger_observation_id,
+		observation_count: row.observation_count,
+		tool_pattern: toolPattern,
+		started_at: row.started_at,
+		ended_at: row.ended_at,
+		created_at: row.created_at
+	};
+}
+function rowToBranchObservation(row) {
+	return {
+		branch_id: row.branch_id,
+		observation_id: row.observation_id,
+		sequence_order: row.sequence_order,
+		tool_name: row.tool_name,
+		arc_stage_at_add: row.arc_stage_at_add,
+		created_at: row.created_at
+	};
+}
+
+//#endregion
 //#region src/storage/research-buffer.ts
 /**
 * Lightweight buffer for exploration tool events (Read, Glob, Grep).
@@ -2651,5 +2952,5 @@ var ToolRegistryRepository = class {
 };
 
 //#endregion
-export { rowToObservation as C, debug as D, runMigrations as E, debugTimed as O, ObservationRepository as S, MIGRATIONS as T, SaveGuard as _, ResearchBufferRepository as a, SearchEngine as b, inferToolType as c, getNodeByNameAndType as d, getNodesByType as f, upsertNode as g, traverseFrom as h, NotificationStore as i, countEdgesForNode as l, insertEdge as m, PathRepository as n, extractServerName as o, initGraphSchema as p, initPathSchema as r, inferScope as s, ToolRegistryRepository as t, getEdgesForNode as u, jaccardSimilarity as v, openDatabase as w, SessionRepository as x, hybridSearch as y };
-//# sourceMappingURL=tool-registry-CZ3mJ4iR.mjs.map
+export { ObservationRepository as C, runMigrations as D, MIGRATIONS as E, debug as O, SessionRepository as S, openDatabase as T, upsertNode as _, ResearchBufferRepository as a, hybridSearch as b, inferScope as c, getEdgesForNode as d, getNodeByNameAndType as f, traverseFrom as g, insertEdge as h, NotificationStore as i, debugTimed as k, inferToolType as l, initGraphSchema as m, PathRepository as n, BranchRepository as o, getNodesByType as p, initPathSchema as r, extractServerName as s, ToolRegistryRepository as t, countEdgesForNode as u, SaveGuard as v, rowToObservation as w, SearchEngine as x, jaccardSimilarity as y };
+//# sourceMappingURL=tool-registry-AN2fB4FP.mjs.map

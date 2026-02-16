@@ -14,6 +14,7 @@ import { debug } from '../../shared/debug.js';
 import type { ProjectHashRef } from '../../shared/types.js';
 import type { NotificationStore } from '../../storage/notifications.js';
 import type { StatusCache } from '../status-cache.js';
+import { loadToolVerbosityConfig } from '../../config/tool-verbosity-config.js';
 
 // =============================================================================
 // Response Helpers
@@ -58,8 +59,25 @@ export function registerStatus(
       try {
         debug('mcp', 'status: request (cached)');
 
+        const verbosity = loadToolVerbosityConfig().level;
+
+        if (verbosity === 1) {
+          return textResponse(
+            prependNotifications(notificationStore, projectHash, 'Laminark: connected'),
+          );
+        }
+
         const formatted = cache.getFormatted();
 
+        if (verbosity === 2) {
+          // Standard: first few lines only (connection + counts)
+          const lines = formatted.split('\n').slice(0, 8);
+          return textResponse(
+            prependNotifications(notificationStore, projectHash, lines.join('\n')),
+          );
+        }
+
+        // Verbose: full output
         return textResponse(
           prependNotifications(notificationStore, projectHash, formatted),
         );

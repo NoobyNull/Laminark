@@ -15,6 +15,7 @@
       <button class="nav-tab active" data-view="graph-view">Knowledge Graph</button>
       <button class="nav-tab" data-view="timeline-view">Timeline</button>
       <button class="nav-tab" data-view="activity-view">Activity</button>
+      <button class="nav-tab" data-view="tools-view">Tools</button>
       <button class="nav-tab" data-view="settings-view">Settings</button>
       <button class="nav-tab" data-view="help-view">Help</button>
     </div>
@@ -130,6 +131,53 @@
       </div>
     </div>
 
+    <div id="tools-view" class="view-container">
+      <div class="tools-toolbar">
+        <div class="tools-toolbar-left">
+          <button class="tools-layout-btn active" data-layout="force" title="Force-directed layout">Force</button>
+          <button class="tools-layout-btn" data-layout="cluster" title="Cluster by server">Clustered</button>
+          <span class="tools-separator">|</span>
+          <label class="tools-toggle-label">
+            <input type="checkbox" id="tools-cluster-toggle" checked>
+            <span>Show clusters</span>
+          </label>
+        </div>
+        <div class="tools-toolbar-right">
+          <select id="tools-filter-type" class="tools-filter-select" title="Filter by tool type">
+            <option value="">All types</option>
+            <option value="mcp_server">MCP Server</option>
+            <option value="mcp_tool">MCP Tool</option>
+            <option value="slash_command">Slash Command</option>
+            <option value="skill">Skill</option>
+            <option value="plugin">Plugin</option>
+            <option value="builtin">Built-in</option>
+          </select>
+          <select id="tools-filter-server" class="tools-filter-select" title="Filter by server">
+            <option value="">All servers</option>
+          </select>
+        </div>
+      </div>
+      <div class="tools-content-row">
+        <div class="tools-graph-area">
+          <svg id="tools-svg"></svg>
+          <div class="tools-graph-stats" id="tools-stats">0 tools, 0 flows</div>
+        </div>
+        <aside id="tools-detail-panel" class="tools-detail-panel hidden">
+          <div class="panel-header">
+            <h3 id="tools-detail-title">Tool Details</h3>
+            <button id="tools-detail-close" aria-label="Close detail panel">&times;</button>
+          </div>
+          <div id="tools-detail-body">
+            <p class="empty-state">Click a tool node to view details</p>
+          </div>
+        </aside>
+      </div>
+      <div class="tools-session-strip" id="tools-session-strip">
+        <div class="tools-session-strip-label">Recent sessions</div>
+        <div class="tools-session-strip-content" id="tools-session-strip-content"></div>
+      </div>
+    </div>
+
     <div id="settings-view" class="view-container">
       <div class="settings-container">
         <h2 class="settings-heading">Database Statistics</h2>
@@ -138,6 +186,38 @@
         </div>
 
         <div id="settings-success" class="settings-success hidden"></div>
+
+        <!-- Tool Response Verbosity Config -->
+        <div id="tool-verbosity-section" class="config-section collapsed">
+          <div class="config-section-header" data-config-toggle="tool-verbosity">
+            <h3><span class="toggle-icon">&#9660;</span> Tool Response Verbosity</h3>
+            <span id="tv-status" class="config-section-status enabled">Standard</span>
+          </div>
+          <div class="config-section-body" id="tv-body">
+            <div class="config-field">
+              <div class="config-field-label">Verbosity Level</div>
+              <div class="config-field-desc">Controls how much detail MCP tool responses include</div>
+              <div class="config-radio-group" id="tv-level">
+                <button class="config-radio" data-value="1">Minimal</button>
+                <button class="config-radio active" data-value="2">Standard</button>
+                <button class="config-radio" data-value="3">Verbose</button>
+              </div>
+            </div>
+
+            <div class="config-field">
+              <div class="config-field-desc" style="margin-top: 4px; line-height: 1.6;">
+                <strong>Minimal:</strong> Just confirms the tool ran<br>
+                <strong>Standard:</strong> Shows titles and key info<br>
+                <strong>Verbose:</strong> Full text with all details
+              </div>
+            </div>
+
+            <div class="config-actions">
+              <button class="btn-config-save" id="tv-save">Save</button>
+              <button class="btn-config-defaults" id="tv-defaults">Reset to Defaults</button>
+            </div>
+          </div>
+        </div>
 
         <!-- Topic Detection Config -->
         <div id="topic-detection-section" class="config-section collapsed">
@@ -394,6 +474,31 @@
           </div>
         </div>
 
+        <!-- Cross-Project Access Config -->
+        <div id="cross-access-section" class="config-section collapsed">
+          <div class="config-section-header" data-config-toggle="cross-access">
+            <h3><span class="toggle-icon">&#9660;</span> Cross-Project Access</h3>
+            <span id="ca-status" class="config-section-status disabled">0 projects</span>
+          </div>
+          <div class="config-section-body" id="ca-body">
+            <p class="config-field-desc" style="margin-bottom: 12px;">Allow the current project to read memories from other projects. Read-only &mdash; no writes cross projects.</p>
+            <div class="cross-access-lists">
+              <div class="cross-access-list">
+                <div class="cross-access-list-header">Available</div>
+                <ul id="ca-available" class="cross-access-items"></ul>
+              </div>
+              <div class="cross-access-list">
+                <div class="cross-access-list-header">Can Read From</div>
+                <ul id="ca-readable" class="cross-access-items"></ul>
+              </div>
+            </div>
+            <div class="config-actions">
+              <button class="btn-config-save" id="ca-save">Save</button>
+              <button class="btn-config-defaults" id="ca-defaults">Reset to Defaults</button>
+            </div>
+          </div>
+        </div>
+
         <h2 class="settings-heading settings-heading-danger">Danger Zone</h2>
         <div class="settings-scope">
           <label class="scope-radio"><input type="radio" name="reset-scope" value="current" checked> Current project only (<span id="reset-scope-project-name">—</span>)</label>
@@ -487,5 +592,6 @@
   <script src="/activity.js"></script>
   <script src="/settings.js"></script>
   <script src="/help.js"></script>
+  <script src="/tools.js"></script>
 </body>
 </html>

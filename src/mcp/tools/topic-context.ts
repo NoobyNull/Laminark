@@ -8,6 +8,7 @@ import { StashManager } from '../../storage/stash-manager.js';
 import type { NotificationStore } from '../../storage/notifications.js';
 import type { ContextStash } from '../../types/stash.js';
 import { timeAgo } from '../../commands/resume.js';
+import { loadToolVerbosityConfig } from '../../config/tool-verbosity-config.js';
 
 // ---------------------------------------------------------------------------
 // Formatting helpers (progressive disclosure)
@@ -167,6 +168,21 @@ export function registerTopicContext(
           );
         }
 
+        const verbosity = loadToolVerbosityConfig().level;
+
+        if (verbosity === 1) {
+          return withNotifications(`${stashes.length} stashed thread(s)`);
+        }
+
+        if (verbosity === 2) {
+          // Standard: topic labels with relative time only
+          const lines = stashes.map(
+            (s, i) => `${i + 1}. ${s.topicLabel} (${timeAgo(s.createdAt)})`,
+          );
+          return withNotifications(lines.join('\n'));
+        }
+
+        // Verbose: full output
         const formatted = formatStashes(stashes);
         const footer = `\n---\n${stashes.length} stashed thread(s) | Use /laminark:resume {id} to restore`;
 

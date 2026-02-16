@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-t8LZeB-u.mjs";
-import { C as rowToObservation, D as debug, E as runMigrations, O as debugTimed, S as ObservationRepository, T as MIGRATIONS, _ as SaveGuard, a as ResearchBufferRepository, b as SearchEngine, c as inferToolType, d as getNodeByNameAndType, f as getNodesByType, g as upsertNode, h as traverseFrom, i as NotificationStore, l as countEdgesForNode, m as insertEdge, n as PathRepository, o as extractServerName, p as initGraphSchema, r as initPathSchema, s as inferScope, t as ToolRegistryRepository, u as getEdgesForNode, v as jaccardSimilarity$1, w as openDatabase, x as SessionRepository, y as hybridSearch } from "./tool-registry-OWRDibx0.mjs";
+import { C as ObservationRepository, D as runMigrations, E as MIGRATIONS, O as debug, S as SessionRepository, T as openDatabase, _ as upsertNode, a as ResearchBufferRepository, b as hybridSearch, c as inferScope, d as getEdgesForNode, f as getNodeByNameAndType, g as traverseFrom, h as insertEdge, i as NotificationStore, k as debugTimed, l as inferToolType, m as initGraphSchema, n as PathRepository, o as BranchRepository, p as getNodesByType, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository, u as countEdgesForNode, v as SaveGuard, w as rowToObservation, x as SearchEngine, y as jaccardSimilarity$1 } from "./tool-registry-AN2fB4FP.mjs";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -9,9 +9,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { unstable_v2_createSession } from "@anthropic-ai/claude-agent-sdk";
 import { Worker } from "node:worker_threads";
 import { fileURLToPath as fileURLToPath$1 } from "node:url";
-import { unstable_v2_createSession } from "@anthropic-ai/claude-agent-sdk";
 import { Hono } from "hono";
 import fs from "fs";
 import { cors } from "hono/cors";
@@ -382,19 +382,19 @@ async function startServer(server) {
 *
 * Config stored at: {configDir}/cross-access-{projectHash}.json
 */
-const DEFAULTS$3 = { readableProjects: [] };
+const DEFAULTS$4 = { readableProjects: [] };
 function getConfigPath(projectHash) {
 	return join(getConfigDir(), `cross-access-${projectHash}.json`);
 }
 function loadCrossAccessConfig(projectHash) {
 	const configPath = getConfigPath(projectHash);
 	try {
-		if (!existsSync(configPath)) return { ...DEFAULTS$3 };
+		if (!existsSync(configPath)) return { ...DEFAULTS$4 };
 		const raw = readFileSync(configPath, "utf-8");
 		const parsed = JSON.parse(raw);
 		return { readableProjects: Array.isArray(parsed.readableProjects) ? parsed.readableProjects.filter((h) => typeof h === "string") : [] };
 	} catch {
-		return { ...DEFAULTS$3 };
+		return { ...DEFAULTS$4 };
 	}
 }
 function saveCrossAccessConfig(projectHash, config) {
@@ -438,6 +438,82 @@ function enforceTokenBudget(results, formatResult, budget = TOKEN_BUDGET) {
 }
 
 //#endregion
+//#region src/config/tool-verbosity-config.ts
+/**
+* Tool Response Verbosity Configuration
+*
+* Controls how much detail MCP tool responses include.
+* Three levels:
+*   1 (minimal): Just confirms the tool ran
+*   2 (standard): Shows title/key info (default)
+*   3 (verbose):  Full formatted text with all details
+*
+* Configuration is loaded from .laminark/tool-verbosity.json with
+* a 5-second cache to avoid repeated disk reads.
+*/
+const DEFAULTS$3 = { level: 2 };
+const CACHE_TTL_MS = 5e3;
+let cachedConfig = null;
+let cachedAt = 0;
+/**
+* Loads tool verbosity configuration from disk with a 5-second cache.
+*/
+function loadToolVerbosityConfig() {
+	const now = Date.now();
+	if (cachedConfig && now - cachedAt < CACHE_TTL_MS) return cachedConfig;
+	const configPath = join(getConfigDir(), "tool-verbosity.json");
+	try {
+		const content = readFileSync(configPath, "utf-8");
+		const level = JSON.parse(content).level;
+		if (level === 1 || level === 2 || level === 3) cachedConfig = { level };
+		else cachedConfig = { ...DEFAULTS$3 };
+		debug("config", "Loaded tool verbosity config", { level: cachedConfig.level });
+	} catch {
+		cachedConfig = { ...DEFAULTS$3 };
+	}
+	cachedAt = now;
+	return cachedConfig;
+}
+/**
+* Saves tool verbosity configuration to disk and invalidates cache.
+*/
+function saveToolVerbosityConfig(config) {
+	writeFileSync(join(getConfigDir(), "tool-verbosity.json"), JSON.stringify(config, null, 2), "utf-8");
+	cachedConfig = config;
+	cachedAt = Date.now();
+}
+/**
+* Resets tool verbosity to defaults by invalidating cache.
+*/
+function resetToolVerbosityConfig() {
+	cachedConfig = null;
+	cachedAt = 0;
+	return { ...DEFAULTS$3 };
+}
+/**
+* Selects the appropriate response text based on the current verbosity level.
+*
+* Each tool passes three pre-built strings:
+* - minimal:  Level 1 — just confirms the tool ran
+* - standard: Level 2 — shows title/key info
+* - verbose:  Level 3 — full formatted text
+*/
+function formatResponse(level, minimal, standard, verbose) {
+	switch (level) {
+		case 1: return minimal;
+		case 2: return standard;
+		case 3: return verbose;
+	}
+}
+/**
+* Convenience: loads config and selects the response in one call.
+*/
+function verboseResponse(minimal, standard, verbose) {
+	const { level } = loadToolVerbosityConfig();
+	return formatResponse(level, minimal, standard, verbose);
+}
+
+//#endregion
 //#region src/mcp/tools/recall.ts
 function shortId(id) {
 	return id.slice(0, 8);
@@ -468,19 +544,19 @@ function formatTimelineGroup(date, items) {
 function formatFullItem(obs) {
 	return `--- ${shortId(obs.id)} | ${obs.title ?? "untitled"} | ${obs.createdAt} ---\n${obs.content}`;
 }
-function prependNotifications$6(notificationStore, projectHash, responseText) {
+function prependNotifications$7(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$7(text) {
+function textResponse$8(text) {
 	return { content: [{
 		type: "text",
 		text
 	}] };
 }
-function errorResponse$3(text) {
+function errorResponse$4(text) {
 	return {
 		content: [{
 			type: "text",
@@ -528,13 +604,13 @@ function registerRecall(server, db, projectHashRef, worker = null, embeddingStor
 		}
 	}, async (args) => {
 		const projectHash = projectHashRef.current;
-		const withNotifications = (text) => textResponse$7(prependNotifications$6(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$8(prependNotifications$7(notificationStore, projectHash, text));
 		try {
 			const repo = new ObservationRepository(db, projectHash);
 			const searchEngine = new SearchEngine(db, projectHash);
 			const hasSearch = args.query !== void 0 || args.id !== void 0 || args.title !== void 0;
-			if (args.ids && hasSearch) return errorResponse$3("Provide either a search query or IDs to act on, not both.");
-			if ((args.action === "purge" || args.action === "restore") && !args.ids && !args.id) return errorResponse$3(`Provide ids array or id to specify which memories to ${args.action}.`);
+			if (args.ids && hasSearch) return errorResponse$4("Provide either a search query or IDs to act on, not both.");
+			if ((args.action === "purge" || args.action === "restore") && !args.ids && !args.id) return errorResponse$4(`Provide ids array or id to specify which memories to ${args.action}.`);
 			let observations = [];
 			let searchResults = null;
 			if (args.ids) {
@@ -596,8 +672,21 @@ function registerRecall(server, db, projectHashRef, worker = null, embeddingStor
 			if (args.kind && observations.length > 0) observations = observations.filter((obs) => obs.kind === args.kind);
 			if (observations.length === 0) return withNotifications(`No memories found matching '${args.query ?? args.title ?? args.id ?? ""}'. Try broader search terms or check the ID.`);
 			if (args.action === "view") {
+				const verbosity = loadToolVerbosityConfig().level;
+				if (verbosity === 1) {
+					const searchTerm = args.query ?? args.title ?? "query";
+					return textResponse$8(prependNotifications$7(notificationStore, projectHash, `Found ${observations.length} memories matching "${searchTerm}"`));
+				}
+				if (verbosity === 2) {
+					const lines = observations.map((obs, i) => {
+						const title = obs.title ?? "untitled";
+						return `${i + 1}. ${title}`;
+					});
+					const footer = `\n---\n${observations.length} result(s)`;
+					return textResponse$8(prependNotifications$7(notificationStore, projectHash, lines.join("\n") + footer));
+				}
 				const originalText = formatViewResponse(observations, searchResults, args.detail, args.id !== void 0).content[0].text;
-				return textResponse$7(prependNotifications$6(notificationStore, projectHash, originalText));
+				return textResponse$8(prependNotifications$7(notificationStore, projectHash, originalText));
 			}
 			if (args.action === "purge") {
 				const targetIds = args.ids ?? (args.id ? [args.id] : []);
@@ -629,11 +718,11 @@ function registerRecall(server, db, projectHashRef, worker = null, embeddingStor
 				if (failures.length > 0) msg += ` Not found: ${failures.join(", ")}`;
 				return withNotifications(msg);
 			}
-			return errorResponse$3(`Unknown action: ${args.action}`);
+			return errorResponse$4(`Unknown action: ${args.action}`);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "recall: error", { error: message });
-			return errorResponse$3(`Recall error: ${message}`);
+			return errorResponse$4(`Recall error: ${message}`);
 		}
 	});
 }
@@ -693,7 +782,7 @@ function formatViewResponse(observations, searchResults, detail, isSingleIdLooku
 	}
 	let footer = `---\n${observations.length} result(s) | ~${tokenEstimate} tokens | detail: ${detail}`;
 	if (truncated) footer += " | truncated (use id for full view)";
-	return textResponse$7(`${body}\n${footer}`);
+	return textResponse$8(`${body}\n${footer}`);
 }
 function buildScoreMap(searchResults) {
 	const map = /* @__PURE__ */ new Map();
@@ -765,7 +854,7 @@ function registerSaveMemory(server, db, projectHashRef, notificationStore = null
 				title: resolvedTitle
 			});
 			statusCache?.markDirty();
-			let responseText = `Saved memory "${resolvedTitle}" (id: ${obs.id})`;
+			let responseText = verboseResponse("Memory saved.", `Saved "${resolvedTitle}"`, `Saved memory "${resolvedTitle}" (id: ${obs.id})`);
 			if (notificationStore) {
 				const pending = notificationStore.consumePending(projectHash);
 				if (pending.length > 0) responseText = pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
@@ -857,13 +946,13 @@ function formatStashes(stashes) {
 	if (stashes.length <= 8) return formatDetail(stashes);
 	return formatCompact(stashes);
 }
-function prependNotifications$5(notificationStore, projectHash, responseText) {
+function prependNotifications$6(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$6(text) {
+function textResponse$7(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -886,7 +975,7 @@ function registerTopicContext(server, db, projectHashRef, notificationStore = nu
 		}
 	}, async (args) => {
 		const projectHash = projectHashRef.current;
-		const withNotifications = (text) => textResponse$6(prependNotifications$5(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$7(prependNotifications$6(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "topic_context: request", {
 				query: args.query,
@@ -898,6 +987,9 @@ function registerTopicContext(server, db, projectHashRef, notificationStore = nu
 				stashes = stashes.filter((s) => s.topicLabel.toLowerCase().includes(q) || s.summary.toLowerCase().includes(q));
 			}
 			if (stashes.length === 0) return withNotifications("No stashed context threads found. You're working in a single thread.");
+			const verbosity = loadToolVerbosityConfig().level;
+			if (verbosity === 1) return withNotifications(`${stashes.length} stashed thread(s)`);
+			if (verbosity === 2) return withNotifications(stashes.map((s, i) => `${i + 1}. ${s.topicLabel} (${timeAgo(s.createdAt)})`).join("\n"));
 			const formatted = formatStashes(stashes);
 			const footer = `\n---\n${stashes.length} stashed thread(s) | Use /laminark:resume {id} to restore`;
 			debug("mcp", "topic_context: returning", { count: stashes.length });
@@ -905,7 +997,7 @@ function registerTopicContext(server, db, projectHashRef, notificationStore = nu
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "topic_context: error", { error: message });
-			return textResponse$6(`Error retrieving context threads: ${message}`);
+			return textResponse$7(`Error retrieving context threads: ${message}`);
 		}
 	});
 }
@@ -1010,19 +1102,19 @@ function formatAge(isoDate) {
 	const months = Math.floor(days / 30);
 	return `${months} month${months !== 1 ? "s" : ""} ago`;
 }
-function prependNotifications$4(notificationStore, projectHash, responseText) {
+function prependNotifications$5(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$5(text) {
+function textResponse$6(text) {
 	return { content: [{
 		type: "text",
 		text
 	}] };
 }
-function errorResponse$2(text) {
+function errorResponse$3(text) {
 	return {
 		content: [{
 			type: "text",
@@ -1051,17 +1143,17 @@ function registerQueryGraph(server, db, projectHashRef, notificationStore = null
 		}
 	}, async (args) => {
 		const projectHash = projectHashRef.current;
-		const withNotifications = (text) => textResponse$5(prependNotifications$4(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$6(prependNotifications$5(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "query_graph: request", {
 				query: args.query,
 				entity_type: args.entity_type,
 				depth: args.depth
 			});
-			if (args.entity_type !== void 0 && !isEntityType(args.entity_type)) return errorResponse$2(`Invalid entity_type "${args.entity_type}". Valid types: ${ENTITY_TYPES.join(", ")}`);
+			if (args.entity_type !== void 0 && !isEntityType(args.entity_type)) return errorResponse$3(`Invalid entity_type "${args.entity_type}". Valid types: ${ENTITY_TYPES.join(", ")}`);
 			const entityType = args.entity_type;
 			if (args.relationship_types) {
-				for (const rt of args.relationship_types) if (!isRelationshipType(rt)) return errorResponse$2(`Invalid relationship_type "${rt}". Valid types: ${RELATIONSHIP_TYPES.join(", ")}`);
+				for (const rt of args.relationship_types) if (!isRelationshipType(rt)) return errorResponse$3(`Invalid relationship_type "${rt}". Valid types: ${RELATIONSHIP_TYPES.join(", ")}`);
 			}
 			const relationshipTypes = args.relationship_types;
 			const rootNodes = [];
@@ -1122,6 +1214,21 @@ function registerQueryGraph(server, db, projectHashRef, notificationStore = null
 					createdAt: row.created_at
 				});
 			}
+			const verbosity = loadToolVerbosityConfig().level;
+			if (verbosity === 1) {
+				const totalTraversals = [...traversalsByNode.values()].reduce((sum, arr) => sum + arr.length, 0);
+				return withNotifications(`${rootNodes.length} entities, ${totalTraversals} connections found`);
+			}
+			if (verbosity === 2) {
+				const lines = [];
+				lines.push("## Entities Found");
+				lines.push("");
+				for (const node of rootNodes) {
+					const traversals = traversalsByNode.get(node.id) ?? [];
+					lines.push(`- ${formatEntityType(node.type)} ${node.name} (${traversals.length} connections)`);
+				}
+				return withNotifications(lines.join("\n"));
+			}
 			const formatted = formatResults(rootNodes, traversalsByNode, observations, args.query);
 			debug("mcp", "query_graph: returning", {
 				rootNodes: rootNodes.length,
@@ -1132,7 +1239,7 @@ function registerQueryGraph(server, db, projectHashRef, notificationStore = null
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "query_graph: error", { error: message });
-			return errorResponse$2(`Graph query error: ${message}`);
+			return errorResponse$3(`Graph query error: ${message}`);
 		}
 	});
 }
@@ -1403,13 +1510,13 @@ function formatStats(stats) {
 	}
 	return lines.join("\n");
 }
-function prependNotifications$3(notificationStore, projectHash, responseText) {
+function prependNotifications$4(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$4(text) {
+function textResponse$5(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1438,24 +1545,24 @@ function registerGraphStats(server, db, projectHashRef, notificationStore = null
 				nodes: stats.total_nodes,
 				edges: stats.total_edges
 			});
-			return textResponse$4(prependNotifications$3(notificationStore, projectHash, formatted));
+			return textResponse$5(prependNotifications$4(notificationStore, projectHash, formatted));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "graph_stats: error", { error: message });
-			return textResponse$4(`Graph stats error: ${message}`);
+			return textResponse$5(`Graph stats error: ${message}`);
 		}
 	});
 }
 
 //#endregion
 //#region src/mcp/tools/status.ts
-function prependNotifications$2(notificationStore, projectHash, responseText) {
+function prependNotifications$3(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$3(text) {
+function textResponse$4(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1470,11 +1577,15 @@ function registerStatus(server, cache, projectHashRef, notificationStore = null)
 		const projectHash = projectHashRef.current;
 		try {
 			debug("mcp", "status: request (cached)");
-			return textResponse$3(prependNotifications$2(notificationStore, projectHash, cache.getFormatted()));
+			const verbosity = loadToolVerbosityConfig().level;
+			if (verbosity === 1) return textResponse$4(prependNotifications$3(notificationStore, projectHash, "Laminark: connected"));
+			const formatted = cache.getFormatted();
+			if (verbosity === 2) return textResponse$4(prependNotifications$3(notificationStore, projectHash, formatted.split("\n").slice(0, 8).join("\n")));
+			return textResponse$4(prependNotifications$3(notificationStore, projectHash, formatted));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "status: error", { error: message });
-			return textResponse$3(`Status error: ${message}`);
+			return textResponse$4(`Status error: ${message}`);
 		}
 	});
 }
@@ -1585,13 +1696,13 @@ var StatusCache = class {
 
 //#endregion
 //#region src/mcp/tools/discover-tools.ts
-function textResponse$2(text) {
+function textResponse$3(text) {
 	return { content: [{
 		type: "text",
 		text
 	}] };
 }
-function errorResponse$1(text) {
+function errorResponse$2(text) {
 	return {
 		content: [{
 			type: "text",
@@ -1600,7 +1711,7 @@ function errorResponse$1(text) {
 		isError: true
 	};
 }
-function prependNotifications$1(notificationStore, projectHash, responseText) {
+function prependNotifications$2(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
@@ -1636,7 +1747,7 @@ function registerDiscoverTools(server, toolRegistry, worker, hasVectorSupport, n
 		}
 	}, async (args) => {
 		const projectHash = projectHashRef.current;
-		const withNotifications = (text) => textResponse$2(prependNotifications$1(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$3(prependNotifications$2(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "discover_tools: request", {
 				query: args.query,
@@ -1674,14 +1785,14 @@ function registerDiscoverTools(server, toolRegistry, worker, hasVectorSupport, n
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "discover_tools: error", { error: message });
-			return errorResponse$1(`Discover tools error: ${message}`);
+			return errorResponse$2(`Discover tools error: ${message}`);
 		}
 	});
 }
 
 //#endregion
 //#region src/mcp/tools/report-tools.ts
-function textResponse$1(text) {
+function textResponse$2(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1731,7 +1842,7 @@ function registerReportTools(server, toolRegistry, projectHashRef) {
 				registered,
 				skipped
 			});
-			return textResponse$1(`Registered ${registered} tools in the tool registry.${skipped > 0 ? ` Skipped ${skipped} Laminark tools (already known).` : ""}`);
+			return textResponse$2(`Registered ${registered} tools in the tool registry.${skipped > 0 ? ` Skipped ${skipped} Laminark tools (already known).` : ""}`);
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "report_available_tools: error", { error: message });
@@ -1748,19 +1859,19 @@ function registerReportTools(server, toolRegistry, projectHashRef) {
 
 //#endregion
 //#region src/mcp/tools/debug-paths.ts
-function prependNotifications(notificationStore, projectHash, responseText) {
+function prependNotifications$1(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse(text) {
+function textResponse$1(text) {
 	return { content: [{
 		type: "text",
 		text
 	}] };
 }
-function errorResponse(text) {
+function errorResponse$1(text) {
 	return {
 		content: [{
 			type: "text",
@@ -1797,18 +1908,18 @@ function registerDebugPathTools(server, pathRepo, pathTracker, notificationStore
 		inputSchema: { trigger: z.string().describe("Brief description of the issue being debugged") }
 	}, async (args) => {
 		const projectHash = projectHashRef.current;
-		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$1(prependNotifications$1(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "path_start: request", { trigger: args.trigger });
 			const existingPathId = pathTracker.getActivePathId();
 			const pathId = pathTracker.startManually(args.trigger);
-			if (!pathId) return errorResponse("Failed to start debug path");
+			if (!pathId) return errorResponse$1("Failed to start debug path");
 			if (existingPathId && existingPathId === pathId) return withNotifications(`Debug path already active: ${pathId}`);
-			return withNotifications(`Debug path started: ${pathId}\nTracking: ${args.trigger}`);
+			return withNotifications(verboseResponse("Debug path started.", `Debug path started: ${pathId}`, `Debug path started: ${pathId}\nTracking: ${args.trigger}`));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "path_start: error", { error: message });
-			return errorResponse(`path_start error: ${message}`);
+			return errorResponse$1(`path_start error: ${message}`);
 		}
 	});
 	server.registerTool("path_resolve", {
@@ -1817,17 +1928,17 @@ function registerDebugPathTools(server, pathRepo, pathTracker, notificationStore
 		inputSchema: { resolution: z.string().describe("What fixed the issue") }
 	}, async (args) => {
 		const projectHash = projectHashRef.current;
-		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$1(prependNotifications$1(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "path_resolve: request", { resolution: args.resolution });
 			const pathId = pathTracker.getActivePathId();
-			if (!pathId) return errorResponse("No active debug path to resolve");
+			if (!pathId) return errorResponse$1("No active debug path to resolve");
 			pathTracker.resolveManually(args.resolution);
-			return withNotifications(`Debug path resolved: ${pathId}\nResolution: ${args.resolution}\nKISS summary generating in background...`);
+			return withNotifications(verboseResponse("Debug path resolved.", `Debug path resolved: ${pathId}`, `Debug path resolved: ${pathId}\nResolution: ${args.resolution}\nKISS summary generating in background...`));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "path_resolve: error", { error: message });
-			return errorResponse(`path_resolve error: ${message}`);
+			return errorResponse$1(`path_resolve error: ${message}`);
 		}
 	});
 	server.registerTool("path_show", {
@@ -1836,18 +1947,28 @@ function registerDebugPathTools(server, pathRepo, pathTracker, notificationStore
 		inputSchema: { path_id: z.string().optional().describe("Path ID to show. Omit for active path.") }
 	}, async (args) => {
 		const projectHash = projectHashRef.current;
-		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$1(prependNotifications$1(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "path_show: request", { path_id: args.path_id });
 			let pathData;
 			if (args.path_id) {
 				pathData = pathRepo.getPath(args.path_id);
-				if (!pathData) return errorResponse(`Debug path not found: ${args.path_id}`);
+				if (!pathData) return errorResponse$1(`Debug path not found: ${args.path_id}`);
 			} else {
 				pathData = pathRepo.getActivePath();
-				if (!pathData) return errorResponse("No active debug path");
+				if (!pathData) return errorResponse$1("No active debug path");
 			}
+			const verbosity = loadToolVerbosityConfig().level;
+			if (verbosity === 1) return withNotifications(`Showing debug path: ${pathData.status}`);
 			const waypoints = pathRepo.getWaypoints(pathData.id);
+			if (verbosity === 2) {
+				const lines = [];
+				lines.push(`## Debug Path: ${pathData.id}`);
+				lines.push(`**Status:** ${pathData.status} | **Trigger:** ${pathData.trigger_summary}`);
+				lines.push(`Waypoints: ${waypoints.length}`);
+				if (pathData.resolution_summary) lines.push(`Resolution: ${pathData.resolution_summary}`);
+				return withNotifications(lines.join("\n"));
+			}
 			const lines = [];
 			lines.push(`## Debug Path: ${pathData.id}`);
 			lines.push(`Status: ${pathData.status}`);
@@ -1869,7 +1990,7 @@ function registerDebugPathTools(server, pathRepo, pathTracker, notificationStore
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "path_show: error", { error: message });
-			return errorResponse(`path_show error: ${message}`);
+			return errorResponse$1(`path_show error: ${message}`);
 		}
 	});
 	server.registerTool("path_list", {
@@ -1885,7 +2006,7 @@ function registerDebugPathTools(server, pathRepo, pathTracker, notificationStore
 		}
 	}, async (args) => {
 		const projectHash = projectHashRef.current;
-		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$1(prependNotifications$1(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "path_list: request", {
 				status: args.status,
@@ -1894,25 +2015,768 @@ function registerDebugPathTools(server, pathRepo, pathTracker, notificationStore
 			let paths = pathRepo.listPaths(args.limit);
 			if (args.status) paths = paths.filter((p) => p.status === args.status);
 			if (paths.length === 0) return withNotifications("No debug paths found");
+			const verbosity = loadToolVerbosityConfig().level;
+			if (verbosity === 1) return withNotifications(`${paths.length} debug paths found`);
 			const lines = [];
 			lines.push("## Debug Paths");
 			lines.push("");
-			lines.push("| ID (short) | Status | Trigger | Started | Resolved |");
-			lines.push("|------------|--------|---------|---------|----------|");
-			for (const p of paths) {
-				const shortId = p.id.slice(0, 8);
-				const trigger = p.trigger_summary.length > 50 ? p.trigger_summary.slice(0, 50) + "..." : p.trigger_summary;
-				const resolved = p.resolved_at ?? "-";
-				lines.push(`| ${shortId} | ${p.status} | ${trigger} | ${p.started_at} | ${resolved} |`);
+			if (verbosity === 2) {
+				lines.push("| Status | Trigger |");
+				lines.push("|--------|---------|");
+				for (const p of paths) {
+					const trigger = p.trigger_summary.length > 60 ? p.trigger_summary.slice(0, 60) + "..." : p.trigger_summary;
+					lines.push(`| ${p.status} | ${trigger} |`);
+				}
+			} else {
+				lines.push("| ID (short) | Status | Trigger | Started | Resolved |");
+				lines.push("|------------|--------|---------|---------|----------|");
+				for (const p of paths) {
+					const shortId = p.id.slice(0, 8);
+					const trigger = p.trigger_summary.length > 50 ? p.trigger_summary.slice(0, 50) + "..." : p.trigger_summary;
+					const resolved = p.resolved_at ?? "-";
+					lines.push(`| ${shortId} | ${p.status} | ${trigger} | ${p.started_at} | ${resolved} |`);
+				}
 			}
 			return withNotifications(lines.join("\n"));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "path_list: error", { error: message });
-			return errorResponse(`path_list error: ${message}`);
+			return errorResponse$1(`path_list error: ${message}`);
 		}
 	});
 }
+
+//#endregion
+//#region src/mcp/tools/thought-branches.ts
+function prependNotifications(notificationStore, projectHash, responseText) {
+	if (!notificationStore) return responseText;
+	const pending = notificationStore.consumePending(projectHash);
+	if (pending.length === 0) return responseText;
+	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
+}
+function textResponse(text) {
+	return { content: [{
+		type: "text",
+		text
+	}] };
+}
+function errorResponse(text) {
+	return {
+		content: [{
+			type: "text",
+			text
+		}],
+		isError: true
+	};
+}
+function registerThoughtBranchTools(server, branchRepo, obsRepo, notificationStore, projectHashRef) {
+	server.registerTool("query_branches", {
+		title: "Query Thought Branches",
+		description: "Search and list thought branches - coherent units of work (investigations, bug fixes, features). Use to see work history and what was investigated, fixed, or built.",
+		inputSchema: {
+			status: z.enum([
+				"active",
+				"completed",
+				"abandoned",
+				"merged"
+			]).optional().describe("Filter by branch status"),
+			branch_type: z.enum([
+				"investigation",
+				"bug_fix",
+				"feature",
+				"refactor",
+				"research",
+				"unknown"
+			]).optional().describe("Filter by branch type"),
+			limit: z.number().int().min(1).max(50).default(10).describe("Maximum results to return")
+		}
+	}, async (args) => {
+		const projectHash = projectHashRef.current;
+		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
+		try {
+			debug("mcp", "query_branches: request", {
+				status: args.status,
+				branch_type: args.branch_type,
+				limit: args.limit
+			});
+			let branches;
+			if (args.status) branches = branchRepo.listByStatus(args.status, args.limit);
+			else if (args.branch_type) branches = branchRepo.listByType(args.branch_type, args.limit);
+			else branches = branchRepo.listBranches(args.limit);
+			if (branches.length === 0) return withNotifications("No thought branches found");
+			const verbosity = loadToolVerbosityConfig().level;
+			if (verbosity === 1) return withNotifications(`${branches.length} branches found`);
+			const lines = [];
+			lines.push("## Thought Branches");
+			lines.push("");
+			if (verbosity === 2) {
+				lines.push("| Status | Type | Title |");
+				lines.push("|--------|------|-------|");
+				for (const b of branches) {
+					const title = b.title ? b.title.length > 50 ? b.title.slice(0, 50) + "..." : b.title : "-";
+					lines.push(`| ${b.status} | ${b.branch_type} | ${title} |`);
+				}
+			} else {
+				lines.push("| ID (short) | Status | Type | Stage | Title | Observations | Started |");
+				lines.push("|------------|--------|------|-------|-------|-------------|---------|");
+				for (const b of branches) {
+					const shortId = b.id.slice(0, 8);
+					const title = b.title ? b.title.length > 40 ? b.title.slice(0, 40) + "..." : b.title : "-";
+					lines.push(`| ${shortId} | ${b.status} | ${b.branch_type} | ${b.arc_stage} | ${title} | ${b.observation_count} | ${b.started_at} |`);
+				}
+			}
+			return withNotifications(lines.join("\n"));
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Unknown error";
+			debug("mcp", "query_branches: error", { error: message });
+			return errorResponse(`query_branches error: ${message}`);
+		}
+	});
+	server.registerTool("show_branch", {
+		title: "Show Thought Branch",
+		description: "Show detailed view of a thought branch with observation timeline and arc stage annotations. Trace the full arc of a work unit.",
+		inputSchema: { branch_id: z.string().optional().describe("Branch ID to show. Omit for active branch.") }
+	}, async (args) => {
+		const projectHash = projectHashRef.current;
+		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
+		try {
+			debug("mcp", "show_branch: request", { branch_id: args.branch_id });
+			let branch;
+			if (args.branch_id) {
+				branch = branchRepo.getBranch(args.branch_id);
+				if (!branch) return errorResponse(`Branch not found: ${args.branch_id}`);
+			} else {
+				branch = branchRepo.getActiveBranch();
+				if (!branch) return errorResponse("No active thought branch");
+			}
+			const verbosity = loadToolVerbosityConfig().level;
+			const branchTitle = branch.title ?? branch.id.slice(0, 12);
+			if (verbosity === 1) return withNotifications(`Showing "${branchTitle}"`);
+			const observations = branchRepo.getObservations(branch.id);
+			if (verbosity === 2) {
+				const lines = [];
+				lines.push(`## ${branchTitle}`);
+				lines.push(`**Status:** ${branch.status} | **Type:** ${branch.branch_type} | **Stage:** ${branch.arc_stage}`);
+				if (branch.summary) lines.push(branch.summary);
+				lines.push(`Observations: ${observations.length}`);
+				return withNotifications(lines.join("\n"));
+			}
+			const lines = [];
+			lines.push(`## Thought Branch: ${branchTitle}`);
+			lines.push(`**ID:** ${branch.id}`);
+			lines.push(`**Status:** ${branch.status}`);
+			lines.push(`**Type:** ${branch.branch_type}`);
+			lines.push(`**Arc Stage:** ${branch.arc_stage}`);
+			lines.push(`**Started:** ${branch.started_at}`);
+			if (branch.ended_at) lines.push(`**Ended:** ${branch.ended_at}`);
+			if (branch.trigger_source) lines.push(`**Trigger:** ${branch.trigger_source}`);
+			if (branch.linked_debug_path_id) lines.push(`**Linked Debug Path:** ${branch.linked_debug_path_id}`);
+			lines.push("");
+			const tools = Object.entries(branch.tool_pattern).sort(([, a], [, b]) => b - a);
+			if (tools.length > 0) {
+				lines.push("### Tool Usage");
+				for (const [tool, count] of tools) lines.push(`- ${tool}: ${count}`);
+				lines.push("");
+			}
+			if (branch.summary) {
+				lines.push("### Summary");
+				lines.push(branch.summary);
+				lines.push("");
+			}
+			lines.push(`### Observation Timeline (${observations.length})`);
+			for (const bo of observations) {
+				const obs = obsRepo.getById(bo.observation_id);
+				const content = obs ? obs.title ?? obs.content.slice(0, 100) : bo.observation_id.slice(0, 8);
+				const stageTag = bo.arc_stage_at_add ? `[${bo.arc_stage_at_add}]` : "";
+				const toolTag = bo.tool_name ? `(${bo.tool_name})` : "";
+				lines.push(`${bo.sequence_order}. ${stageTag} ${toolTag} ${content}`);
+			}
+			return withNotifications(lines.join("\n"));
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Unknown error";
+			debug("mcp", "show_branch: error", { error: message });
+			return errorResponse(`show_branch error: ${message}`);
+		}
+	});
+	server.registerTool("branch_summary", {
+		title: "Branch Activity Summary",
+		description: "Summary of recent work activity grouped by time window. Shows what was investigated, fixed, built, and where work left off.",
+		inputSchema: { hours: z.number().int().min(1).max(168).default(24).describe("Time window in hours (default 24)") }
+	}, async (args) => {
+		const projectHash = projectHashRef.current;
+		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
+		try {
+			debug("mcp", "branch_summary: request", { hours: args.hours });
+			const branches = branchRepo.listRecentBranches(args.hours);
+			if (branches.length === 0) return withNotifications(`No work branches in the last ${args.hours} hours`);
+			const verbosity = loadToolVerbosityConfig().level;
+			if (verbosity === 1) return withNotifications(`${branches.length} branches in ${args.hours}h`);
+			const active = branches.filter((b) => b.status === "active");
+			const completed = branches.filter((b) => b.status === "completed");
+			const abandoned = branches.filter((b) => b.status === "abandoned");
+			const lines = [];
+			lines.push(`## Work Summary (last ${args.hours}h)`);
+			lines.push(`**Total branches:** ${branches.length}`);
+			lines.push("");
+			if (active.length > 0) {
+				lines.push("### Active");
+				for (const b of active) {
+					const title = b.title ?? b.id.slice(0, 8);
+					lines.push(verbosity === 2 ? `- ${title} (${b.branch_type})` : `- **${title}** (${b.branch_type}, ${b.arc_stage}) — ${b.observation_count} obs`);
+				}
+				lines.push("");
+			}
+			if (completed.length > 0) {
+				lines.push("### Completed");
+				for (const b of completed) {
+					const title = b.title ?? b.id.slice(0, 8);
+					const summary = b.summary ? `: ${b.summary.slice(0, 100)}` : "";
+					lines.push(verbosity === 2 ? `- ${title} (${b.branch_type})` : `- **${title}** (${b.branch_type})${summary}`);
+				}
+				lines.push("");
+			}
+			if (abandoned.length > 0) {
+				lines.push("### Abandoned");
+				for (const b of abandoned) {
+					const title = b.title ?? b.id.slice(0, 8);
+					lines.push(verbosity === 2 ? `- ${title} (${b.branch_type})` : `- **${title}** (${b.branch_type}) — ${b.observation_count} obs`);
+				}
+				lines.push("");
+			}
+			if (verbosity === 3) {
+				const allTools = {};
+				for (const b of branches) for (const [tool, count] of Object.entries(b.tool_pattern)) allTools[tool] = (allTools[tool] ?? 0) + count;
+				const toolEntries = Object.entries(allTools).sort(([, a], [, b]) => b - a);
+				if (toolEntries.length > 0) {
+					lines.push("### Tool Distribution");
+					for (const [tool, count] of toolEntries.slice(0, 10)) lines.push(`- ${tool}: ${count}`);
+				}
+			}
+			return withNotifications(lines.join("\n"));
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Unknown error";
+			debug("mcp", "branch_summary: error", { error: message });
+			return errorResponse(`branch_summary error: ${message}`);
+		}
+	});
+}
+
+//#endregion
+//#region src/branches/arc-detector.ts
+const BUILTIN_CATEGORY = {
+	"Read": "investigation",
+	"Glob": "investigation",
+	"Grep": "investigation",
+	"WebSearch": "investigation",
+	"WebFetch": "investigation",
+	"Task": "investigation",
+	"AskUserQuestion": "investigation",
+	"Write": "write",
+	"Edit": "write",
+	"NotebookEdit": "write",
+	"Bash": "verification",
+	"EnterPlanMode": "planning",
+	"ExitPlanMode": "planning",
+	"TaskCreate": "planning",
+	"TaskUpdate": "planning",
+	"TaskList": "planning",
+	"TaskGet": "planning",
+	"Skill": "uncategorized"
+};
+/** Keywords matched against tool descriptions (case-insensitive). */
+const DESCRIPTION_RULES = [
+	{
+		category: "planning",
+		keywords: /\b(plan|todo|task|roadmap|milestone|phase|design|architect)\b/i
+	},
+	{
+		category: "verification",
+		keywords: /\b(run|test|build|execute|evaluate|validate|verify|check|assert|lint|compile)\b/i
+	},
+	{
+		category: "write",
+		keywords: /\b(write|edit|create|update|save|upload|modify|delete|remove|fill|type|click|select|drag|press|submit|install|deploy|push|commit|insert|drop|replace)\b/i
+	},
+	{
+		category: "investigation",
+		keywords: /\b(read|search|query|find|list|get|fetch|browse|snapshot|screenshot|inspect|show|view|discover|status|stats|navigate|hover|recall|monitor|log|trace|debug|profile|measure|analyze|explore)\b/i
+	}
+];
+/**
+* Classify a tool from its description text.
+* Returns null if no confident match.
+*/
+function classifyFromDescription(description) {
+	for (const rule of DESCRIPTION_RULES) if (rule.keywords.test(description)) return rule.category;
+	return null;
+}
+const NAME_RULES = [
+	{
+		category: "planning",
+		pattern: /\b(plan|todo|task|roadmap|phase|milestone)\b/i
+	},
+	{
+		category: "verification",
+		pattern: /\b(run|test|build|exec|evaluate|validate|check|verify)\b/i
+	},
+	{
+		category: "write",
+		pattern: /\b(write|edit|create|update|save|upload|fill|type|click|select|drag|press|install)\b/i
+	},
+	{
+		category: "investigation",
+		pattern: /\b(search|query|find|list|get|read|fetch|browse|snapshot|screenshot|inspect|show|view|recall|discover|status|stats|console|network|navigate|tabs|hover)\b/i
+	}
+];
+function classifyFromName(toolName) {
+	const actionPart = toolName.includes("__") ? toolName.substring(toolName.lastIndexOf("__") + 2) : toolName;
+	for (const rule of NAME_RULES) if (rule.pattern.test(actionPart)) return rule.category;
+	if (toolName.includes("laminark")) return "investigation";
+	return "uncategorized";
+}
+const classificationCache = /* @__PURE__ */ new Map();
+let lastRegistryCount = -1;
+/**
+* Re-reads the tool_registry table and classifies every tool by its
+* description. Only rescans when the registry row count has changed.
+*
+* Call on startup and periodically (e.g., during BranchTracker maintenance).
+*/
+function primeFromRegistry(db, projectHash) {
+	try {
+		const currentCount = db.prepare("SELECT COUNT(*) AS cnt FROM tool_registry").get()?.cnt ?? 0;
+		if (currentCount === lastRegistryCount && lastRegistryCount >= 0) return;
+		const rows = db.prepare(`
+      SELECT name, description FROM tool_registry
+      WHERE status = 'active'
+        AND (scope = 'global' OR project_hash IS NULL OR project_hash = ?)
+    `).all(projectHash);
+		let primed = 0;
+		for (const row of rows) {
+			if (BUILTIN_CATEGORY[row.name]) continue;
+			let category = null;
+			if (row.description) category = classifyFromDescription(row.description);
+			if (!category) category = classifyFromName(row.name);
+			classificationCache.set(row.name, category);
+			primed++;
+		}
+		lastRegistryCount = currentCount;
+		debug("branches", "Arc detector cache primed from registry", {
+			registryTools: rows.length,
+			primed
+		});
+	} catch {}
+}
+/**
+* Classify any tool name into an arc category.
+*
+* Priority: built-in table > registry-primed cache > name-pattern fallback.
+*/
+function classifyTool(toolName) {
+	const cached = classificationCache.get(toolName);
+	if (cached) return cached;
+	const builtin = BUILTIN_CATEGORY[toolName];
+	if (builtin) {
+		classificationCache.set(toolName, builtin);
+		return builtin;
+	}
+	const fromName = classifyFromName(toolName);
+	classificationCache.set(toolName, fromName);
+	return fromName;
+}
+/**
+* Infers the current arc stage from tool usage pattern counts.
+*
+* Handles all tool types: builtins, MCP tools, plugins, skills, slash commands.
+* Uncategorized tools are excluded from ratio calculations so they don't
+* dilute the signal from known tools.
+*
+* @param toolPattern - Map of tool name to usage count within the branch
+* @param classification - Optional dominant observation classification
+* @returns The inferred arc stage
+*/
+function inferArcStage(toolPattern, classification) {
+	let investigationCount = 0;
+	let writeCount = 0;
+	let verificationCount = 0;
+	let planningCount = 0;
+	let categorizedCount = 0;
+	for (const [tool, count] of Object.entries(toolPattern)) switch (classifyTool(tool)) {
+		case "investigation":
+			investigationCount += count;
+			categorizedCount += count;
+			break;
+		case "write":
+			writeCount += count;
+			categorizedCount += count;
+			break;
+		case "verification":
+			verificationCount += count;
+			categorizedCount += count;
+			break;
+		case "planning":
+			planningCount += count;
+			categorizedCount += count;
+			break;
+		case "uncategorized": break;
+	}
+	if (categorizedCount === 0) return "investigation";
+	if (verificationCount > 0 && writeCount > 0) {
+		if (verificationCount / categorizedCount > .2) return "verification";
+	}
+	if (writeCount / categorizedCount > .4) return "execution";
+	if (planningCount > 0) {
+		if (planningCount / categorizedCount > .1) return "planning";
+	}
+	if (classification === "problem" && writeCount > 0 && investigationCount > 0) return "diagnosis";
+	return "investigation";
+}
+
+//#endregion
+//#region src/config/haiku-config.ts
+function loadHaikuConfig() {
+	return {
+		model: "claude-haiku-4-5-20251001",
+		maxTokensPerCall: 1024
+	};
+}
+
+//#endregion
+//#region src/intelligence/haiku-client.ts
+/**
+* Shared Haiku client using Claude Agent SDK V2 session.
+*
+* Routes Haiku calls through the user's Claude Code subscription
+* instead of requiring a separate API key. Uses a persistent session
+* to avoid 12s cold-start overhead on sequential calls.
+*
+* Provides the core infrastructure for all Haiku agent modules:
+* - callHaiku() helper for structured prompt/response calls
+* - extractJsonFromResponse() for defensive JSON parsing
+* - Session reuse across batch processing cycles
+*/
+let _session = null;
+function getOrCreateSession() {
+	if (!_session) _session = unstable_v2_createSession({
+		model: loadHaikuConfig().model,
+		permissionMode: "bypassPermissions",
+		allowedTools: []
+	});
+	return _session;
+}
+/**
+* Returns whether Haiku enrichment is available.
+* Always true with subscription auth -- no API key check needed.
+*/
+function isHaikuEnabled() {
+	return true;
+}
+/**
+* Calls Haiku with a system prompt and user content.
+* Returns the text content from the response.
+*
+* Uses a persistent V2 session to avoid cold-start overhead on sequential calls.
+* System prompt is embedded in the user message since session-level systemPrompt
+* is set at creation time and we need different prompts per agent.
+*
+* @param systemPrompt - Instructions for the model
+* @param userContent - The content to process
+* @param _maxTokens - Kept for signature compatibility (unused -- Agent SDK constrains output via prompts)
+* @throws Error if the Haiku call fails or session expires
+*/
+async function callHaiku(systemPrompt, userContent, _maxTokens) {
+	const session = getOrCreateSession();
+	const fullPrompt = `<instructions>\n${systemPrompt}\n</instructions>\n\n${userContent}`;
+	try {
+		await session.send(fullPrompt);
+		for await (const msg of session.stream()) if (msg.type === "result") {
+			if (msg.subtype === "success") return msg.result;
+			const errorMsg = ("errors" in msg ? msg.errors : void 0)?.join(", ") ?? msg.subtype;
+			throw new Error(`Haiku call failed: ${errorMsg}`);
+		}
+		return "";
+	} catch (error) {
+		try {
+			_session?.close();
+		} catch {}
+		_session = null;
+		throw error;
+	}
+}
+/**
+* Defensive JSON extraction from Haiku response text.
+*
+* Handles common LLM response quirks:
+* - Markdown code fences (```json ... ```)
+* - Explanatory text before/after JSON
+* - Both array and object JSON shapes
+*
+* @throws Error if no JSON structure found in text
+*/
+function extractJsonFromResponse(text) {
+	const cleaned = text.replace(/```json\s*/g, "").replace(/```\s*/g, "");
+	const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+	if (arrayMatch) return JSON.parse(arrayMatch[0]);
+	const objMatch = cleaned.match(/\{[\s\S]*\}/);
+	if (objMatch) return JSON.parse(objMatch[0]);
+	throw new Error("No JSON found in Haiku response");
+}
+
+//#endregion
+//#region src/branches/branch-classifier-agent.ts
+/**
+* Haiku agent for classifying thought branch type and generating title/summary.
+*
+* Uses a single Haiku call to determine:
+* 1. Branch type (investigation, bug_fix, feature, refactor, research)
+* 2. A concise title for the branch
+* 3. An optional summary (for completed branches)
+*
+* Follows the same pattern as haiku-classifier-agent.ts.
+*/
+const ClassifyBranchSchema = z.object({
+	branch_type: z.enum([
+		"investigation",
+		"bug_fix",
+		"feature",
+		"refactor",
+		"research"
+	]),
+	title: z.string().max(100)
+});
+const SummarizeBranchSchema = z.object({ summary: z.string().max(500) });
+const CLASSIFY_PROMPT = `You classify developer work branches for a knowledge management system.
+
+Given a sequence of observations from a work session, determine:
+1. branch_type: What kind of work is this?
+   - "investigation": Exploring code, reading docs, understanding behavior
+   - "bug_fix": Fixing an error, test failure, or unexpected behavior
+   - "feature": Building new functionality
+   - "refactor": Restructuring existing code without changing behavior
+   - "research": Looking up external resources, comparing approaches
+
+2. title: A concise title (3-8 words) describing the work unit. Use imperative form.
+   Examples: "Fix auth token refresh", "Add branch detection system", "Investigate memory leak"
+
+Return JSON: {"branch_type": "...", "title": "..."}
+No markdown, no explanation, ONLY the JSON object.`;
+const SUMMARIZE_PROMPT = `You summarize completed developer work branches for a knowledge management system.
+
+Given a sequence of observations from a completed work branch, write a concise summary (1-3 sentences) that captures:
+- What was the goal
+- What was done
+- What was the outcome
+
+Return JSON: {"summary": "..."}
+No markdown, no explanation, ONLY the JSON object.`;
+/**
+* Classifies a branch type and generates a title from observation content.
+*/
+async function classifyBranchWithHaiku(observationTexts, toolPattern) {
+	const parsed = extractJsonFromResponse(await callHaiku(CLASSIFY_PROMPT, [
+		`Tool usage: ${Object.entries(toolPattern).sort(([, a], [, b]) => b - a).map(([tool, count]) => `${tool}: ${count}`).join(", ")}`,
+		"",
+		"Observations:",
+		...observationTexts.slice(0, 10).map((t, i) => `${i + 1}. ${t.slice(0, 200)}`)
+	].join("\n"), 256));
+	return ClassifyBranchSchema.parse(parsed);
+}
+/**
+* Generates a completion summary for a finished branch.
+*/
+async function summarizeBranchWithHaiku(title, branchType, observationTexts) {
+	const parsed = extractJsonFromResponse(await callHaiku(SUMMARIZE_PROMPT, [
+		`Branch: ${title} (${branchType})`,
+		"",
+		"Observations:",
+		...observationTexts.slice(0, 15).map((t, i) => `${i + 1}. ${t.slice(0, 200)}`)
+	].join("\n"), 256));
+	return SummarizeBranchSchema.parse(parsed);
+}
+
+//#endregion
+//#region src/branches/branch-tracker.ts
+const TIME_GAP_MS = 900 * 1e3;
+var BranchTracker = class {
+	state = "idle";
+	activeBranchId = null;
+	activeProjectHash = null;
+	activeSessionId = null;
+	lastObservationTime = 0;
+	toolPattern = {};
+	repo;
+	db;
+	projectHash;
+	constructor(repo, db, projectHash) {
+		this.repo = repo;
+		this.db = db;
+		this.projectHash = projectHash;
+		primeFromRegistry(db, projectHash);
+		const activeBranch = repo.findRecentActiveBranch();
+		if (activeBranch) {
+			this.state = "tracking";
+			this.activeBranchId = activeBranch.id;
+			this.activeProjectHash = activeBranch.project_hash;
+			this.activeSessionId = activeBranch.session_id;
+			this.toolPattern = activeBranch.tool_pattern;
+			this.lastObservationTime = new Date(activeBranch.started_at).getTime();
+			debug("branches", "Recovered active branch from DB", { branchId: activeBranch.id });
+		}
+	}
+	/**
+	* Process a new observation through the boundary detection state machine.
+	* Called from HaikuProcessor after classification (Step 1.6).
+	*/
+	processObservation(obs) {
+		const now = Date.now();
+		const obsTime = new Date(obs.createdAt).getTime();
+		const toolName = this.extractToolName(obs.source);
+		const boundary = this.detectBoundary(obs, obsTime);
+		if (boundary) {
+			if (this.state === "tracking" && this.activeBranchId) this.completeBranch();
+			this.startBranch(boundary, obs);
+		} else if (this.state === "idle") this.startBranch("session_start", obs);
+		if (this.activeBranchId) {
+			const arcStage = inferArcStage(this.toolPattern, obs.classification);
+			if (toolName) {
+				this.toolPattern[toolName] = (this.toolPattern[toolName] ?? 0) + 1;
+				this.repo.updateToolPattern(this.activeBranchId, this.toolPattern);
+			}
+			this.repo.addObservation(this.activeBranchId, obs.id, toolName, arcStage);
+			const newStage = inferArcStage(this.toolPattern, obs.classification);
+			this.repo.updateArcStage(this.activeBranchId, newStage);
+		}
+		this.lastObservationTime = obsTime || now;
+		this.activeProjectHash = obs.projectHash;
+		this.activeSessionId = obs.sessionId ?? this.activeSessionId;
+	}
+	/**
+	* Notify the tracker of a topic shift (from TopicShiftHandler).
+	*/
+	onTopicShift(observationId) {
+		if (this.state === "tracking" && this.activeBranchId) {
+			this.completeBranch();
+			debug("branches", "Topic shift boundary detected", { observationId });
+		}
+	}
+	/**
+	* Link the active branch to a debug path (when PathTracker activates).
+	*/
+	linkDebugPath(debugPathId) {
+		if (this.activeBranchId) {
+			this.repo.linkDebugPath(this.activeBranchId, debugPathId);
+			debug("branches", "Linked debug path to branch", {
+				branchId: this.activeBranchId,
+				debugPathId
+			});
+		}
+	}
+	/**
+	* Get the active branch ID (for external callers).
+	*/
+	getActiveBranchId() {
+		return this.activeBranchId;
+	}
+	/**
+	* Run periodic maintenance tasks:
+	* - Classify branches with 3+ observations via Haiku
+	* - Generate summaries for recently completed branches
+	* - Auto-abandon stale branches (>24h)
+	* - Link branches to debug paths
+	*/
+	async runMaintenance() {
+		try {
+			primeFromRegistry(this.db, this.projectHash);
+			const stale = this.repo.findStaleBranches();
+			for (const branch of stale) {
+				this.repo.abandonBranch(branch.id);
+				if (this.activeBranchId === branch.id) {
+					this.state = "idle";
+					this.activeBranchId = null;
+					this.toolPattern = {};
+				}
+				debug("branches", "Auto-abandoned stale branch", { branchId: branch.id });
+			}
+			if (isHaikuEnabled()) {
+				const unclassified = this.repo.findUnclassifiedBranches(3);
+				for (const branch of unclassified) try {
+					const observations = this.repo.getObservations(branch.id);
+					const obsRepo = new ObservationRepository(this.db, branch.project_hash);
+					const texts = observations.map((bo) => {
+						const obs = obsRepo.getById(bo.observation_id);
+						return obs ? obs.title ? `${obs.title}: ${obs.content}` : obs.content : null;
+					}).filter((t) => t !== null);
+					if (texts.length === 0) continue;
+					const result = await classifyBranchWithHaiku(texts, branch.tool_pattern);
+					this.repo.updateClassification(branch.id, result.branch_type, result.title);
+					debug("branches", "Branch classified", {
+						branchId: branch.id,
+						type: result.branch_type,
+						title: result.title
+					});
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					debug("branches", "Branch classification failed (non-fatal)", {
+						branchId: branch.id,
+						error: msg
+					});
+				}
+				const unsummarized = this.repo.findRecentCompletedUnsummarized(2);
+				for (const branch of unsummarized) try {
+					const observations = this.repo.getObservations(branch.id);
+					const obsRepo = new ObservationRepository(this.db, branch.project_hash);
+					const texts = observations.map((bo) => {
+						const obs = obsRepo.getById(bo.observation_id);
+						return obs ? obs.title ? `${obs.title}: ${obs.content}` : obs.content : null;
+					}).filter((t) => t !== null);
+					if (texts.length === 0) continue;
+					const result = await summarizeBranchWithHaiku(branch.title ?? "Untitled", branch.branch_type, texts);
+					this.repo.updateSummary(branch.id, result.summary);
+					debug("branches", "Branch summarized", { branchId: branch.id });
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					debug("branches", "Branch summarization failed (non-fatal)", {
+						branchId: branch.id,
+						error: msg
+					});
+				}
+			}
+		} catch (err) {
+			debug("branches", "Maintenance error (non-fatal)", { error: err instanceof Error ? err.message : String(err) });
+		}
+	}
+	detectBoundary(obs, obsTime) {
+		if (this.activeProjectHash && obs.projectHash !== this.activeProjectHash) return "project_switch";
+		if (this.activeSessionId && obs.sessionId && obs.sessionId !== this.activeSessionId) return "session_start";
+		if (this.lastObservationTime > 0) {
+			if (obsTime - this.lastObservationTime > TIME_GAP_MS) return "time_gap";
+		}
+		return null;
+	}
+	startBranch(triggerSource, obs) {
+		const branch = this.repo.createBranch(obs.sessionId ?? null, triggerSource, obs.id);
+		this.state = "tracking";
+		this.activeBranchId = branch.id;
+		this.toolPattern = {};
+		debug("branches", "New branch started", {
+			branchId: branch.id,
+			trigger: triggerSource
+		});
+	}
+	completeBranch() {
+		if (!this.activeBranchId) return;
+		this.repo.completeBranch(this.activeBranchId);
+		debug("branches", "Branch completed", { branchId: this.activeBranchId });
+		this.state = "idle";
+		this.activeBranchId = null;
+		this.toolPattern = {};
+	}
+	extractToolName(source) {
+		if (source.startsWith("hook:")) return source.slice(5);
+		if (source.startsWith("mcp:")) return source.slice(4);
+		return null;
+	}
+};
 
 //#endregion
 //#region src/analysis/worker-bridge.ts
@@ -3649,96 +4513,6 @@ var CurationAgent = class {
 };
 
 //#endregion
-//#region src/config/haiku-config.ts
-function loadHaikuConfig() {
-	return {
-		model: "claude-haiku-4-5-20251001",
-		maxTokensPerCall: 1024
-	};
-}
-
-//#endregion
-//#region src/intelligence/haiku-client.ts
-/**
-* Shared Haiku client using Claude Agent SDK V2 session.
-*
-* Routes Haiku calls through the user's Claude Code subscription
-* instead of requiring a separate API key. Uses a persistent session
-* to avoid 12s cold-start overhead on sequential calls.
-*
-* Provides the core infrastructure for all Haiku agent modules:
-* - callHaiku() helper for structured prompt/response calls
-* - extractJsonFromResponse() for defensive JSON parsing
-* - Session reuse across batch processing cycles
-*/
-let _session = null;
-function getOrCreateSession() {
-	if (!_session) _session = unstable_v2_createSession({
-		model: loadHaikuConfig().model,
-		permissionMode: "bypassPermissions",
-		allowedTools: []
-	});
-	return _session;
-}
-/**
-* Returns whether Haiku enrichment is available.
-* Always true with subscription auth -- no API key check needed.
-*/
-function isHaikuEnabled() {
-	return true;
-}
-/**
-* Calls Haiku with a system prompt and user content.
-* Returns the text content from the response.
-*
-* Uses a persistent V2 session to avoid cold-start overhead on sequential calls.
-* System prompt is embedded in the user message since session-level systemPrompt
-* is set at creation time and we need different prompts per agent.
-*
-* @param systemPrompt - Instructions for the model
-* @param userContent - The content to process
-* @param _maxTokens - Kept for signature compatibility (unused -- Agent SDK constrains output via prompts)
-* @throws Error if the Haiku call fails or session expires
-*/
-async function callHaiku(systemPrompt, userContent, _maxTokens) {
-	const session = getOrCreateSession();
-	const fullPrompt = `<instructions>\n${systemPrompt}\n</instructions>\n\n${userContent}`;
-	try {
-		await session.send(fullPrompt);
-		for await (const msg of session.stream()) if (msg.type === "result") {
-			if (msg.subtype === "success") return msg.result;
-			const errorMsg = ("errors" in msg ? msg.errors : void 0)?.join(", ") ?? msg.subtype;
-			throw new Error(`Haiku call failed: ${errorMsg}`);
-		}
-		return "";
-	} catch (error) {
-		try {
-			_session?.close();
-		} catch {}
-		_session = null;
-		throw error;
-	}
-}
-/**
-* Defensive JSON extraction from Haiku response text.
-*
-* Handles common LLM response quirks:
-* - Markdown code fences (```json ... ```)
-* - Explanatory text before/after JSON
-* - Both array and object JSON shapes
-*
-* @throws Error if no JSON structure found in text
-*/
-function extractJsonFromResponse(text) {
-	const cleaned = text.replace(/```json\s*/g, "").replace(/```\s*/g, "");
-	const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
-	if (arrayMatch) return JSON.parse(arrayMatch[0]);
-	const objMatch = cleaned.match(/\{[\s\S]*\}/);
-	if (objMatch) return JSON.parse(objMatch[0]);
-	throw new Error("No JSON found in Haiku response");
-}
-
-//#endregion
 //#region src/intelligence/haiku-classifier-agent.ts
 /**
 * Combined noise/signal and observation classification agent.
@@ -4199,6 +4973,7 @@ var HaikuProcessor = class {
 	batchSize;
 	concurrency;
 	pathTracker;
+	branchTracker;
 	timer = null;
 	constructor(db, projectHash, opts) {
 		this.db = db;
@@ -4207,6 +4982,7 @@ var HaikuProcessor = class {
 		this.batchSize = opts?.batchSize ?? 10;
 		this.concurrency = opts?.concurrency ?? 3;
 		this.pathTracker = opts?.pathTracker ?? null;
+		this.branchTracker = opts?.branchTracker ?? null;
 	}
 	start() {
 		if (this.timer) return;
@@ -4246,6 +5022,11 @@ var HaikuProcessor = class {
 				await Promise.all(batch.map((obs) => this.processOne(obs, repo, hash)));
 			}
 		}
+		if (this.branchTracker) try {
+			await this.branchTracker.runMaintenance();
+		} catch (err) {
+			debug("haiku", "Branch maintenance error (non-fatal)", { error: err instanceof Error ? err.message : String(err) });
+		}
 	}
 	async processOne(obs, repo, obsProjectHash) {
 		const projectHash = obsProjectHash ?? this.projectHash;
@@ -4258,6 +5039,23 @@ var HaikuProcessor = class {
 				} catch (pathErr) {
 					const msg = pathErr instanceof Error ? pathErr.message : String(pathErr);
 					debug("haiku", "Path tracking failed (non-fatal)", {
+						id: obs.id,
+						error: msg
+					});
+				}
+				if (this.branchTracker) try {
+					this.branchTracker.processObservation({
+						id: obs.id,
+						content: obs.content,
+						source: obs.source,
+						projectHash: obsProjectHash ?? this.projectHash,
+						sessionId: void 0,
+						classification: result.classification,
+						createdAt: (/* @__PURE__ */ new Date()).toISOString()
+					});
+				} catch (branchErr) {
+					const msg = branchErr instanceof Error ? branchErr.message : String(branchErr);
+					debug("haiku", "Branch tracking failed (non-fatal)", {
 						id: obs.id,
 						error: msg
 					});
@@ -5316,6 +6114,236 @@ apiRoutes.get("/paths/:id", (c) => {
 	}
 });
 /**
+* GET /api/tools
+*
+* Returns all tools from tool_registry with usage stats.
+*/
+apiRoutes.get("/tools", (c) => {
+	const db = getDb$1(c);
+	let tools = [];
+	try {
+		tools = db.prepare(`
+      SELECT id, name, tool_type, scope, status, usage_count, server_name, description, last_used_at, discovered_at
+      FROM tool_registry
+      ORDER BY usage_count DESC, discovered_at DESC
+    `).all();
+	} catch {}
+	return c.json({ tools: tools.map((t) => ({
+		id: t.id,
+		name: t.name,
+		toolType: t.tool_type,
+		scope: t.scope,
+		status: t.status,
+		usageCount: t.usage_count,
+		serverName: t.server_name,
+		description: t.description,
+		lastUsedAt: t.last_used_at,
+		discoveredAt: t.discovered_at
+	})) });
+});
+/**
+* GET /api/tools/flows
+*
+* Returns edges for the tool topology graph:
+* 1. Pre-computed routing_patterns (preceding_tools -> target_tool)
+* 2. Pairwise co-occurrence from tool_usage_events session sequences
+*/
+apiRoutes.get("/tools/flows", (c) => {
+	const db = getDb$1(c);
+	const projectFilter = getProjectHash$2(c);
+	const edges = [];
+	const edgeKey = /* @__PURE__ */ new Set();
+	try {
+		let sql = "SELECT target_tool, preceding_tools, frequency FROM routing_patterns";
+		const params = [];
+		if (projectFilter) {
+			sql += " WHERE project_hash = ?";
+			params.push(projectFilter);
+		}
+		sql += " ORDER BY frequency DESC LIMIT 200";
+		const rows = db.prepare(sql).all(...params);
+		for (const row of rows) {
+			let preceding;
+			try {
+				preceding = JSON.parse(row.preceding_tools);
+			} catch {
+				preceding = [];
+			}
+			for (const src of preceding) {
+				const key = src + "->" + row.target_tool;
+				if (!edgeKey.has(key)) {
+					edgeKey.add(key);
+					edges.push({
+						source: src,
+						target: row.target_tool,
+						frequency: row.frequency,
+						edgeType: "pattern"
+					});
+				}
+			}
+		}
+	} catch {}
+	try {
+		let sql = `
+      SELECT session_id, tool_name, created_at
+      FROM tool_usage_events
+      WHERE session_id IS NOT NULL
+    `;
+		const params = [];
+		if (projectFilter) {
+			sql += " AND project_hash = ?";
+			params.push(projectFilter);
+		}
+		sql += " ORDER BY session_id, created_at ASC LIMIT 5000";
+		const rows = db.prepare(sql).all(...params);
+		const pairFreq = /* @__PURE__ */ new Map();
+		let prevSession = "";
+		let prevTool = "";
+		for (const row of rows) {
+			if (row.session_id === prevSession && prevTool && prevTool !== row.tool_name) {
+				const key = prevTool + "->" + row.tool_name;
+				pairFreq.set(key, (pairFreq.get(key) || 0) + 1);
+			}
+			prevSession = row.session_id;
+			prevTool = row.tool_name;
+		}
+		for (const [key, freq] of pairFreq) if (!edgeKey.has(key) && freq >= 2) {
+			edgeKey.add(key);
+			const [source, target] = key.split("->");
+			edges.push({
+				source,
+				target,
+				frequency: freq,
+				edgeType: "session"
+			});
+		}
+	} catch {}
+	return c.json({ edges });
+});
+/**
+* GET /api/tools/:name/stats
+*
+* Returns detailed stats for a single tool.
+*/
+apiRoutes.get("/tools/:name/stats", (c) => {
+	const db = getDb$1(c);
+	const toolName = c.req.param("name");
+	const projectFilter = getProjectHash$2(c);
+	let tool;
+	try {
+		tool = db.prepare("SELECT id, name, tool_type, scope, status, usage_count, server_name, description, last_used_at, discovered_at FROM tool_registry WHERE name = ? ORDER BY usage_count DESC LIMIT 1").get(toolName);
+	} catch {}
+	if (!tool) return c.json({ error: "Tool not found" }, 404);
+	let successRate = null;
+	let totalEvents = 0;
+	try {
+		let sql = "SELECT success FROM tool_usage_events WHERE tool_name = ?";
+		const params = [toolName];
+		if (projectFilter) {
+			sql += " AND project_hash = ?";
+			params.push(projectFilter);
+		}
+		sql += " ORDER BY created_at DESC LIMIT 50";
+		const events = db.prepare(sql).all(...params);
+		totalEvents = events.length;
+		if (totalEvents > 0) successRate = events.filter((e) => e.success === 1).length / totalEvents;
+	} catch {}
+	let sessionsUsedIn = 0;
+	try {
+		let sql = "SELECT COUNT(DISTINCT session_id) as cnt FROM tool_usage_events WHERE tool_name = ? AND session_id IS NOT NULL";
+		const params = [toolName];
+		if (projectFilter) {
+			sql += " AND project_hash = ?";
+			params.push(projectFilter);
+		}
+		sessionsUsedIn = db.prepare(sql).get(...params)?.cnt ?? 0;
+	} catch {}
+	let coOccurring = [];
+	try {
+		let sql = `
+      SELECT e2.tool_name as name, COUNT(*) as count
+      FROM tool_usage_events e1
+      JOIN tool_usage_events e2
+        ON e1.session_id = e2.session_id AND e1.tool_name != e2.tool_name
+      WHERE e1.tool_name = ? AND e1.session_id IS NOT NULL
+    `;
+		const params = [toolName];
+		if (projectFilter) {
+			sql += " AND e1.project_hash = ?";
+			params.push(projectFilter);
+		}
+		sql += " GROUP BY e2.tool_name ORDER BY count DESC LIMIT 10";
+		coOccurring = db.prepare(sql).all(...params);
+	} catch {}
+	return c.json({
+		tool: {
+			id: tool.id,
+			name: tool.name,
+			toolType: tool.tool_type,
+			scope: tool.scope,
+			status: tool.status,
+			usageCount: tool.usage_count,
+			serverName: tool.server_name,
+			description: tool.description,
+			lastUsedAt: tool.last_used_at,
+			discoveredAt: tool.discovered_at
+		},
+		successRate,
+		totalEvents,
+		sessionsUsedIn,
+		coOccurring
+	});
+});
+/**
+* GET /api/tools/sessions
+*
+* Returns recent session tool sequences for the flow strip.
+*/
+apiRoutes.get("/tools/sessions", (c) => {
+	const db = getDb$1(c);
+	const projectFilter = getProjectHash$2(c);
+	const limitStr = c.req.query("limit");
+	const limit = limitStr ? Math.min(parseInt(limitStr, 10) || 10, 30) : 10;
+	let sessions = [];
+	try {
+		let sessionSql = `
+      SELECT DISTINCT session_id FROM tool_usage_events
+      WHERE session_id IS NOT NULL
+    `;
+		const sessionParams = [];
+		if (projectFilter) {
+			sessionSql += " AND project_hash = ?";
+			sessionParams.push(projectFilter);
+		}
+		sessionSql += " ORDER BY created_at DESC LIMIT ?";
+		sessionParams.push(limit);
+		const sessionIds = db.prepare(sessionSql).all(...sessionParams);
+		if (sessionIds.length > 0) {
+			const placeholders = sessionIds.map(() => "?").join(", ");
+			const ids = sessionIds.map((s) => s.session_id);
+			const eventRows = db.prepare(`
+        SELECT session_id, tool_name, created_at
+        FROM tool_usage_events
+        WHERE session_id IN (${placeholders})
+        ORDER BY session_id, created_at ASC
+      `).all(...ids);
+			const sessionMap = /* @__PURE__ */ new Map();
+			for (const row of eventRows) {
+				if (!sessionMap.has(row.session_id)) sessionMap.set(row.session_id, []);
+				sessionMap.get(row.session_id).push({
+					name: row.tool_name,
+					time: row.created_at
+				});
+			}
+			sessions = sessionIds.filter((s) => sessionMap.has(s.session_id)).map((s) => ({
+				sessionId: s.session_id,
+				tools: sessionMap.get(s.session_id)
+			}));
+		}
+	} catch {}
+	return c.json({ sessions });
+});
+/**
 * Finds connected components in the graph via BFS.
 * Shared by /api/graph/analysis and /api/graph/communities.
 */
@@ -5642,6 +6670,22 @@ adminRoutes.put("/config/cross-access", async (c) => {
 	saveCrossAccessConfig(project, { readableProjects: body.readableProjects || [] });
 	return c.json(loadCrossAccessConfig(project));
 });
+adminRoutes.get("/config/tool-verbosity", (c) => {
+	return c.json(loadToolVerbosityConfig());
+});
+adminRoutes.put("/config/tool-verbosity", async (c) => {
+	const body = await c.req.json();
+	if (body && body.__reset === true) {
+		const config = resetToolVerbosityConfig();
+		saveToolVerbosityConfig(config);
+		return c.json(config);
+	}
+	if (typeof body !== "object" || body === null || Array.isArray(body)) return c.json({ error: "Request body must be a JSON object" }, 400);
+	const level = body.level;
+	if (level !== 1 && level !== 2 && level !== 3) return c.json({ error: "level must be 1, 2, or 3" }, 400);
+	saveToolVerbosityConfig({ level });
+	return c.json(loadToolVerbosityConfig());
+});
 
 //#endregion
 //#region src/web/server.ts
@@ -5918,11 +6962,22 @@ if (toolRegistry) {
 const pathRepo = new PathRepository(db.db, projectHashRef.current);
 const pathTracker = new PathTracker(pathRepo);
 registerDebugPathTools(server, pathRepo, pathTracker, notificationStore, projectHashRef);
+let branchRepo = null;
+let branchTracker = null;
+try {
+	branchRepo = new BranchRepository(db.db, projectHashRef.current);
+	branchTracker = new BranchTracker(branchRepo, db.db, projectHashRef.current);
+	const obsRepoForBranches = new ObservationRepository(db.db, projectHashRef.current);
+	registerThoughtBranchTools(server, branchRepo, obsRepoForBranches, notificationStore, projectHashRef);
+} catch {
+	debug("mcp", "Branch tracking not available (pre-migration-21)");
+}
 const haikuProcessor = new HaikuProcessor(db.db, projectHashRef.current, {
 	intervalMs: 3e4,
 	batchSize: 10,
 	concurrency: 3,
-	pathTracker
+	pathTracker,
+	branchTracker
 });
 startServer(server).then(() => {
 	haikuProcessor.start();

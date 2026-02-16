@@ -30,6 +30,7 @@ import {
   getEdgesForNode,
   type TraversalResult,
 } from '../../graph/schema.js';
+import { loadToolVerbosityConfig } from '../../config/tool-verbosity-config.js';
 
 // =============================================================================
 // Types
@@ -378,6 +379,31 @@ export function registerQueryGraph(
         }
 
         // 5. Format and return
+        const verbosity = loadToolVerbosityConfig().level;
+
+        if (verbosity === 1) {
+          const totalTraversals = [...traversalsByNode.values()].reduce(
+            (sum, arr) => sum + arr.length, 0);
+          return withNotifications(
+            `${rootNodes.length} entities, ${totalTraversals} connections found`,
+          );
+        }
+
+        if (verbosity === 2) {
+          // Standard: entity names and types, no observations
+          const lines: string[] = [];
+          lines.push('## Entities Found');
+          lines.push('');
+          for (const node of rootNodes) {
+            const traversals = traversalsByNode.get(node.id) ?? [];
+            lines.push(
+              `- ${formatEntityType(node.type)} ${node.name} (${traversals.length} connections)`,
+            );
+          }
+          return withNotifications(lines.join('\n'));
+        }
+
+        // Verbose: full output
         const formatted = formatResults(
           rootNodes,
           traversalsByNode,
