@@ -11,6 +11,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { debug } from '../../shared/debug.js';
+import type { ProjectHashRef } from '../../shared/types.js';
 import type { NotificationStore } from '../../storage/notifications.js';
 import type { StatusCache } from '../status-cache.js';
 
@@ -41,7 +42,7 @@ function textResponse(text: string) {
 export function registerStatus(
   server: McpServer,
   cache: StatusCache,
-  projectHash: string,
+  projectHashRef: ProjectHashRef,
   notificationStore: NotificationStore | null = null,
 ): void {
   server.registerTool(
@@ -53,6 +54,7 @@ export function registerStatus(
       inputSchema: {},
     },
     async () => {
+      const projectHash = projectHashRef.current;
       try {
         debug('mcp', 'status: request (cached)');
 

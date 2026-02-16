@@ -3,6 +3,7 @@ import type BetterSqlite3 from 'better-sqlite3';
 import { z } from 'zod';
 
 import { debug } from '../../shared/debug.js';
+import type { ProjectHashRef } from '../../shared/types.js';
 import { StashManager } from '../../storage/stash-manager.js';
 import type { NotificationStore } from '../../storage/notifications.js';
 import type { ContextStash } from '../../types/stash.js';
@@ -114,7 +115,7 @@ function textResponse(text: string) {
 export function registerTopicContext(
   server: McpServer,
   db: BetterSqlite3.Database,
-  projectHash: string,
+  projectHashRef: ProjectHashRef,
   notificationStore: NotificationStore | null = null,
 ): void {
   const stashManager = new StashManager(db);
@@ -140,6 +141,7 @@ export function registerTopicContext(
       },
     },
     async (args) => {
+      const projectHash = projectHashRef.current;
       // Helper to wrap textResponse with pending notifications
       const withNotifications = (text: string) =>
         textResponse(prependNotifications(notificationStore, projectHash, text));

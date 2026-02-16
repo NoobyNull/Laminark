@@ -12,6 +12,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type BetterSqlite3 from 'better-sqlite3';
 
 import { debug } from '../../shared/debug.js';
+import type { ProjectHashRef } from '../../shared/types.js';
 import type { NotificationStore } from '../../storage/notifications.js';
 import {
   type EntityType,
@@ -273,7 +274,7 @@ function textResponse(text: string) {
 export function registerGraphStats(
   server: McpServer,
   db: BetterSqlite3.Database,
-  projectHash: string,
+  projectHashRef: ProjectHashRef,
   notificationStore: NotificationStore | null = null,
 ): void {
   // Ensure graph schema is initialized
@@ -288,6 +289,7 @@ export function registerGraphStats(
       inputSchema: {},
     },
     async () => {
+      const projectHash = projectHashRef.current;
       try {
         debug('mcp', 'graph_stats: request');
 

@@ -12,6 +12,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { debug } from '../../shared/debug.js';
+import type { ProjectHashRef } from '../../shared/types.js';
 import type { NotificationStore } from '../../storage/notifications.js';
 import type { PathRepository } from '../../paths/path-repository.js';
 import type { PathTracker } from '../../paths/path-tracker.js';
@@ -87,7 +88,7 @@ export function registerDebugPathTools(
   pathRepo: PathRepository,
   pathTracker: PathTracker,
   notificationStore: NotificationStore | null,
-  projectHash: string,
+  projectHashRef: ProjectHashRef,
 ): void {
   // ---------------------------------------------------------------------------
   // path_start (UI-01)
@@ -106,6 +107,7 @@ export function registerDebugPathTools(
       },
     },
     async (args) => {
+      const projectHash = projectHashRef.current;
       const withNotifications = (text: string) =>
         textResponse(
           prependNotifications(notificationStore, projectHash, text),
@@ -154,6 +156,7 @@ export function registerDebugPathTools(
       },
     },
     async (args) => {
+      const projectHash = projectHashRef.current;
       const withNotifications = (text: string) =>
         textResponse(
           prependNotifications(notificationStore, projectHash, text),
@@ -199,6 +202,7 @@ export function registerDebugPathTools(
       },
     },
     async (args) => {
+      const projectHash = projectHashRef.current;
       const withNotifications = (text: string) =>
         textResponse(
           prependNotifications(notificationStore, projectHash, text),
@@ -284,6 +288,7 @@ export function registerDebugPathTools(
       },
     },
     async (args) => {
+      const projectHash = projectHashRef.current;
       const withNotifications = (text: string) =>
         textResponse(
           prependNotifications(notificationStore, projectHash, text),

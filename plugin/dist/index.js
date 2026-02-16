@@ -372,6 +372,44 @@ async function startServer(server) {
 }
 
 //#endregion
+//#region src/config/cross-access.ts
+/**
+* Cross-Project Access Configuration
+*
+* Per-project config that controls which other projects' memories
+* the current project can read from. Read-only access — no writes
+* cross projects.
+*
+* Config stored at: {configDir}/cross-access-{projectHash}.json
+*/
+const DEFAULTS$3 = { readableProjects: [] };
+function getConfigPath(projectHash) {
+	return join(getConfigDir(), `cross-access-${projectHash}.json`);
+}
+function loadCrossAccessConfig(projectHash) {
+	const configPath = getConfigPath(projectHash);
+	try {
+		if (!existsSync(configPath)) return { ...DEFAULTS$3 };
+		const raw = readFileSync(configPath, "utf-8");
+		const parsed = JSON.parse(raw);
+		return { readableProjects: Array.isArray(parsed.readableProjects) ? parsed.readableProjects.filter((h) => typeof h === "string") : [] };
+	} catch {
+		return { ...DEFAULTS$3 };
+	}
+}
+function saveCrossAccessConfig(projectHash, config) {
+	const configPath = getConfigPath(projectHash);
+	const validated = { readableProjects: Array.isArray(config.readableProjects) ? config.readableProjects.filter((h) => typeof h === "string" && h !== projectHash) : [] };
+	writeFileSync(configPath, JSON.stringify(validated, null, 2), "utf-8");
+}
+function resetCrossAccessConfig(projectHash) {
+	const configPath = getConfigPath(projectHash);
+	try {
+		if (existsSync(configPath)) unlinkSync(configPath);
+	} catch {}
+}
+
+//#endregion
 //#region src/mcp/token-budget.ts
 const TOKEN_BUDGET = 2e3;
 const FULL_VIEW_BUDGET = 4e3;
@@ -451,7 +489,15 @@ function errorResponse$3(text) {
 		isError: true
 	};
 }
-function registerRecall(server, db, projectHash, worker = null, embeddingStore = null, notificationStore = null, statusCache = null) {
+function getProjectNameMap(db) {
+	const map = /* @__PURE__ */ new Map();
+	try {
+		const rows = db.prepare("SELECT project_hash, display_name FROM project_metadata").all();
+		for (const row of rows) map.set(row.project_hash, row.display_name ?? row.project_hash.slice(0, 8));
+	} catch {}
+	return map;
+}
+function registerRecall(server, db, projectHashRef, worker = null, embeddingStore = null, notificationStore = null, statusCache = null) {
 	server.registerTool("recall", {
 		title: "Recall Memories",
 		description: "Search, view, purge, or restore memories. Search first to find matches, then act on specific results by ID.",
@@ -481,6 +527,7 @@ function registerRecall(server, db, projectHash, worker = null, embeddingStore =
 			include_purged: z.boolean().default(false).describe("Include soft-deleted items in results (needed for restore)")
 		}
 	}, async (args) => {
+		const projectHash = projectHashRef.current;
 		const withNotifications = (text) => textResponse$7(prependNotifications$6(notificationStore, projectHash, text));
 		try {
 			const repo = new ObservationRepository(db, projectHash);
@@ -514,6 +561,30 @@ function registerRecall(server, db, projectHash, worker = null, embeddingStore =
 				});
 				else searchResults = searchEngine.searchKeyword(args.query, { limit: args.limit });
 				observations = searchResults.map((r) => r.observation);
+				const crossConfig = loadCrossAccessConfig(projectHash);
+				if (crossConfig.readableProjects.length > 0) {
+					const nameMap = getProjectNameMap(db);
+					for (const otherHash of crossConfig.readableProjects) {
+						const otherEngine = new SearchEngine(db, otherHash);
+						let otherResults;
+						if (embeddingStore) otherResults = await hybridSearch({
+							searchEngine: otherEngine,
+							embeddingStore,
+							worker,
+							query: args.query,
+							db,
+							projectHash: otherHash,
+							options: { limit: args.limit }
+						});
+						else otherResults = otherEngine.searchKeyword(args.query, { limit: args.limit });
+						if (otherResults.length > 0) {
+							const projName = nameMap.get(otherHash) ?? otherHash.slice(0, 8);
+							for (const r of otherResults) r.observation.title = `[${projName}] ${r.observation.title ?? "untitled"}`;
+							searchResults.push(...otherResults);
+							observations.push(...otherResults.map((r) => r.observation));
+						}
+					}
+				}
 			} else if (args.title) observations = repo.getByTitle(args.title, {
 				limit: args.limit,
 				includePurged: args.include_purged
@@ -648,7 +719,7 @@ function generateTitle(content) {
 * save_memory persists user-provided text as a new observation with an optional title.
 * If title is omitted, one is auto-generated from the text content.
 */
-function registerSaveMemory(server, db, projectHash, notificationStore = null, worker = null, embeddingStore = null, statusCache = null) {
+function registerSaveMemory(server, db, projectHashRef, notificationStore = null, worker = null, embeddingStore = null, statusCache = null) {
 	server.registerTool("save_memory", {
 		title: "Save Memory",
 		description: "Save a new memory observation. Provide text content and an optional title. If title is omitted, one is auto-generated from the text.",
@@ -665,6 +736,7 @@ function registerSaveMemory(server, db, projectHash, notificationStore = null, w
 			]).default("finding").describe("Observation kind: change, reference, finding, decision, or verification")
 		}
 	}, async (args) => {
+		const projectHash = projectHashRef.current;
 		try {
 			const repo = new ObservationRepository(db, projectHash);
 			const decision = await new SaveGuard(repo, {
@@ -803,7 +875,7 @@ function textResponse$6(text) {
 * Shows recently stashed context threads. Used when the user asks
 * "where was I?" or wants to see abandoned conversation threads.
 */
-function registerTopicContext(server, db, projectHash, notificationStore = null) {
+function registerTopicContext(server, db, projectHashRef, notificationStore = null) {
 	const stashManager = new StashManager(db);
 	server.registerTool("topic_context", {
 		title: "Topic Context",
@@ -813,6 +885,7 @@ function registerTopicContext(server, db, projectHash, notificationStore = null)
 			limit: z.number().int().min(1).max(20).default(5).describe("Max threads to return")
 		}
 	}, async (args) => {
+		const projectHash = projectHashRef.current;
 		const withNotifications = (text) => textResponse$6(prependNotifications$5(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "topic_context: request", {
@@ -964,7 +1037,7 @@ function errorResponse$2(text) {
 * Allows Claude to search entities by name (exact or fuzzy), filter by type,
 * traverse relationships to configurable depth, and see linked observations.
 */
-function registerQueryGraph(server, db, projectHash, notificationStore = null) {
+function registerQueryGraph(server, db, projectHashRef, notificationStore = null) {
 	initGraphSchema(db);
 	server.registerTool("query_graph", {
 		title: "Query Knowledge Graph",
@@ -977,6 +1050,7 @@ function registerQueryGraph(server, db, projectHash, notificationStore = null) {
 			limit: z.number().int().min(1).max(50).default(20).describe("Max root entities to return (default: 20, max: 50)")
 		}
 	}, async (args) => {
+		const projectHash = projectHashRef.current;
 		const withNotifications = (text) => textResponse$5(prependNotifications$4(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "query_graph: request", {
@@ -1348,13 +1422,14 @@ function textResponse$4(text) {
 * type distribution, degree statistics, hotspot nodes, duplicate candidates,
 * and staleness flags. No input parameters -- dashboard view.
 */
-function registerGraphStats(server, db, projectHash, notificationStore = null) {
+function registerGraphStats(server, db, projectHashRef, notificationStore = null) {
 	initGraphSchema(db);
 	server.registerTool("graph_stats", {
 		title: "Graph Statistics",
 		description: "Get knowledge graph statistics: entity counts, relationship distribution, health metrics. Use to understand the state of accumulated knowledge.",
 		inputSchema: {}
 	}, async () => {
+		const projectHash = projectHashRef.current;
 		try {
 			debug("mcp", "graph_stats: request");
 			const stats = collectGraphStats(db);
@@ -1386,12 +1461,13 @@ function textResponse$3(text) {
 		text
 	}] };
 }
-function registerStatus(server, cache, projectHash, notificationStore = null) {
+function registerStatus(server, cache, projectHashRef, notificationStore = null) {
 	server.registerTool("status", {
 		title: "Laminark Status",
 		description: "Show Laminark system status: connection info, memory count, token estimates, and capabilities.",
 		inputSchema: {}
 	}, async () => {
+		const projectHash = projectHashRef.current;
 		try {
 			debug("mcp", "status: request (cached)");
 			return textResponse$3(prependNotifications$2(notificationStore, projectHash, cache.getFormatted()));
@@ -1415,7 +1491,7 @@ function formatUptime(seconds) {
 }
 var StatusCache = class {
 	db;
-	projectHash;
+	projectHashRef;
 	projectPath;
 	hasVectorSupport;
 	isWorkerReady;
@@ -1424,9 +1500,9 @@ var StatusCache = class {
 	/** Uptime snapshot at the time cachedBody was built. */
 	builtAtUptime = 0;
 	dirty = false;
-	constructor(db, projectHash, projectPath, hasVectorSupport, isWorkerReady) {
+	constructor(db, projectHashRef, projectPath, hasVectorSupport, isWorkerReady) {
 		this.db = db;
-		this.projectHash = projectHash;
+		this.projectHashRef = projectHashRef;
 		this.projectPath = projectPath;
 		this.hasVectorSupport = hasVectorSupport;
 		this.isWorkerReady = isWorkerReady;
@@ -1453,7 +1529,7 @@ var StatusCache = class {
 	}
 	rebuild() {
 		try {
-			const ph = this.projectHash;
+			const ph = this.projectHashRef.current;
 			const totalObs = this.db.prepare("SELECT COUNT(*) as cnt FROM observations WHERE project_hash = ? AND deleted_at IS NULL").get(ph).cnt;
 			const embeddedObs = this.db.prepare("SELECT COUNT(*) as cnt FROM observations WHERE project_hash = ? AND deleted_at IS NULL AND embedding_model IS NOT NULL").get(ph).cnt;
 			const deletedObs = this.db.prepare("SELECT COUNT(*) as cnt FROM observations WHERE project_hash = ? AND deleted_at IS NOT NULL").get(ph).cnt;
@@ -1545,7 +1621,7 @@ function formatToolResult(result, index) {
 * with optional scope filtering. Returns ranked results with scope, usage count,
 * and last used timestamp metadata.
 */
-function registerDiscoverTools(server, toolRegistry, worker, hasVectorSupport, notificationStore, projectHash) {
+function registerDiscoverTools(server, toolRegistry, worker, hasVectorSupport, notificationStore, projectHashRef) {
 	server.registerTool("discover_tools", {
 		title: "Discover Tools",
 		description: "Search the tool registry to find available tools by keyword or description. Supports semantic search -- \"file manipulation\" finds tools described as \"read and write files\". Returns scope, usage count, and last used timestamp for each result.",
@@ -1559,6 +1635,7 @@ function registerDiscoverTools(server, toolRegistry, worker, hasVectorSupport, n
 			limit: z.number().int().min(1).max(50).default(20).describe("Maximum results to return (default: 20)")
 		}
 	}, async (args) => {
+		const projectHash = projectHashRef.current;
 		const withNotifications = (text) => textResponse$2(prependNotifications$1(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "discover_tools: request", {
@@ -1617,7 +1694,7 @@ function textResponse$1(text) {
 * each into the tool registry. Tool type, scope, and server name are inferred
 * from the tool name using the same parser as PostToolUse organic discovery.
 */
-function registerReportTools(server, toolRegistry, projectHash) {
+function registerReportTools(server, toolRegistry, projectHashRef) {
 	server.registerTool("report_available_tools", {
 		title: "Report Available Tools",
 		description: "Register all tools available in this session with Laminark. Call this once at session start with every tool name you have access to (built-in and MCP). This populates the tool registry for discovery and routing.",
@@ -1626,6 +1703,7 @@ function registerReportTools(server, toolRegistry, projectHash) {
 			description: z.string().optional().describe("Brief description of the tool")
 		})).min(1).describe("Array of tools available in this session") }
 	}, async (args) => {
+		const projectHash = projectHashRef.current;
 		try {
 			let registered = 0;
 			let skipped = 0;
@@ -1712,12 +1790,13 @@ function formatKissSummary(raw) {
 *
 * Tools: path_start, path_resolve, path_show, path_list
 */
-function registerDebugPathTools(server, pathRepo, pathTracker, notificationStore, projectHash) {
+function registerDebugPathTools(server, pathRepo, pathTracker, notificationStore, projectHashRef) {
 	server.registerTool("path_start", {
 		title: "Start Debug Path",
 		description: "Explicitly start tracking a debug path. Use when auto-detection hasn't triggered but you're actively debugging.",
 		inputSchema: { trigger: z.string().describe("Brief description of the issue being debugged") }
 	}, async (args) => {
+		const projectHash = projectHashRef.current;
 		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "path_start: request", { trigger: args.trigger });
@@ -1737,6 +1816,7 @@ function registerDebugPathTools(server, pathRepo, pathTracker, notificationStore
 		description: "Explicitly resolve the active debug path with a resolution summary. Use when auto-detection hasn't detected resolution.",
 		inputSchema: { resolution: z.string().describe("What fixed the issue") }
 	}, async (args) => {
+		const projectHash = projectHashRef.current;
 		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "path_resolve: request", { resolution: args.resolution });
@@ -1755,6 +1835,7 @@ function registerDebugPathTools(server, pathRepo, pathTracker, notificationStore
 		description: "Show a debug path with its waypoints and KISS summary.",
 		inputSchema: { path_id: z.string().optional().describe("Path ID to show. Omit for active path.") }
 	}, async (args) => {
+		const projectHash = projectHashRef.current;
 		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "path_show: request", { path_id: args.path_id });
@@ -1803,6 +1884,7 @@ function registerDebugPathTools(server, pathRepo, pathTracker, notificationStore
 			limit: z.number().int().min(1).max(50).default(10).describe("Max paths to return")
 		}
 	}, async (args) => {
+		const projectHash = projectHashRef.current;
 		const withNotifications = (text) => textResponse(prependNotifications(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "path_list: request", {
@@ -5543,6 +5625,23 @@ adminRoutes.put("/config/graph-extraction", async (c) => {
 	writeFileSync(configPath, JSON.stringify(validated, null, 2), "utf-8");
 	return c.json(validated);
 });
+adminRoutes.get("/config/cross-access", (c) => {
+	const project = c.req.query("project");
+	if (!project) return c.json({ error: "project query parameter is required" }, 400);
+	return c.json(loadCrossAccessConfig(project));
+});
+adminRoutes.put("/config/cross-access", async (c) => {
+	const project = c.req.query("project");
+	if (!project) return c.json({ error: "project query parameter is required" }, 400);
+	const body = await c.req.json();
+	if (body && body.__reset === true) {
+		resetCrossAccessConfig(project);
+		return c.json(loadCrossAccessConfig(project));
+	}
+	if (typeof body !== "object" || body === null || Array.isArray(body)) return c.json({ error: "Request body must be a JSON object" }, 400);
+	saveCrossAccessConfig(project, { readableProjects: body.readableProjects || [] });
+	return c.json(loadCrossAccessConfig(project));
+});
 
 //#endregion
 //#region src/web/server.ts
@@ -5651,25 +5750,46 @@ const noGui = process.argv.includes("--no_gui");
 const db = openDatabase(getDatabaseConfig());
 initGraphSchema(db.db);
 initPathSchema(db.db);
-function resolveProjectHash(sqliteDb) {
-	try {
-		const row = sqliteDb.prepare("SELECT project_hash FROM project_metadata ORDER BY last_seen_at DESC LIMIT 1").get();
-		if (row?.project_hash) {
-			debug("startup", "Resolved project hash from project_metadata", { hash: row.project_hash });
-			return row.project_hash;
+var LiveProjectHashRef = class LiveProjectHashRef {
+	_current;
+	_lastChecked = 0;
+	_db;
+	static CHECK_INTERVAL_MS = 2e3;
+	constructor(sqliteDb) {
+		this._db = sqliteDb;
+		this._current = this.resolve();
+	}
+	get current() {
+		const now = Date.now();
+		if (now - this._lastChecked >= LiveProjectHashRef.CHECK_INTERVAL_MS) {
+			this._lastChecked = now;
+			const fresh = this.resolve();
+			if (fresh !== this._current) {
+				debug("mcp", "Project hash refreshed from database", {
+					old: this._current,
+					new: fresh
+				});
+				this._current = fresh;
+			}
 		}
-	} catch {}
-	debug("startup", "No project_metadata found, falling back to process.cwd()");
-	return getProjectHash(process.cwd());
-}
-const projectHash = resolveProjectHash(db.db);
+		return this._current;
+	}
+	resolve() {
+		try {
+			const row = this._db.prepare("SELECT project_hash FROM project_metadata ORDER BY last_seen_at DESC LIMIT 1").get();
+			if (row?.project_hash) return row.project_hash;
+		} catch {}
+		return getProjectHash(process.cwd());
+	}
+};
+const projectHashRef = new LiveProjectHashRef(db.db);
 let toolRegistry = null;
 try {
 	toolRegistry = new ToolRegistryRepository(db.db);
 } catch {
 	debug("mcp", "Tool registry not available (pre-migration-16)");
 }
-const embeddingStore = db.hasVectorSupport ? new EmbeddingStore(db.db, projectHash) : null;
+const embeddingStore = db.hasVectorSupport ? new EmbeddingStore(db.db, projectHashRef.current) : null;
 const worker = new AnalysisWorker();
 worker.start().catch(() => {
 	debug("mcp", "Worker failed to start, keyword-only mode");
@@ -5682,7 +5802,7 @@ const adaptiveManager = new AdaptiveThresholdManager({
 	alpha: topicConfig.ewmaAlpha
 });
 applyConfig(topicConfig, detector, adaptiveManager);
-const historicalSeed = new ThresholdStore(db.db).loadHistoricalSeed(projectHash);
+const historicalSeed = new ThresholdStore(db.db).loadHistoricalSeed(projectHashRef.current);
 if (historicalSeed) {
 	adaptiveManager.seedFromHistory(historicalSeed.averageDistance, historicalSeed.averageVariance);
 	applyConfig(topicConfig, detector, adaptiveManager);
@@ -5693,7 +5813,7 @@ const notificationStore = new NotificationStore(db.db);
 const topicShiftHandler = new TopicShiftHandler({
 	detector,
 	stashManager,
-	observationStore: new ObservationRepository(db.db, projectHash),
+	observationStore: new ObservationRepository(db.db, projectHashRef.current),
 	config: topicConfig,
 	decisionLogger,
 	adaptiveManager
@@ -5708,7 +5828,8 @@ async function processUnembedded() {
 	if (!embeddingStore || !worker.isReady()) return;
 	const ids = embeddingStore.findUnembedded(10);
 	if (ids.length === 0) return;
-	const obsRepo = new ObservationRepository(db.db, projectHash);
+	const currentHash = projectHashRef.current;
+	const obsRepo = new ObservationRepository(db.db, currentHash);
 	let shiftDetectedThisCycle = false;
 	for (const id of ids) {
 		const obs = obsRepo.getById(id);
@@ -5725,24 +5846,26 @@ async function processUnembedded() {
 				id,
 				text: obs.content.length > 120 ? obs.content.substring(0, 120) + "..." : obs.content,
 				sessionId: obs.sessionId ?? null,
-				createdAt: obs.createdAt
+				createdAt: obs.createdAt,
+				projectHash: currentHash
 			});
 			if (topicConfig.enabled && !shiftDetectedThisCycle && TOPIC_SHIFT_SOURCES.has(obs.source)) try {
 				const obsWithEmbedding = {
 					...obs,
 					embedding
 				};
-				const result = await topicShiftHandler.handleObservation(obsWithEmbedding, obs.sessionId ?? "unknown", projectHash);
+				const result = await topicShiftHandler.handleObservation(obsWithEmbedding, obs.sessionId ?? "unknown", currentHash);
 				if (result.stashed && result.notification) {
 					shiftDetectedThisCycle = true;
-					notificationStore.add(projectHash, result.notification);
+					notificationStore.add(currentHash, result.notification);
 					debug("embed", "Topic shift detected, notification queued", { id });
 					broadcast("topic_shift", {
 						id: result.notification.substring(0, 32),
 						fromTopic: null,
 						toTopic: null,
 						timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-						confidence: null
+						confidence: null,
+						projectHash: currentHash
 					});
 				}
 			} catch (topicErr) {
@@ -5753,7 +5876,7 @@ async function processUnembedded() {
 }
 let researchBufferForFlush = null;
 try {
-	researchBufferForFlush = new ResearchBufferRepository(db.db, projectHash);
+	researchBufferForFlush = new ResearchBufferRepository(db.db, projectHashRef.current);
 } catch {}
 async function processUnembeddedTools() {
 	if (!toolRegistry || !worker.isReady() || !db.hasVectorSupport) return;
@@ -5780,22 +5903,22 @@ const embedTimer = setInterval(() => {
 	} catch {}
 	statusCache.refreshIfDirty();
 }, 5e3);
-const statusCache = new StatusCache(db.db, projectHash, process.cwd(), db.hasVectorSupport, () => worker.isReady());
+const statusCache = new StatusCache(db.db, projectHashRef, process.cwd(), db.hasVectorSupport, () => worker.isReady());
 const server = createServer();
-registerSaveMemory(server, db.db, projectHash, notificationStore, worker, embeddingStore, statusCache);
-registerRecall(server, db.db, projectHash, worker, embeddingStore, notificationStore, statusCache);
-registerTopicContext(server, db.db, projectHash, notificationStore);
-registerQueryGraph(server, db.db, projectHash, notificationStore);
-registerGraphStats(server, db.db, projectHash, notificationStore);
-registerStatus(server, statusCache, projectHash, notificationStore);
+registerSaveMemory(server, db.db, projectHashRef, notificationStore, worker, embeddingStore, statusCache);
+registerRecall(server, db.db, projectHashRef, worker, embeddingStore, notificationStore, statusCache);
+registerTopicContext(server, db.db, projectHashRef, notificationStore);
+registerQueryGraph(server, db.db, projectHashRef, notificationStore);
+registerGraphStats(server, db.db, projectHashRef, notificationStore);
+registerStatus(server, statusCache, projectHashRef, notificationStore);
 if (toolRegistry) {
-	registerDiscoverTools(server, toolRegistry, worker, db.hasVectorSupport, notificationStore, projectHash);
-	registerReportTools(server, toolRegistry, projectHash);
+	registerDiscoverTools(server, toolRegistry, worker, db.hasVectorSupport, notificationStore, projectHashRef);
+	registerReportTools(server, toolRegistry, projectHashRef);
 }
-const pathRepo = new PathRepository(db.db, projectHash);
+const pathRepo = new PathRepository(db.db, projectHashRef.current);
 const pathTracker = new PathTracker(pathRepo);
-registerDebugPathTools(server, pathRepo, pathTracker, notificationStore, projectHash);
-const haikuProcessor = new HaikuProcessor(db.db, projectHash, {
+registerDebugPathTools(server, pathRepo, pathTracker, notificationStore, projectHashRef);
+const haikuProcessor = new HaikuProcessor(db.db, projectHashRef.current, {
 	intervalMs: 3e4,
 	batchSize: 10,
 	concurrency: 3,
@@ -5814,7 +5937,7 @@ if (!noGui) {
 	const __filename = fileURLToPath(import.meta.url);
 	const __dirname = path.dirname(__filename);
 	const uiRoot = path.resolve(__dirname, "..", "ui");
-	startWebServer(createWebServer(db.db, uiRoot, projectHash), webPort);
+	startWebServer(createWebServer(db.db, uiRoot, projectHashRef.current), webPort);
 } else debug("mcp", "Web UI disabled (--no_gui)");
 const curationAgent = new CurationAgent(db.db, {
 	intervalMs: 300 * 1e3,

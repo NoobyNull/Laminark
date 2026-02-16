@@ -11,6 +11,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { debug } from '../../shared/debug.js';
+import type { ProjectHashRef } from '../../shared/types.js';
 import type { ToolRegistryRepository } from '../../storage/tool-registry.js';
 import { inferToolType, inferScope, extractServerName } from '../../hooks/tool-name-parser.js';
 
@@ -36,7 +37,7 @@ function textResponse(text: string) {
 export function registerReportTools(
   server: McpServer,
   toolRegistry: ToolRegistryRepository,
-  projectHash: string,
+  projectHashRef: ProjectHashRef,
 ): void {
   server.registerTool(
     'report_available_tools',
@@ -57,6 +58,7 @@ export function registerReportTools(
       },
     },
     async (args) => {
+      const projectHash = projectHashRef.current;
       try {
         let registered = 0;
         let skipped = 0;

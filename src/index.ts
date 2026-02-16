@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { openDatabase } from './storage/database.js';
 import { getDatabaseConfig, getProjectHash } from './shared/config.js';
 import { debug } from './shared/debug.js';
+import type { ProjectHashRef } from './shared/types.js';
 import { createServer, startServer } from './mcp/server.js';
 import { registerRecall } from './mcp/tools/recall.js';
 import { registerSaveMemory } from './mcp/tools/save-memory.js';
@@ -50,28 +51,57 @@ const db = openDatabase(getDatabaseConfig());
 initGraphSchema(db.db);
 initPathSchema(db.db);
 
-// Resolve the correct project hash. The MCP server's process.cwd() returns the
-// plugin install path, not the user's project directory. Look up the most recently
-// active project from project_metadata (populated by the SessionStart hook which
-// receives the real project directory via input.cwd).
-function resolveProjectHash(sqliteDb: import('better-sqlite3').Database): string {
-  try {
-    const row = sqliteDb.prepare(
-      'SELECT project_hash FROM project_metadata ORDER BY last_seen_at DESC LIMIT 1'
-    ).get() as { project_hash: string } | undefined;
-    if (row?.project_hash) {
-      debug('startup', 'Resolved project hash from project_metadata', { hash: row.project_hash });
-      return row.project_hash;
-    }
-  } catch {
-    // Table may not exist yet on first run
+// ---------------------------------------------------------------------------
+// Live project hash ref — auto-refreshes from project_metadata on access.
+//
+// The MCP server's process.cwd() is the plugin install path, NOT the user's
+// project directory.  The correct hash is written to project_metadata by the
+// SessionStart hook (which receives input.cwd from Claude Code).  This ref
+// re-queries the database at most once per CHECK_INTERVAL_MS so tool handlers
+// always use the correct, current project hash.
+// ---------------------------------------------------------------------------
+
+class LiveProjectHashRef implements ProjectHashRef {
+  private _current: string;
+  private _lastChecked = 0;
+  private _db: import('better-sqlite3').Database;
+  private static readonly CHECK_INTERVAL_MS = 2000;
+
+  constructor(sqliteDb: import('better-sqlite3').Database) {
+    this._db = sqliteDb;
+    // Best-effort initial value (may be stale from a previous session).
+    // First tool-call access will re-query after CHECK_INTERVAL_MS (0ms elapsed
+    // since _lastChecked starts at 0, so the very first .current triggers a refresh).
+    this._current = this.resolve();
   }
-  // Fallback for first-ever run before any SessionStart has populated project_metadata
-  debug('startup', 'No project_metadata found, falling back to process.cwd()');
-  return getProjectHash(process.cwd());
+
+  get current(): string {
+    const now = Date.now();
+    if (now - this._lastChecked >= LiveProjectHashRef.CHECK_INTERVAL_MS) {
+      this._lastChecked = now;
+      const fresh = this.resolve();
+      if (fresh !== this._current) {
+        debug('mcp', 'Project hash refreshed from database', { old: this._current, new: fresh });
+        this._current = fresh;
+      }
+    }
+    return this._current;
+  }
+
+  private resolve(): string {
+    try {
+      const row = this._db.prepare(
+        'SELECT project_hash FROM project_metadata ORDER BY last_seen_at DESC LIMIT 1',
+      ).get() as { project_hash: string } | undefined;
+      if (row?.project_hash) return row.project_hash;
+    } catch {
+      // Table may not exist yet on first run
+    }
+    return getProjectHash(process.cwd());
+  }
 }
 
-const projectHash = resolveProjectHash(db.db);
+const projectHashRef: ProjectHashRef = new LiveProjectHashRef(db.db);
 
 // Tool registry (cross-project, scope-aware)
 let toolRegistry: ToolRegistryRepository | null = null;
@@ -86,7 +116,7 @@ try {
 // ---------------------------------------------------------------------------
 
 const embeddingStore = db.hasVectorSupport
-  ? new EmbeddingStore(db.db, projectHash)
+  ? new EmbeddingStore(db.db, projectHashRef.current)
   : null;
 
 const worker = new AnalysisWorker();
@@ -114,7 +144,7 @@ applyConfig(topicConfig, detector, adaptiveManager);
 
 // Seed adaptive threshold from history (cold start handling)
 const thresholdStore = new ThresholdStore(db.db);
-const historicalSeed = thresholdStore.loadHistoricalSeed(projectHash);
+const historicalSeed = thresholdStore.loadHistoricalSeed(projectHashRef.current);
 if (historicalSeed) {
   adaptiveManager.seedFromHistory(historicalSeed.averageDistance, historicalSeed.averageVariance);
   applyConfig(topicConfig, detector, adaptiveManager);
@@ -123,7 +153,7 @@ if (historicalSeed) {
 const stashManager = new StashManager(db.db);
 const decisionLogger = new TopicShiftDecisionLogger(db.db);
 const notificationStore = new NotificationStore(db.db);
-const obsRepoForTopicDetection = new ObservationRepository(db.db, projectHash);
+const obsRepoForTopicDetection = new ObservationRepository(db.db, projectHashRef.current);
 
 const topicShiftHandler = new TopicShiftHandler({
   detector,
@@ -148,7 +178,8 @@ async function processUnembedded(): Promise<void> {
   const ids = embeddingStore.findUnembedded(10);
   if (ids.length === 0) return;
 
-  const obsRepo = new ObservationRepository(db.db, projectHash);
+  const currentHash = projectHashRef.current;
+  const obsRepo = new ObservationRepository(db.db, currentHash);
 
   // At most one topic shift notification per processing cycle
   let shiftDetectedThisCycle = false;
@@ -176,7 +207,7 @@ async function processUnembedded(): Promise<void> {
         text: truncatedText,
         sessionId: obs.sessionId ?? null,
         createdAt: obs.createdAt,
-        projectHash,
+        projectHash: currentHash,
       });
 
       // Topic shift detection -- only evaluate user-directed observations
@@ -189,11 +220,11 @@ async function processUnembedded(): Promise<void> {
           const result = await topicShiftHandler.handleObservation(
             obsWithEmbedding,
             obs.sessionId ?? 'unknown',
-            projectHash,
+            currentHash,
           );
           if (result.stashed && result.notification) {
             shiftDetectedThisCycle = true;
-            notificationStore.add(projectHash, result.notification);
+            notificationStore.add(currentHash, result.notification);
             debug('embed', 'Topic shift detected, notification queued', { id });
 
             // Broadcast topic shift to SSE clients
@@ -203,7 +234,7 @@ async function processUnembedded(): Promise<void> {
               toTopic: null,
               timestamp: new Date().toISOString(),
               confidence: null,
-              projectHash,
+              projectHash: currentHash,
             });
           }
         } catch (topicErr) {
@@ -221,7 +252,7 @@ async function processUnembedded(): Promise<void> {
 // Research buffer instance for periodic flush
 let researchBufferForFlush: ResearchBufferRepository | null = null;
 try {
-  researchBufferForFlush = new ResearchBufferRepository(db.db, projectHash);
+  researchBufferForFlush = new ResearchBufferRepository(db.db, projectHashRef.current);
 } catch {
   // Table may not exist yet
 }
@@ -270,30 +301,30 @@ const embedTimer = setInterval(() => {
 // ---------------------------------------------------------------------------
 
 const statusCache = new StatusCache(
-  db.db, projectHash, process.cwd(), db.hasVectorSupport, () => worker.isReady(),
+  db.db, projectHashRef, process.cwd(), db.hasVectorSupport, () => worker.isReady(),
 );
 
 const server = createServer();
-registerSaveMemory(server, db.db, projectHash, notificationStore, worker, embeddingStore, statusCache);
-registerRecall(server, db.db, projectHash, worker, embeddingStore, notificationStore, statusCache);
-registerTopicContext(server, db.db, projectHash, notificationStore);
-registerQueryGraph(server, db.db, projectHash, notificationStore);
-registerGraphStats(server, db.db, projectHash, notificationStore);
-registerStatus(server, statusCache, projectHash, notificationStore);
+registerSaveMemory(server, db.db, projectHashRef, notificationStore, worker, embeddingStore, statusCache);
+registerRecall(server, db.db, projectHashRef, worker, embeddingStore, notificationStore, statusCache);
+registerTopicContext(server, db.db, projectHashRef, notificationStore);
+registerQueryGraph(server, db.db, projectHashRef, notificationStore);
+registerGraphStats(server, db.db, projectHashRef, notificationStore);
+registerStatus(server, statusCache, projectHashRef, notificationStore);
 if (toolRegistry) {
-  registerDiscoverTools(server, toolRegistry, worker, db.hasVectorSupport, notificationStore, projectHash);
-  registerReportTools(server, toolRegistry, projectHash);
+  registerDiscoverTools(server, toolRegistry, worker, db.hasVectorSupport, notificationStore, projectHashRef);
+  registerReportTools(server, toolRegistry, projectHashRef);
 }
 
 // ---------------------------------------------------------------------------
 // Background Haiku processor (classification + entity extraction + relationships)
 // ---------------------------------------------------------------------------
 
-const pathRepo = new PathRepository(db.db, projectHash);
+const pathRepo = new PathRepository(db.db, projectHashRef.current);
 const pathTracker = new PathTracker(pathRepo);
-registerDebugPathTools(server, pathRepo, pathTracker, notificationStore, projectHash);
+registerDebugPathTools(server, pathRepo, pathTracker, notificationStore, projectHashRef);
 
-const haikuProcessor = new HaikuProcessor(db.db, projectHash, {
+const haikuProcessor = new HaikuProcessor(db.db, projectHashRef.current, {
   intervalMs: 30_000,
   batchSize: 10,
   concurrency: 3,
@@ -318,7 +349,7 @@ if (!noGui) {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
   const uiRoot = path.resolve(__dirname, '..', 'ui');
-  const webApp = createWebServer(db.db, uiRoot, projectHash);
+  const webApp = createWebServer(db.db, uiRoot, projectHashRef.current);
   startWebServer(webApp, webPort);
 } else {
   debug('mcp', 'Web UI disabled (--no_gui)');

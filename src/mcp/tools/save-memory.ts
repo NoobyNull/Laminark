@@ -3,6 +3,7 @@ import type BetterSqlite3 from 'better-sqlite3';
 import { z } from 'zod';
 
 import { debug } from '../../shared/debug.js';
+import type { ProjectHashRef } from '../../shared/types.js';
 import { ObservationRepository } from '../../storage/observations.js';
 import type { NotificationStore } from '../../storage/notifications.js';
 import type { AnalysisWorker } from '../../analysis/worker-bridge.js';
@@ -32,7 +33,7 @@ export function generateTitle(content: string): string {
 export function registerSaveMemory(
   server: McpServer,
   db: BetterSqlite3.Database,
-  projectHash: string,
+  projectHashRef: ProjectHashRef,
   notificationStore: NotificationStore | null = null,
   worker: AnalysisWorker | null = null,
   embeddingStore: EmbeddingStore | null = null,
@@ -68,6 +69,7 @@ export function registerSaveMemory(
       },
     },
     async (args) => {
+      const projectHash = projectHashRef.current;
       try {
         const repo = new ObservationRepository(db, projectHash);
 

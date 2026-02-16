@@ -12,6 +12,7 @@ import type BetterSqlite3 from 'better-sqlite3';
 import { z } from 'zod';
 
 import { debug } from '../../shared/debug.js';
+import type { ProjectHashRef } from '../../shared/types.js';
 import type { NotificationStore } from '../../storage/notifications.js';
 import {
   type EntityType,
@@ -199,7 +200,7 @@ function errorResponse(text: string) {
 export function registerQueryGraph(
   server: McpServer,
   db: BetterSqlite3.Database,
-  projectHash: string,
+  projectHashRef: ProjectHashRef,
   notificationStore: NotificationStore | null = null,
 ): void {
   // Ensure graph schema is initialized
@@ -245,6 +246,7 @@ export function registerQueryGraph(
       },
     },
     async (args) => {
+      const projectHash = projectHashRef.current;
       const withNotifications = (text: string) =>
         textResponse(
           prependNotifications(notificationStore, projectHash, text),

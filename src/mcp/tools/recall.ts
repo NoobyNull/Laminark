@@ -10,6 +10,8 @@ import type { EmbeddingStore } from '../../storage/embeddings.js';
 import type { AnalysisWorker } from '../../analysis/worker-bridge.js';
 import type { NotificationStore } from '../../storage/notifications.js';
 import { hybridSearch } from '../../search/hybrid.js';
+import type { ProjectHashRef } from '../../shared/types.js';
+import { loadCrossAccessConfig } from '../../config/cross-access.js';
 import {
   enforceTokenBudget,
   estimateTokens,
@@ -101,13 +103,35 @@ function errorResponse(text: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Cross-project helpers
+// ---------------------------------------------------------------------------
+
+interface ProjectNameRow {
+  project_hash: string;
+  display_name: string | null;
+}
+
+function getProjectNameMap(db: BetterSqlite3.Database): Map<string, string> {
+  const map = new Map<string, string>();
+  try {
+    const rows = db.prepare(
+      'SELECT project_hash, display_name FROM project_metadata'
+    ).all() as ProjectNameRow[];
+    for (const row of rows) {
+      map.set(row.project_hash, row.display_name ?? row.project_hash.slice(0, 8));
+    }
+  } catch { /* table may not exist yet */ }
+  return map;
+}
+
+// ---------------------------------------------------------------------------
 // registerRecall
 // ---------------------------------------------------------------------------
 
 export function registerRecall(
   server: McpServer,
   db: BetterSqlite3.Database,
-  projectHash: string,
+  projectHashRef: ProjectHashRef,
   worker: AnalysisWorker | null = null,
   embeddingStore: EmbeddingStore | null = null,
   notificationStore: NotificationStore | null = null,
@@ -169,6 +193,7 @@ export function registerRecall(
       },
     },
     async (args) => {
+      const projectHash = projectHashRef.current;
       // Helper to wrap textResponse with pending notifications
       const withNotifications = (text: string) =>
         textResponse(prependNotifications(notificationStore, projectHash, text));
@@ -246,6 +271,39 @@ export function registerRecall(
             });
           }
           observations = searchResults.map((r) => r.observation);
+
+          // Cross-project search: also search readable projects
+          const crossConfig = loadCrossAccessConfig(projectHash);
+          if (crossConfig.readableProjects.length > 0) {
+            const nameMap = getProjectNameMap(db);
+            for (const otherHash of crossConfig.readableProjects) {
+              const otherEngine = new SearchEngine(db, otherHash);
+              let otherResults: SearchResult[];
+              if (embeddingStore) {
+                otherResults = await hybridSearch({
+                  searchEngine: otherEngine,
+                  embeddingStore,
+                  worker,
+                  query: args.query,
+                  db,
+                  projectHash: otherHash,
+                  options: { limit: args.limit },
+                });
+              } else {
+                otherResults = otherEngine.searchKeyword(args.query, {
+                  limit: args.limit,
+                });
+              }
+              if (otherResults.length > 0) {
+                const projName = nameMap.get(otherHash) ?? otherHash.slice(0, 8);
+                for (const r of otherResults) {
+                  r.observation.title = `[${projName}] ${r.observation.title ?? 'untitled'}`;
+                }
+                searchResults.push(...otherResults);
+                observations.push(...otherResults.map((r) => r.observation));
+              }
+            }
+          }
         } else if (args.title) {
           observations = repo.getByTitle(args.title, {
             limit: args.limit,

@@ -1,6 +1,23 @@
 import { z } from 'zod';
 
 // =============================================================================
+// Project Hash Reference (cross-project isolation)
+// =============================================================================
+
+/**
+ * Mutable reference to the active project hash.
+ *
+ * The MCP server's process.cwd() returns the plugin install path, NOT the
+ * user's project directory.  The correct hash is only known after the
+ * SessionStart hook writes to `project_metadata`.  This ref auto-refreshes
+ * from the database so that tool handlers always resolve the current project.
+ */
+export interface ProjectHashRef {
+  /** Current project hash — reads may trigger a DB refresh. */
+  readonly current: string;
+}
+
+// =============================================================================
 // Database Layer Types (snake_case, matches SQL columns)
 // =============================================================================
 

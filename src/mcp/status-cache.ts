@@ -9,6 +9,7 @@
 import type BetterSqlite3 from 'better-sqlite3';
 
 import { debug } from '../shared/debug.js';
+import type { ProjectHashRef } from '../shared/types.js';
 import { getDbPath } from '../shared/config.js';
 import { estimateTokens } from './token-budget.js';
 
@@ -31,7 +32,7 @@ function formatUptime(seconds: number): string {
 
 export class StatusCache {
   private db: BetterSqlite3.Database;
-  private projectHash: string;
+  private projectHashRef: ProjectHashRef;
   private projectPath: string;
   private hasVectorSupport: boolean;
   private isWorkerReady: () => boolean;
@@ -44,13 +45,13 @@ export class StatusCache {
 
   constructor(
     db: BetterSqlite3.Database,
-    projectHash: string,
+    projectHashRef: ProjectHashRef,
     projectPath: string,
     hasVectorSupport: boolean,
     isWorkerReady: () => boolean,
   ) {
     this.db = db;
-    this.projectHash = projectHash;
+    this.projectHashRef = projectHashRef;
     this.projectPath = projectPath;
     this.hasVectorSupport = hasVectorSupport;
     this.isWorkerReady = isWorkerReady;
@@ -94,7 +95,7 @@ export class StatusCache {
 
   private rebuild(): void {
     try {
-      const ph = this.projectHash;
+      const ph = this.projectHashRef.current;
 
       const totalObs = (
         this.db.prepare(

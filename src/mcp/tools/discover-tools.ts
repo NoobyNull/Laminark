@@ -10,6 +10,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { debug } from '../../shared/debug.js';
+import type { ProjectHashRef } from '../../shared/types.js';
 import type { ToolSearchResult } from '../../shared/tool-types.js';
 import type { ToolRegistryRepository } from '../../storage/tool-registry.js';
 import type { AnalysisWorker } from '../../analysis/worker-bridge.js';
@@ -70,7 +71,7 @@ export function registerDiscoverTools(
   worker: AnalysisWorker | null,
   hasVectorSupport: boolean,
   notificationStore: NotificationStore | null,
-  projectHash: string,
+  projectHashRef: ProjectHashRef,
 ): void {
   server.registerTool(
     'discover_tools',
@@ -97,6 +98,7 @@ export function registerDiscoverTools(
       },
     },
     async (args) => {
+      const projectHash = projectHashRef.current;
       const withNotifications = (text: string) =>
         textResponse(prependNotifications(notificationStore, projectHash, text));
 

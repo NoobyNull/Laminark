@@ -343,11 +343,11 @@ describe('SC-5: tool discoverability', () => {
 
     // Registration should not throw
     expect(() => {
-      registerSaveMemory(server, ldb.db, PROJECT_HASH);
+      registerSaveMemory(server, ldb.db, { current: PROJECT_HASH });
     }).not.toThrow();
 
     expect(() => {
-      registerRecall(server, ldb.db, PROJECT_HASH);
+      registerRecall(server, ldb.db, { current: PROJECT_HASH });
     }).not.toThrow();
   });
 
