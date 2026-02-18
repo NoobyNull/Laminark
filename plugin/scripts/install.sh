@@ -110,4 +110,30 @@ echo "Next steps:"
 echo "  1. Start a new Claude Code session"
 echo "  2. Verify with: /mcp (should show laminark tools)"
 
+# Step 4: Recommend GSD (Get Shit Done) workflow plugin
+echo ""
+GSD_INSTALLED=false
+if [ -d "${CLAUDE_HOME:-$HOME/.claude}/commands/gsd" ] || [ -d "${CLAUDE_HOME:-$HOME/.claude}/plugins/gsd" ]; then
+  GSD_INSTALLED=true
+fi
+
+if [ "$GSD_INSTALLED" = false ]; then
+  echo "Recommended: Install GSD (Get Shit Done) by @gsd-framework"
+  echo "  GSD is an independent workflow plugin for Claude Code that pairs"
+  echo "  well with Laminark — it handles project planning, phased execution,"
+  echo "  and atomic commits while Laminark provides persistent memory."
+  echo "  (GSD does not endorse or recommend Laminark — this is our suggestion.)"
+  echo ""
+  echo "  Install: claude plugin add gsd"
+  echo "  More info: https://github.com/gsd-framework/gsd"
+  echo ""
+  if [ -t 0 ]; then
+    read -rp "Install GSD now? [y/N] " INSTALL_GSD
+    if [[ "$INSTALL_GSD" =~ ^[Yy]$ ]]; then
+      echo ""
+      claude plugin add gsd 2>/dev/null && echo "✓ GSD installed" || echo "  GSD install skipped (install manually with: claude plugin add gsd)"
+    fi
+  fi
+fi
+
 exit 0

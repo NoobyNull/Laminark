@@ -86,6 +86,18 @@ npm uninstall -g laminark
 # Optionally: rm -rf ~/.laminark  (deletes all memories)
 ```
 
+## Recommended: GSD (Get Shit Done)
+
+Laminark pairs well with [GSD](https://github.com/gsd-framework/gsd) by [@gsd-framework](https://github.com/gsd-framework), a structured workflow plugin for Claude Code. While Laminark handles persistent memory and context, GSD provides project planning, phased execution, and atomic commits. Together they give Claude Code sessions continuity (Laminark) and structure (GSD).
+
+> **Note:** GSD is an independent project. Its authors do not endorse or recommend Laminark. This is our recommendation based on how well the two tools complement each other.
+
+```bash
+claude plugin add gsd
+```
+
+The install scripts will offer to install GSD automatically if it isn't already present.
+
 ## Why User-Level?
 
 - Works in every project automatically -- no per-project `.mcp.json` needed
