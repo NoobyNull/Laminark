@@ -852,11 +852,32 @@ var ObservationRepository = class {
 		return rowToObservation(row);
 	}
 	/**
+	* Resolves a full or prefix ID to the full 32-char ID.
+	* Observation IDs are 32-char hex strings. Search results display only the
+	* first 8 chars via shortId(). This method allows callers to pass either
+	* a full ID or an 8-char (or any-length) prefix and get the full ID back.
+	* Returns null if no unique match is found.
+	*/
+	resolveId(id) {
+		if (id.length === 32) return id;
+		const rows = this.db.prepare("SELECT id FROM observations WHERE project_hash = ? AND id LIKE ? ESCAPE '\\' LIMIT 2").all(this.projectHash, id.replace(/[%_\\]/g, "\\$&") + "%");
+		if (rows.length === 1) return rows[0].id;
+		if (rows.length > 1) debug("obs", "Ambiguous ID prefix - multiple matches", {
+			prefix: id,
+			count: rows.length
+		});
+		return null;
+	}
+	/**
 	* Gets an observation by ID, scoped to this project.
+	* Accepts full 32-char IDs or shorter prefix strings (e.g. the 8-char
+	* display IDs shown in search results).
 	* Returns null if not found or soft-deleted.
 	*/
 	getById(id) {
-		const row = this.stmtGetById.get(id, this.projectHash);
+		const resolvedId = this.resolveId(id);
+		if (!resolvedId) return null;
+		const row = this.stmtGetById.get(resolvedId, this.projectHash);
 		return row ? rowToObservation(row) : null;
 	}
 	/**
@@ -925,20 +946,26 @@ var ObservationRepository = class {
 	}
 	/**
 	* Soft-deletes an observation by setting deleted_at.
+	* Accepts full 32-char IDs or shorter prefix strings (e.g. the 8-char
+	* display IDs shown in search results).
 	* Returns true if the observation was found and deleted.
 	*/
 	softDelete(id) {
 		debug("obs", "Soft-deleting observation", { id });
-		const result = this.stmtSoftDelete.run(id, this.projectHash);
-		debug("obs", result.changes > 0 ? "Observation soft-deleted" : "Observation not found for delete", { id });
+		const resolvedId = this.resolveId(id) ?? id;
+		const result = this.stmtSoftDelete.run(resolvedId, this.projectHash);
+		debug("obs", result.changes > 0 ? "Observation soft-deleted" : "Observation not found for delete", { id: resolvedId });
 		return result.changes > 0;
 	}
 	/**
 	* Restores a soft-deleted observation by clearing deleted_at.
+	* Accepts full 32-char IDs or shorter prefix strings (e.g. the 8-char
+	* display IDs shown in search results).
 	* Returns true if the observation was found and restored.
 	*/
 	restore(id) {
-		return this.stmtRestore.run(id, this.projectHash).changes > 0;
+		const resolvedId = this.resolveId(id) ?? id;
+		return this.stmtRestore.run(resolvedId, this.projectHash).changes > 0;
 	}
 	/**
 	* Updates the classification of an observation.
@@ -1021,11 +1048,28 @@ var ObservationRepository = class {
 	}
 	/**
 	* Gets an observation by ID, including soft-deleted observations.
+	* Accepts full 32-char IDs or shorter prefix strings (e.g. the 8-char
+	* display IDs shown in search results).
 	* Used by the recall tool for restore operations (must find purged items).
 	*/
 	getByIdIncludingDeleted(id) {
 		debug("obs", "Getting observation including deleted", { id });
-		const row = this.stmtGetByIdIncludingDeleted.get(id, this.projectHash);
+		const FULL_ID_LENGTH = 32;
+		let resolvedId;
+		if (id.length === FULL_ID_LENGTH) resolvedId = id;
+		else {
+			const rows = this.db.prepare("SELECT id FROM observations WHERE project_hash = ? AND id LIKE ? ESCAPE '\\' LIMIT 2").all(this.projectHash, id.replace(/[%_\\]/g, "\\$&") + "%");
+			if (rows.length === 0) return null;
+			if (rows.length > 1) {
+				debug("obs", "Ambiguous ID prefix for getByIdIncludingDeleted", {
+					prefix: id,
+					count: rows.length
+				});
+				return null;
+			}
+			resolvedId = rows[0].id;
+		}
+		const row = this.stmtGetByIdIncludingDeleted.get(resolvedId, this.projectHash);
 		return row ? rowToObservation(row) : null;
 	}
 	/**
@@ -2953,4 +2997,4 @@ var ToolRegistryRepository = class {
 
 //#endregion
 export { ObservationRepository as C, runMigrations as D, MIGRATIONS as E, debug as O, SessionRepository as S, openDatabase as T, upsertNode as _, ResearchBufferRepository as a, hybridSearch as b, inferScope as c, getEdgesForNode as d, getNodeByNameAndType as f, traverseFrom as g, insertEdge as h, NotificationStore as i, debugTimed as k, inferToolType as l, initGraphSchema as m, PathRepository as n, BranchRepository as o, getNodesByType as p, initPathSchema as r, extractServerName as s, ToolRegistryRepository as t, countEdgesForNode as u, SaveGuard as v, rowToObservation as w, SearchEngine as x, jaccardSimilarity as y };
-//# sourceMappingURL=tool-registry-AN2fB4FP.mjs.map
+//# sourceMappingURL=tool-registry-FHfSTose.mjs.map

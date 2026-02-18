@@ -88,7 +88,17 @@ declare class ObservationRepository {
    */
   create(input: ObservationInsert): Observation;
   /**
+   * Resolves a full or prefix ID to the full 32-char ID.
+   * Observation IDs are 32-char hex strings. Search results display only the
+   * first 8 chars via shortId(). This method allows callers to pass either
+   * a full ID or an 8-char (or any-length) prefix and get the full ID back.
+   * Returns null if no unique match is found.
+   */
+  private resolveId;
+  /**
    * Gets an observation by ID, scoped to this project.
+   * Accepts full 32-char IDs or shorter prefix strings (e.g. the 8-char
+   * display IDs shown in search results).
    * Returns null if not found or soft-deleted.
    */
   getById(id: string): Observation | null;
@@ -112,11 +122,15 @@ declare class ObservationRepository {
   update(id: string, updates: Partial<Pick<Observation, 'content' | 'embedding' | 'embeddingModel' | 'embeddingVersion'>>): Observation | null;
   /**
    * Soft-deletes an observation by setting deleted_at.
+   * Accepts full 32-char IDs or shorter prefix strings (e.g. the 8-char
+   * display IDs shown in search results).
    * Returns true if the observation was found and deleted.
    */
   softDelete(id: string): boolean;
   /**
    * Restores a soft-deleted observation by clearing deleted_at.
+   * Accepts full 32-char IDs or shorter prefix strings (e.g. the 8-char
+   * display IDs shown in search results).
    * Returns true if the observation was found and restored.
    */
   restore(id: string): boolean;
@@ -151,6 +165,8 @@ declare class ObservationRepository {
   count(): number;
   /**
    * Gets an observation by ID, including soft-deleted observations.
+   * Accepts full 32-char IDs or shorter prefix strings (e.g. the 8-char
+   * display IDs shown in search results).
    * Used by the recall tool for restore operations (must find purged items).
    */
   getByIdIncludingDeleted(id: string): Observation | null;
@@ -173,4 +189,4 @@ declare class ObservationRepository {
 }
 //#endregion
 export { SearchResult as a, ObservationInsert as i, DatabaseConfig as n, Session as o, Observation as r, ObservationRepository as t };
-//# sourceMappingURL=observations-DUHXy7Lm.d.mts.map
+//# sourceMappingURL=observations-CorAAc1A.d.mts.map

@@ -17,6 +17,7 @@ import { registerSaveMemory } from './mcp/tools/save-memory.js';
 import { registerTopicContext } from './mcp/tools/topic-context.js';
 import { registerQueryGraph } from './mcp/tools/query-graph.js';
 import { registerGraphStats } from './mcp/tools/graph-stats.js';
+import { registerHygiene } from './mcp/tools/hygiene.js';
 import { registerStatus } from './mcp/tools/status.js';
 import { StatusCache } from './mcp/status-cache.js';
 import { registerDiscoverTools } from './mcp/tools/discover-tools.js';
@@ -313,6 +314,7 @@ registerRecall(server, db.db, projectHashRef, worker, embeddingStore, notificati
 registerTopicContext(server, db.db, projectHashRef, notificationStore);
 registerQueryGraph(server, db.db, projectHashRef, notificationStore);
 registerGraphStats(server, db.db, projectHashRef, notificationStore);
+registerHygiene(server, db.db, projectHashRef, notificationStore);
 registerStatus(server, statusCache, projectHashRef, notificationStore);
 if (toolRegistry) {
   registerDiscoverTools(server, toolRegistry, worker, db.hasVectorSupport, notificationStore, projectHashRef);

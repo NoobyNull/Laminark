@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-t8LZeB-u.mjs";
-import { C as ObservationRepository, D as runMigrations, E as MIGRATIONS, O as debug, S as SessionRepository, T as openDatabase, _ as upsertNode, a as ResearchBufferRepository, b as hybridSearch, c as inferScope, d as getEdgesForNode, f as getNodeByNameAndType, g as traverseFrom, h as insertEdge, i as NotificationStore, k as debugTimed, l as inferToolType, m as initGraphSchema, n as PathRepository, o as BranchRepository, p as getNodesByType, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository, u as countEdgesForNode, v as SaveGuard, w as rowToObservation, x as SearchEngine, y as jaccardSimilarity$1 } from "./tool-registry-AN2fB4FP.mjs";
+import { C as ObservationRepository, D as runMigrations, E as MIGRATIONS, O as debug, S as SessionRepository, T as openDatabase, _ as upsertNode, a as ResearchBufferRepository, b as hybridSearch, c as inferScope, d as getEdgesForNode, f as getNodeByNameAndType, g as traverseFrom, h as insertEdge, i as NotificationStore, k as debugTimed, l as inferToolType, m as initGraphSchema, n as PathRepository, o as BranchRepository, p as getNodesByType, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository, u as countEdgesForNode, v as SaveGuard, w as rowToObservation, x as SearchEngine, y as jaccardSimilarity$1 } from "./tool-registry-FHfSTose.mjs";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -544,13 +544,13 @@ function formatTimelineGroup(date, items) {
 function formatFullItem(obs) {
 	return `--- ${shortId(obs.id)} | ${obs.title ?? "untitled"} | ${obs.createdAt} ---\n${obs.content}`;
 }
-function prependNotifications$7(notificationStore, projectHash, responseText) {
+function prependNotifications$8(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$8(text) {
+function textResponse$9(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -604,7 +604,7 @@ function registerRecall(server, db, projectHashRef, worker = null, embeddingStor
 		}
 	}, async (args) => {
 		const projectHash = projectHashRef.current;
-		const withNotifications = (text) => textResponse$8(prependNotifications$7(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$9(prependNotifications$8(notificationStore, projectHash, text));
 		try {
 			const repo = new ObservationRepository(db, projectHash);
 			const searchEngine = new SearchEngine(db, projectHash);
@@ -675,7 +675,7 @@ function registerRecall(server, db, projectHashRef, worker = null, embeddingStor
 				const verbosity = loadToolVerbosityConfig().level;
 				if (verbosity === 1) {
 					const searchTerm = args.query ?? args.title ?? "query";
-					return textResponse$8(prependNotifications$7(notificationStore, projectHash, `Found ${observations.length} memories matching "${searchTerm}"`));
+					return textResponse$9(prependNotifications$8(notificationStore, projectHash, `Found ${observations.length} memories matching "${searchTerm}"`));
 				}
 				if (verbosity === 2) {
 					const lines = observations.map((obs, i) => {
@@ -683,10 +683,10 @@ function registerRecall(server, db, projectHashRef, worker = null, embeddingStor
 						return `${i + 1}. ${title}`;
 					});
 					const footer = `\n---\n${observations.length} result(s)`;
-					return textResponse$8(prependNotifications$7(notificationStore, projectHash, lines.join("\n") + footer));
+					return textResponse$9(prependNotifications$8(notificationStore, projectHash, lines.join("\n") + footer));
 				}
 				const originalText = formatViewResponse(observations, searchResults, args.detail, args.id !== void 0).content[0].text;
-				return textResponse$8(prependNotifications$7(notificationStore, projectHash, originalText));
+				return textResponse$9(prependNotifications$8(notificationStore, projectHash, originalText));
 			}
 			if (args.action === "purge") {
 				const targetIds = args.ids ?? (args.id ? [args.id] : []);
@@ -782,7 +782,7 @@ function formatViewResponse(observations, searchResults, detail, isSingleIdLooku
 	}
 	let footer = `---\n${observations.length} result(s) | ~${tokenEstimate} tokens | detail: ${detail}`;
 	if (truncated) footer += " | truncated (use id for full view)";
-	return textResponse$8(`${body}\n${footer}`);
+	return textResponse$9(`${body}\n${footer}`);
 }
 function buildScoreMap(searchResults) {
 	const map = /* @__PURE__ */ new Map();
@@ -946,13 +946,13 @@ function formatStashes(stashes) {
 	if (stashes.length <= 8) return formatDetail(stashes);
 	return formatCompact(stashes);
 }
-function prependNotifications$6(notificationStore, projectHash, responseText) {
+function prependNotifications$7(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$7(text) {
+function textResponse$8(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -975,7 +975,7 @@ function registerTopicContext(server, db, projectHashRef, notificationStore = nu
 		}
 	}, async (args) => {
 		const projectHash = projectHashRef.current;
-		const withNotifications = (text) => textResponse$7(prependNotifications$6(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$8(prependNotifications$7(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "topic_context: request", {
 				query: args.query,
@@ -997,7 +997,7 @@ function registerTopicContext(server, db, projectHashRef, notificationStore = nu
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "topic_context: error", { error: message });
-			return textResponse$7(`Error retrieving context threads: ${message}`);
+			return textResponse$8(`Error retrieving context threads: ${message}`);
 		}
 	});
 }
@@ -1102,13 +1102,13 @@ function formatAge(isoDate) {
 	const months = Math.floor(days / 30);
 	return `${months} month${months !== 1 ? "s" : ""} ago`;
 }
-function prependNotifications$5(notificationStore, projectHash, responseText) {
+function prependNotifications$6(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$6(text) {
+function textResponse$7(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1143,7 +1143,7 @@ function registerQueryGraph(server, db, projectHashRef, notificationStore = null
 		}
 	}, async (args) => {
 		const projectHash = projectHashRef.current;
-		const withNotifications = (text) => textResponse$6(prependNotifications$5(notificationStore, projectHash, text));
+		const withNotifications = (text) => textResponse$7(prependNotifications$6(notificationStore, projectHash, text));
 		try {
 			debug("mcp", "query_graph: request", {
 				query: args.query,
@@ -1510,13 +1510,13 @@ function formatStats(stats) {
 	}
 	return lines.join("\n");
 }
-function prependNotifications$4(notificationStore, projectHash, responseText) {
+function prependNotifications$5(notificationStore, projectHash, responseText) {
 	if (!notificationStore) return responseText;
 	const pending = notificationStore.consumePending(projectHash);
 	if (pending.length === 0) return responseText;
 	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
 }
-function textResponse$5(text) {
+function textResponse$6(text) {
 	return { content: [{
 		type: "text",
 		text
@@ -1545,11 +1545,294 @@ function registerGraphStats(server, db, projectHashRef, notificationStore = null
 				nodes: stats.total_nodes,
 				edges: stats.total_edges
 			});
-			return textResponse$5(prependNotifications$4(notificationStore, projectHash, formatted));
+			return textResponse$6(prependNotifications$5(notificationStore, projectHash, formatted));
 		} catch (err) {
 			const message = err instanceof Error ? err.message : "Unknown error";
 			debug("mcp", "graph_stats: error", { error: message });
-			return textResponse$5(`Graph stats error: ${message}`);
+			return textResponse$6(`Graph stats error: ${message}`);
+		}
+	});
+}
+
+//#endregion
+//#region src/graph/hygiene-analyzer.ts
+const WEIGHTS = {
+	orphaned: .3,
+	islandNode: .15,
+	noiseClassified: .25,
+	shortContent: .1,
+	autoCaptured: .1,
+	stale: .1
+};
+const SHORT_CONTENT_THRESHOLD = 50;
+/**
+* Analyzes all active observations and scores each on deletion signals.
+* Pure read-only — no data is modified.
+*/
+function analyzeObservations(db, projectHash, opts) {
+	const limit = opts?.limit ?? 50;
+	const minTier = opts?.minTier ?? "medium";
+	debug("hygiene", "Starting analysis", {
+		projectHash,
+		sessionId: opts?.sessionId
+	});
+	let obsSql = `
+    SELECT id, content, title, source, kind, session_id, classification, created_at
+    FROM observations
+    WHERE project_hash = ? AND deleted_at IS NULL
+  `;
+	const obsParams = [projectHash];
+	if (opts?.sessionId) {
+		obsSql += " AND session_id = ?";
+		obsParams.push(opts.sessionId);
+	}
+	obsSql += " ORDER BY created_at DESC";
+	const observations = db.prepare(obsSql).all(...obsParams);
+	const linkedObsIds = /* @__PURE__ */ new Set();
+	const islandObsIds = /* @__PURE__ */ new Set();
+	const allNodes = db.prepare("SELECT id, type, name, observation_ids FROM graph_nodes").all();
+	const edgeCounts = /* @__PURE__ */ new Map();
+	const edgeRows = db.prepare(`SELECT source_id AS nid, COUNT(*) AS cnt FROM graph_edges GROUP BY source_id
+     UNION ALL
+     SELECT target_id AS nid, COUNT(*) AS cnt FROM graph_edges GROUP BY target_id`).all();
+	for (const row of edgeRows) edgeCounts.set(row.nid, (edgeCounts.get(row.nid) ?? 0) + row.cnt);
+	for (const node of allNodes) {
+		let obsIds;
+		try {
+			obsIds = JSON.parse(node.observation_ids);
+		} catch {
+			continue;
+		}
+		const degree = edgeCounts.get(node.id) ?? 0;
+		for (const oid of obsIds) {
+			linkedObsIds.add(oid);
+			if (degree === 0) islandObsIds.add(oid);
+		}
+	}
+	const staleIds = /* @__PURE__ */ new Set();
+	try {
+		initStalenessSchema(db);
+		const staleRows = db.prepare("SELECT observation_id FROM staleness_flags WHERE resolved = 0").all();
+		for (const row of staleRows) staleIds.add(row.observation_id);
+	} catch {}
+	const allCandidates = [];
+	for (const obs of observations) {
+		const signals = {
+			orphaned: !linkedObsIds.has(obs.id),
+			islandNode: islandObsIds.has(obs.id),
+			noiseClassified: obs.classification === "noise",
+			shortContent: obs.content.length < SHORT_CONTENT_THRESHOLD,
+			autoCaptured: obs.source.startsWith("hook:"),
+			stale: staleIds.has(obs.id)
+		};
+		const confidence = (signals.orphaned ? WEIGHTS.orphaned : 0) + (signals.islandNode ? WEIGHTS.islandNode : 0) + (signals.noiseClassified ? WEIGHTS.noiseClassified : 0) + (signals.shortContent ? WEIGHTS.shortContent : 0) + (signals.autoCaptured ? WEIGHTS.autoCaptured : 0) + (signals.stale ? WEIGHTS.stale : 0);
+		const tier = confidence >= .7 ? "high" : confidence >= .5 ? "medium" : "low";
+		if (minTier === "high" && tier !== "high") continue;
+		if (minTier === "medium" && tier === "low") continue;
+		const preview = obs.content.length > 80 ? obs.content.substring(0, 80) + "..." : obs.content;
+		allCandidates.push({
+			id: obs.id,
+			shortId: obs.id.substring(0, 8),
+			sessionId: obs.session_id,
+			kind: obs.kind,
+			source: obs.source,
+			contentPreview: preview,
+			createdAt: obs.created_at,
+			signals,
+			confidence: Math.round(confidence * 100) / 100,
+			tier
+		});
+	}
+	allCandidates.sort((a, b) => b.confidence - a.confidence);
+	const activeObsIds = new Set(observations.map((o) => o.id));
+	const orphanNodes = [];
+	for (const node of allNodes) {
+		if ((edgeCounts.get(node.id) ?? 0) > 0) continue;
+		let obsIds;
+		try {
+			obsIds = JSON.parse(node.observation_ids);
+		} catch {
+			continue;
+		}
+		if (obsIds.length === 0 || obsIds.every((oid) => !activeObsIds.has(oid))) orphanNodes.push({
+			id: node.id,
+			type: node.type,
+			name: node.name,
+			reason: "zero edges, dead observation refs"
+		});
+	}
+	const limited = allCandidates.slice(0, limit);
+	const highCount = allCandidates.filter((c) => c.tier === "high").length;
+	const mediumCount = allCandidates.filter((c) => c.tier === "medium").length;
+	const lowCount = allCandidates.filter((c) => c.tier === "low").length;
+	debug("hygiene", "Analysis complete", {
+		total: observations.length,
+		high: highCount,
+		medium: mediumCount,
+		orphanNodes: orphanNodes.length
+	});
+	return {
+		analyzedAt: (/* @__PURE__ */ new Date()).toISOString(),
+		totalObservations: observations.length,
+		candidates: limited,
+		orphanNodes: orphanNodes.slice(0, limit),
+		summary: {
+			high: highCount,
+			medium: mediumCount,
+			low: lowCount,
+			orphanNodeCount: orphanNodes.length
+		}
+	};
+}
+/**
+* Soft-deletes observations matching the given tier threshold and removes
+* dead orphan graph nodes. Returns counts of affected records.
+*/
+function executePurge(db, projectHash, report, tier) {
+	const candidateIds = report.candidates.filter((c) => {
+		if (tier === "high") return c.tier === "high";
+		if (tier === "medium") return c.tier === "high" || c.tier === "medium";
+		return true;
+	}).map((c) => c.id);
+	debug("hygiene", "Executing purge", {
+		tier,
+		candidates: candidateIds.length
+	});
+	let observationsPurged = 0;
+	const softDeleteStmt = db.prepare(`
+    UPDATE observations
+    SET deleted_at = datetime('now'), updated_at = datetime('now')
+    WHERE id = ? AND project_hash = ? AND deleted_at IS NULL
+  `);
+	return db.transaction(() => {
+		for (const id of candidateIds) {
+			const result = softDeleteStmt.run(id, projectHash);
+			observationsPurged += result.changes;
+		}
+		let orphanNodesRemoved = 0;
+		const deleteNodeStmt = db.prepare("DELETE FROM graph_nodes WHERE id = ?");
+		for (const node of report.orphanNodes) {
+			const result = deleteNodeStmt.run(node.id);
+			orphanNodesRemoved += result.changes;
+		}
+		return {
+			observationsPurged,
+			orphanNodesRemoved
+		};
+	})();
+}
+
+//#endregion
+//#region src/mcp/tools/hygiene.ts
+function formatReport(report, mode, tier) {
+	const lines = [];
+	lines.push("## Database Hygiene Report");
+	lines.push(`Analyzed ${report.totalObservations.toLocaleString()} observations`);
+	lines.push("");
+	lines.push("### Summary");
+	lines.push("| Tier | Count | Action |");
+	lines.push("|------|-------|--------|");
+	lines.push(`| High (>= 0.7) | ${report.summary.high} | Safe to purge |`);
+	lines.push(`| Medium (0.5-0.69) | ${report.summary.medium} | Review recommended |`);
+	if (report.summary.low > 0) lines.push(`| Low (< 0.5) | ${report.summary.low} | Kept |`);
+	lines.push(`| Orphan graph nodes | ${report.summary.orphanNodeCount} | Dead references |`);
+	lines.push("");
+	if (report.candidates.length === 0) {
+		lines.push("No candidates found matching the selected tier.");
+		return lines.join("\n");
+	}
+	const bySession = /* @__PURE__ */ new Map();
+	for (const c of report.candidates) {
+		const key = c.sessionId ?? "(no session)";
+		const list = bySession.get(key) ?? [];
+		list.push(c);
+		bySession.set(key, list);
+	}
+	const tierLabel = tier === "all" ? "All" : tier === "medium" ? "Medium+" : "High";
+	lines.push(`### ${tierLabel} Confidence Candidates (showing ${report.candidates.length})`);
+	lines.push("");
+	for (const [sessionId, candidates] of bySession) {
+		const sessionDate = candidates[0]?.createdAt?.substring(0, 10) ?? "";
+		lines.push(`#### Session: ${sessionId.substring(0, 8)} (${sessionDate}, ${candidates.length} obs)`);
+		lines.push("| ID | Kind | Source | Confidence | Signals | Preview |");
+		lines.push("|----|------|--------|------------|---------|---------|");
+		for (const c of candidates) {
+			const signals = [];
+			if (c.signals.orphaned) signals.push("orphaned");
+			if (c.signals.islandNode) signals.push("island");
+			if (c.signals.noiseClassified) signals.push("noise");
+			if (c.signals.shortContent) signals.push("short");
+			if (c.signals.autoCaptured) signals.push("auto");
+			if (c.signals.stale) signals.push("stale");
+			const preview = c.contentPreview.replace(/\|/g, "\\|").replace(/\n/g, " ");
+			lines.push(`| ${c.shortId} | ${c.kind} | ${c.source} | ${c.confidence.toFixed(2)} | ${signals.join(",") || "-"} | ${preview} |`);
+		}
+		lines.push("");
+	}
+	if (mode === "simulate") lines.push(`_Dry run — no data modified. Use \`hygiene(mode="purge", tier="${tier}")\` to execute._`);
+	return lines.join("\n");
+}
+function formatPurgeResult(observationsPurged, orphanNodesRemoved, tier) {
+	const lines = [];
+	lines.push("## Hygiene Purge Complete");
+	lines.push(`- Tier: ${tier}`);
+	lines.push(`- Observations soft-deleted: ${observationsPurged}`);
+	lines.push(`- Orphan graph nodes removed: ${orphanNodesRemoved}`);
+	return lines.join("\n");
+}
+function prependNotifications$4(notificationStore, projectHash, responseText) {
+	if (!notificationStore) return responseText;
+	const pending = notificationStore.consumePending(projectHash);
+	if (pending.length === 0) return responseText;
+	return pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + responseText;
+}
+function textResponse$5(text) {
+	return { content: [{
+		type: "text",
+		text
+	}] };
+}
+function registerHygiene(server, db, projectHashRef, notificationStore = null) {
+	server.registerTool("hygiene", {
+		title: "Database Hygiene",
+		description: "Analyze observations for deletion candidates with confidence scoring. Simulate mode (default) produces a dry-run report. Purge mode soft-deletes candidates and removes dead orphan graph nodes.",
+		inputSchema: {
+			mode: z.enum(["simulate", "purge"]).default("simulate").describe("simulate = dry-run report, purge = execute deletions"),
+			tier: z.enum([
+				"high",
+				"medium",
+				"all"
+			]).default("high").describe("Which confidence tier to act on"),
+			session_id: z.string().optional().describe("Optional: scope analysis to a single session"),
+			limit: z.number().int().min(1).max(200).default(50).describe("Max results to return")
+		}
+	}, async (args) => {
+		const projectHash = projectHashRef.current;
+		try {
+			const mode = args.mode ?? "simulate";
+			const tier = args.tier ?? "high";
+			const sessionId = args.session_id;
+			const limit = args.limit ?? 50;
+			debug("hygiene", "Request", {
+				mode,
+				tier,
+				sessionId,
+				limit
+			});
+			const report = analyzeObservations(db, projectHash, {
+				sessionId,
+				limit,
+				minTier: tier === "all" ? "low" : tier
+			});
+			if (mode === "purge") {
+				const result = executePurge(db, projectHash, report, tier);
+				return textResponse$5(prependNotifications$4(notificationStore, projectHash, formatPurgeResult(result.observationsPurged, result.orphanNodesRemoved, tier)));
+			}
+			return textResponse$5(prependNotifications$4(notificationStore, projectHash, formatReport(report, mode, tier)));
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Unknown error";
+			debug("hygiene", "Error", { error: message });
+			return textResponse$5(`Hygiene analysis error: ${message}`);
 		}
 	});
 }
@@ -6954,6 +7237,7 @@ registerRecall(server, db.db, projectHashRef, worker, embeddingStore, notificati
 registerTopicContext(server, db.db, projectHashRef, notificationStore);
 registerQueryGraph(server, db.db, projectHashRef, notificationStore);
 registerGraphStats(server, db.db, projectHashRef, notificationStore);
+registerHygiene(server, db.db, projectHashRef, notificationStore);
 registerStatus(server, statusCache, projectHashRef, notificationStore);
 if (toolRegistry) {
 	registerDiscoverTools(server, toolRegistry, worker, db.hasVectorSupport, notificationStore, projectHashRef);
