@@ -790,6 +790,185 @@
   }
 
   // =========================================================================
+  // Database Hygiene
+  // =========================================================================
+
+  var lastHygieneReport = null;
+
+  function getSelectedTier() {
+    var activeBtn = document.querySelector('#hy-tier .config-radio.active');
+    return activeBtn ? activeBtn.getAttribute('data-value') : 'high';
+  }
+
+  async function runHygieneScan() {
+    var project = getProjectHash();
+    if (!project) return;
+
+    var tier = getSelectedTier();
+    var params = new URLSearchParams({ project: project, tier: tier, limit: '100' });
+
+    var badge = document.getElementById('hy-status');
+    if (badge) { badge.textContent = 'Scanning...'; badge.className = 'config-section-status disabled'; }
+
+    try {
+      var res = await fetch('/api/admin/hygiene?' + params.toString());
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var report = await res.json();
+      lastHygieneReport = report;
+      renderHygieneReport(report, tier);
+    } catch (err) {
+      console.error('[laminark] Hygiene scan failed:', err);
+      if (badge) { badge.textContent = 'Error'; badge.className = 'config-section-status disabled'; }
+    }
+  }
+
+  function renderHygieneReport(report, tier) {
+    var badge = document.getElementById('hy-status');
+    var total = report.summary.high + report.summary.medium;
+    if (badge) {
+      badge.textContent = total + ' candidate' + (total !== 1 ? 's' : '');
+      badge.className = 'config-section-status ' + (total > 0 ? 'enabled' : 'disabled');
+    }
+
+    var results = document.getElementById('hy-results');
+    if (results) results.classList.remove('hidden');
+
+    // Summary
+    var summary = document.getElementById('hy-summary');
+    if (summary) {
+      summary.innerHTML =
+        '<div class="hygiene-summary-row">' +
+          '<span class="hygiene-stat"><strong>' + report.totalObservations.toLocaleString() + '</strong> analyzed</span>' +
+          '<span class="hygiene-stat hy-high"><strong>' + report.summary.high + '</strong> high</span>' +
+          '<span class="hygiene-stat hy-medium"><strong>' + report.summary.medium + '</strong> medium</span>' +
+          '<span class="hygiene-stat"><strong>' + report.summary.orphanNodeCount + '</strong> orphan nodes</span>' +
+        '</div>';
+    }
+
+    // Table
+    var tbody = document.getElementById('hy-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    if (report.candidates.length === 0) {
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="6" style="text-align:center;opacity:0.5;">No candidates at this tier</td>';
+      tbody.appendChild(tr);
+      return;
+    }
+
+    report.candidates.forEach(function (c) {
+      var signals = [];
+      if (c.signals.orphaned) signals.push('orphaned');
+      if (c.signals.islandNode) signals.push('island');
+      if (c.signals.noiseClassified) signals.push('noise');
+      if (c.signals.shortContent) signals.push('short');
+      if (c.signals.autoCaptured) signals.push('auto');
+      if (c.signals.stale) signals.push('stale');
+
+      var tr = document.createElement('tr');
+      tr.className = c.tier === 'high' ? 'hy-row-high' : c.tier === 'medium' ? 'hy-row-medium' : '';
+      tr.innerHTML =
+        '<td class="mono">' + c.shortId + '</td>' +
+        '<td>' + c.kind + '</td>' +
+        '<td>' + c.source + '</td>' +
+        '<td>' + c.confidence.toFixed(2) + '</td>' +
+        '<td class="hygiene-signals">' + signals.map(function (s) { return '<span class="hy-signal">' + s + '</span>'; }).join(' ') + '</td>' +
+        '<td class="hygiene-preview">' + escapeHtml(c.contentPreview) + '</td>';
+      tbody.appendChild(tr);
+    });
+  }
+
+  function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  async function runHygienePurge() {
+    var project = getProjectHash();
+    if (!project) return;
+
+    var tier = getSelectedTier();
+    var purgeBtn = document.getElementById('hy-purge');
+
+    if (purgeBtn && !purgeBtn.classList.contains('confirming')) {
+      purgeBtn.classList.add('confirming');
+      purgeBtn.textContent = 'Confirm Purge?';
+      setTimeout(function () {
+        if (purgeBtn.classList.contains('confirming')) {
+          purgeBtn.classList.remove('confirming');
+          purgeBtn.textContent = 'Purge Selected Tier';
+        }
+      }, 3000);
+      return;
+    }
+
+    if (purgeBtn) {
+      purgeBtn.classList.remove('confirming');
+      purgeBtn.textContent = 'Purging...';
+      purgeBtn.disabled = true;
+    }
+
+    try {
+      var res = await fetch('/api/admin/hygiene/purge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier: tier }),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var result = await res.json();
+
+      showSuccessMessage(
+        'Purged ' + result.observationsPurged + ' observations, ' +
+        result.orphanNodesRemoved + ' orphan nodes removed.'
+      );
+
+      // Refresh stats and re-scan
+      await refreshStats();
+      await runHygieneScan();
+    } catch (err) {
+      console.error('[laminark] Hygiene purge failed:', err);
+    }
+
+    if (purgeBtn) {
+      purgeBtn.disabled = false;
+      purgeBtn.textContent = 'Purge Selected Tier';
+    }
+  }
+
+  function initHygiene() {
+    // Collapsible section
+    var header = document.querySelector('[data-config-toggle="hygiene"]');
+    if (header) {
+      header.addEventListener('click', function () {
+        document.getElementById('hygiene-section').classList.toggle('collapsed');
+      });
+    }
+
+    // Tier radio buttons
+    var tierBtns = document.querySelectorAll('#hy-tier .config-radio');
+    tierBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        tierBtns.forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+      });
+    });
+
+    // Scan button
+    var scanBtn = document.getElementById('hy-scan');
+    if (scanBtn) {
+      scanBtn.addEventListener('click', runHygieneScan);
+    }
+
+    // Purge button
+    var purgeBtn = document.getElementById('hy-purge');
+    if (purgeBtn) {
+      purgeBtn.addEventListener('click', runHygienePurge);
+    }
+  }
+
+  // =========================================================================
   // Tool Response Verbosity Config
   // =========================================================================
 
@@ -936,6 +1115,7 @@
     }
 
     // Config sections
+    initHygiene();
     initToolVerbosity();
     initTopicDetection();
     initGraphExtraction();

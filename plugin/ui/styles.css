@@ -3655,3 +3655,98 @@ line.edge.path-highlight {
   color: var(--text-muted);
   font-size: 12px;
 }
+
+/* =========================================================================
+   Database Hygiene
+   ========================================================================= */
+
+.hygiene-summary-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.hygiene-stat {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.hygiene-stat strong {
+  color: var(--text);
+}
+
+.hygiene-stat.hy-high strong {
+  color: #f85149;
+}
+
+.hygiene-stat.hy-medium strong {
+  color: #d29922;
+}
+
+.hygiene-table-wrap {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.hygiene-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.hygiene-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-secondary);
+  padding: 6px 8px;
+  text-align: left;
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.hygiene-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.3);
+  vertical-align: top;
+}
+
+.hygiene-table .mono {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+
+.hygiene-preview {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.hy-row-high {
+  background: rgba(248, 81, 73, 0.06);
+}
+
+.hy-row-medium {
+  background: rgba(210, 153, 34, 0.06);
+}
+
+.hy-signal {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(110, 118, 129, 0.2);
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+.hygiene-signals {
+  white-space: nowrap;
+}

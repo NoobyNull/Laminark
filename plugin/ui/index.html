@@ -187,6 +187,55 @@
 
         <div id="settings-success" class="settings-success hidden"></div>
 
+        <!-- Database Hygiene -->
+        <div id="hygiene-section" class="config-section collapsed">
+          <div class="config-section-header" data-config-toggle="hygiene">
+            <h3><span class="toggle-icon">&#9660;</span> Database Hygiene</h3>
+            <span id="hy-status" class="config-section-status disabled">Not scanned</span>
+          </div>
+          <div class="config-section-body" id="hy-body">
+            <p class="config-field-desc" style="margin-bottom: 12px;">
+              Analyze observations for deletion candidates scored on 6 signals: orphaned, island node, noise classified, short content, auto-captured, stale.
+            </p>
+
+            <div class="config-field">
+              <div class="config-field-label">Tier Filter</div>
+              <div class="config-field-desc">Which confidence tier to analyze</div>
+              <div class="config-radio-group" id="hy-tier">
+                <button class="config-radio active" data-value="high">High (&ge; 0.7)</button>
+                <button class="config-radio" data-value="medium">Medium+ (&ge; 0.5)</button>
+                <button class="config-radio" data-value="all">All</button>
+              </div>
+            </div>
+
+            <div class="config-actions" style="margin-bottom: 16px;">
+              <button class="btn-config-save" id="hy-scan">Scan Now</button>
+            </div>
+
+            <div id="hy-results" class="hygiene-results hidden">
+              <div id="hy-summary" class="hygiene-summary"></div>
+              <div id="hy-table-wrap" class="hygiene-table-wrap">
+                <table id="hy-table" class="hygiene-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Kind</th>
+                      <th>Source</th>
+                      <th>Confidence</th>
+                      <th>Signals</th>
+                      <th>Preview</th>
+                    </tr>
+                  </thead>
+                  <tbody id="hy-table-body"></tbody>
+                </table>
+              </div>
+              <div class="config-actions" style="margin-top: 12px;">
+                <button class="btn-danger" id="hy-purge">Purge Selected Tier</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Tool Response Verbosity Config -->
         <div id="tool-verbosity-section" class="config-section collapsed">
           <div class="config-section-header" data-config-toggle="tool-verbosity">

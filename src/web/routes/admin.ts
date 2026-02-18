@@ -11,6 +11,7 @@ import { Hono } from 'hono';
 import type BetterSqlite3 from 'better-sqlite3';
 
 import { getConfigDir } from '../../shared/config.js';
+import { analyzeObservations, executePurge } from '../../graph/hygiene-analyzer.js';
 import { loadTopicDetectionConfig } from '../../config/topic-detection-config.js';
 import { loadGraphExtractionConfig } from '../../config/graph-extraction-config.js';
 import { loadCrossAccessConfig, saveCrossAccessConfig, resetCrossAccessConfig } from '../../config/cross-access.js';
@@ -210,6 +211,45 @@ adminRoutes.post('/reset', async (c) => {
   })();
 
   return c.json({ ok: true, deleted, scope: scoped ? 'project' : 'all' });
+});
+
+// =========================================================================
+// Hygiene analysis
+// =========================================================================
+
+adminRoutes.get('/hygiene', (c) => {
+  const db = getDb(c);
+  const project = getProjectHash(c);
+  if (!project) return c.json({ error: 'No project context available' }, 400);
+
+  const tier = (c.req.query('tier') || 'high') as 'high' | 'medium' | 'all';
+  const sessionId = c.req.query('session_id');
+  const limit = parseInt(c.req.query('limit') || '50', 10);
+
+  const minTier = tier === 'all' ? 'low' as const : tier;
+  const report = analyzeObservations(db, project, { sessionId, limit, minTier });
+
+  return c.json(report);
+});
+
+adminRoutes.post('/hygiene/purge', async (c) => {
+  const db = getDb(c);
+  const project = getProjectHash(c);
+  if (!project) return c.json({ error: 'No project context available' }, 400);
+
+  const body = await c.req.json<{ tier?: string }>();
+  const tier = (body.tier || 'high') as 'high' | 'medium' | 'all';
+
+  const minTier = tier === 'all' ? 'low' as const : tier;
+  const report = analyzeObservations(db, project, { minTier, limit: 500 });
+  const result = executePurge(db, project, report, tier);
+
+  return c.json({
+    ok: true,
+    observationsPurged: result.observationsPurged,
+    orphanNodesRemoved: result.orphanNodesRemoved,
+    tier,
+  });
 });
 
 // =========================================================================

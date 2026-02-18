@@ -6898,6 +6898,34 @@ adminRoutes.post("/reset", async (c) => {
 		scope: scoped ? "project" : "all"
 	});
 });
+adminRoutes.get("/hygiene", (c) => {
+	const db = getDb(c);
+	const project = getProjectHash$1(c);
+	if (!project) return c.json({ error: "No project context available" }, 400);
+	const tier = c.req.query("tier") || "high";
+	const report = analyzeObservations(db, project, {
+		sessionId: c.req.query("session_id"),
+		limit: parseInt(c.req.query("limit") || "50", 10),
+		minTier: tier === "all" ? "low" : tier
+	});
+	return c.json(report);
+});
+adminRoutes.post("/hygiene/purge", async (c) => {
+	const db = getDb(c);
+	const project = getProjectHash$1(c);
+	if (!project) return c.json({ error: "No project context available" }, 400);
+	const tier = (await c.req.json()).tier || "high";
+	const result = executePurge(db, project, analyzeObservations(db, project, {
+		minTier: tier === "all" ? "low" : tier,
+		limit: 500
+	}), tier);
+	return c.json({
+		ok: true,
+		observationsPurged: result.observationsPurged,
+		orphanNodesRemoved: result.orphanNodesRemoved,
+		tier
+	});
+});
 adminRoutes.get("/config/topic-detection", (c) => {
 	return c.json(loadTopicDetectionConfig());
 });
