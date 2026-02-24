@@ -465,7 +465,7 @@
           type: 'text',
           content:
             'Laminark exposes tools via the Model Context Protocol (MCP) that Claude Code uses ' +
-            'to save memories, search knowledge, query the graph, and manage debug paths.',
+            'to save memories, search knowledge, query the graph, manage debug paths, track work branches, and ingest codebase knowledge.',
         },
         {
           type: 'cards',
@@ -482,6 +482,11 @@
             { name: 'path_resolve', desc: 'Resolve the active debug path with a resolution summary. Generates a KISS summary (Problem/Cause/Fix/Prevention).' },
             { name: 'path_show', desc: 'Show a debug path with its waypoints and KISS summary. Omit path ID for the active path.' },
             { name: 'path_list', desc: 'List recent debug paths, optionally filtered by status: active, resolved, or abandoned.' },
+            { name: 'query_branches', desc: 'Search and list thought branches — coherent units of work like investigations, bug fixes, or features.' },
+            { name: 'show_branch', desc: 'Show detailed view of a thought branch with observation timeline and arc stage annotations.' },
+            { name: 'branch_summary', desc: 'Summary of recent work activity grouped by time window. Shows what was investigated, fixed, and built.' },
+            { name: 'hygiene', desc: 'Analyze observations for deletion candidates with confidence scoring. Simulate mode for dry-run, purge mode to execute.' },
+            { name: 'ingest_knowledge', desc: 'Ingest structured markdown documents into queryable per-project reference memories. Auto-detects .planning/codebase/ (GSD output).' },
           ],
         },
         {
