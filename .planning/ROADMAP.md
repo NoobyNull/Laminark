@@ -6,6 +6,7 @@
 - ✅ **v2.0 Global Tool Intelligence** — Phases 9-16 (shipped 2026-02-10)
 - ✅ **v2.1 Agent SDK Migration** — Phases 17-18 (shipped 2026-02-14)
 - ✅ **v2.2 Debug Resolution Paths** — Phases 19-21 (shipped 2026-02-14)
+- 🔄 **v2.3 Codebase & Tool Knowledge** — Phases 22-26
 
 ## Phases
 
@@ -54,6 +55,70 @@
 
 </details>
 
+### v2.3 Codebase & Tool Knowledge (Phases 22-26)
+
+**Goal:** Laminark understands the full environment — codebase structure and tool capabilities equally. It delegates analysis to existing tools (GSD for mapping), ingests their output into queryable knowledge, and deeply understands what every tool can do. No duplication, no bundling — Laminark is the knowledge layer.
+
+**Philosophy:** Laminark doesn't duplicate — it delegates, ingests, and understands. GSD maps codebases. Playwright browses. Agent SDK builds agents. Laminark knows what they all do and when to use them.
+
+### Phase 22: Knowledge Ingestion Pipeline
+
+**Goal:** Structured markdown documents become queryable per-project reference memories
+
+**Requirements:** [FR-2.1, FR-2.2, FR-2.3, FR-2.4, FR-2.5]
+
+**Plans:** 3/3 plans complete
+
+Plans:
+- [x] 22-01-PLAN.md — Markdown parser and KnowledgeIngester with idempotent upsert
+- [x] 22-02-PLAN.md — MCP tool (ingest_knowledge) and /laminark:map-codebase command
+
+**Key Decisions:**
+- No new database tables -- use existing observations with kind="reference" and source="ingest:{filename}"
+- Markdown heading-based splitting only (no JSON/CSV/code parsers -- GSD output is structured markdown)
+- Idempotent via soft-delete + re-create pattern (handles section removals)
+- Pre-classify as 'discovery' to bypass noise filter (immediately searchable)
+- Delegate codebase mapping to GSD; Laminark ingests the output
+
+### Phase 23: Deep Tool Capability Understanding
+
+**Goal:** Laminark knows what every tool can actually do, not just that it exists
+
+- Extend tool registry beyond name+description to capture capabilities, parameters, use cases
+- Parse MCP tool input schemas (parameters, types, required fields) from session tool definitions
+- Parse plugin skill/command/agent .md files for rich capability data (beyond frontmatter)
+- Populate trigger_hints for ALL tools — fixes proactive suggestion blind spot where MCP tools have null trigger_hints
+- Result: discover_tools returns what tools can do, not just that they exist
+- Equal coverage: Playwright (screenshot, navigate, click, fill), GSD (plan, execute, debug), Agent SDK (sessions, agents), all first-class
+
+### Phase 24: Hook-Driven Incremental Updates
+
+**Goal:** Knowledge stays current as Claude edits files
+
+- PostToolUse hook on Write/Edit extracts file path from tool input
+- Background re-analysis: determine which knowledge sections the file affects
+- Haiku-powered targeted update: re-analyze only the relevant section(s), update memory
+- Non-blocking: updates happen after tool response, in background processing queue
+
+### Phase 25: Session-Start Catch-Up
+
+**Goal:** External changes (editor, git pull, other tools) don't leave knowledge stale
+
+- On SessionStart, run `git diff --name-only` against last-indexed commit hash
+- Queue changed files for incremental re-analysis (same pipeline as Phase 24)
+- Store last-indexed commit hash per project in DB
+- If no prior index exists, suggest running /gsd:map-codebase (or installing GSD)
+
+### Phase 26: Context Integration
+
+**Goal:** Codebase + tool knowledge flows into context injection and on-demand queries
+
+- `index_project` MCP tool: full or targeted re-index on demand
+- Context injection prioritizes codebase knowledge for project structure queries
+- Context injection surfaces tool capabilities for "how do I..." queries
+- Update CLAUDE.md template: instruct Claude to query Laminark before file exploration
+- Web UI: index status page showing per-project knowledge freshness and coverage
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -79,3 +144,8 @@
 | 19. Path Detection & Storage | v2.2 | 3/3 | Complete | 2026-02-14 |
 | 20. Intelligence & MCP Tools | v2.2 | 3/3 | Complete | 2026-02-14 |
 | 21. Graph Visualization | v2.2 | 3/3 | Complete | 2026-02-14 |
+| 22. Knowledge Ingestion Pipeline | v2.3 | Complete    | 2026-02-24 | 2026-02-23 |
+| 23. Deep Tool Capability Understanding | v2.3 | 0/? | Pending | — |
+| 24. Hook-Driven Incremental Updates | v2.3 | 0/? | Pending | — |
+| 25. Session-Start Catch-Up | v2.3 | 0/? | Pending | — |
+| 26. Context Integration | v2.3 | 0/? | Pending | — |

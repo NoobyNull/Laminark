@@ -204,11 +204,9 @@ apiRoutes.get('/graph', (c) => {
     edgeRows = [];
   }
 
-  // If type filtering is active, only include edges between included nodes
+  // Only include edges where both endpoints exist in the node set
   const nodeIdSet = new Set(nodes.map(n => n.id));
-  const filteredEdges = typeFilter
-    ? edgeRows.filter(e => nodeIdSet.has(e.source_id) && nodeIdSet.has(e.target_id))
-    : edgeRows;
+  const filteredEdges = edgeRows.filter(e => nodeIdSet.has(e.source_id) && nodeIdSet.has(e.target_id));
 
   const edges = filteredEdges.map(row => ({
     id: row.id,

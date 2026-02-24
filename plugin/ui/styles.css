@@ -1261,13 +1261,74 @@ body {
 
 /* Settings view */
 #settings-view {
+  overflow: hidden;
+}
+
+#settings-view.active {
+  display: flex;
+}
+
+.settings-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.settings-sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 0;
+  background: var(--surface);
   overflow-y: auto;
 }
 
-.settings-container {
-  max-width: 720px;
-  margin: 0 auto;
+.settings-sidebar-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-radius: 4px;
+  margin: 2px 8px;
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+}
+
+.settings-sidebar-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+
+.settings-sidebar-item.active {
+  background: rgba(88, 166, 255, 0.1);
+  color: var(--accent);
+}
+
+.settings-sidebar-item-danger {
+  margin-top: auto;
+}
+
+.settings-sidebar-item-danger.active {
+  background: rgba(248, 81, 73, 0.1);
+  color: var(--danger);
+}
+
+.settings-content {
+  flex: 1;
+  overflow-y: auto;
   padding: 24px;
+  min-width: 0;
+}
+
+.settings-panel {
+  display: none;
+}
+
+.settings-panel.active {
+  display: block;
 }
 
 .settings-heading {
@@ -1311,6 +1372,14 @@ body {
   margin-top: 4px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.system-info-grid {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+}
+
+.system-info-grid .stat-value {
+  font-size: 16px;
 }
 
 /* Success message */
@@ -3447,13 +3516,9 @@ line.edge.path-highlight {
 }
 
 /* Content area */
-#tools-view {
-  display: flex;
-  flex-direction: column;
-}
-
 #tools-view.active {
   display: flex;
+  flex-direction: column;
 }
 
 .tools-content-row {
@@ -3749,4 +3814,43 @@ line.edge.path-highlight {
 
 .hygiene-signals {
   white-space: nowrap;
+}
+
+.hygiene-distribution {
+  margin: 8px 0;
+}
+
+.hygiene-histogram {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 100px;
+  padding: 4px 0;
+}
+
+.hygiene-histogram-bar-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.hygiene-histogram-bar {
+  width: 100%;
+  min-height: 2px;
+  background: var(--accent, #58a6ff);
+  border-radius: 2px 2px 0 0;
+  transition: height 0.2s ease;
+}
+
+.hygiene-histogram-bar:hover {
+  background: var(--accent-hover, #79b8ff);
+}
+
+.hygiene-histogram-label {
+  font-size: 10px;
+  color: var(--text-muted, #8b949e);
+  margin-top: 2px;
 }

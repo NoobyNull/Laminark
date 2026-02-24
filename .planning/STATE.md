@@ -2,17 +2,17 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-14)
+See: .planning/PROJECT.md (updated 2026-02-23)
 
 **Core value:** You never lose context. Every thread is recoverable, every thought is findable. Claude always knows which tools are available and when to use them.
-**Current focus:** v2.2 Debug Resolution Paths — MILESTONE COMPLETE
+**Current focus:** v2.3 Codebase Knowledge Pre-loading
 
 ## Current Position
 
-Phase: 21 of 21 (Graph Visualization) — COMPLETE
-Plan: 3 of 3
-Status: Milestone v2.2 Complete
-Last activity: 2026-02-14 — All 3 phases complete (9/9 plans, all verified)
+Phase: 22 of 26 (Knowledge Ingestion Pipeline) — COMPLETE
+Plan: 2 of 2
+Status: Phase 22 complete, ready for phase 23
+Last activity: 2026-02-23 — MCP tool wiring and slash command complete
 
 ## Performance Metrics
 
@@ -64,29 +64,17 @@ Last activity: 2026-02-14 — All 3 phases complete (9/9 plans, all verified)
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- [V2.1]: Replace regex extraction with Haiku AI — semantic understanding over brittle rules
-- [V2.1]: Claude Agent SDK over Anthropic SDK — subscription auth, no API key needed
-- [V2.1]: V2 session API over V1 query() — avoids 12s cold-start per call
-- [V2.2]: Path detection extends existing classifier prompt (no separate Haiku call) — prevents API volume explosion
-- [V2.2]: Paths stored in dedicated SQLite tables (not embedded in graph_nodes) — prevents graph pollution
-- [V2.2]: PathTracker in MCP server process (not hook handler) — hooks are ephemeral subprocesses
-- [V2.2]: Zod .default(null) for debug_signal backward compatibility — graceful degradation if Haiku omits field
-- [V2.2]: debug_signal evaluated for noise and signal observations — build failures are noise but debug-relevant
-- [V2.2]: PathTracker as optional dependency in HaikuProcessor — backward compatible, null if not provided
-- [V2.2]: Waypoint summaries use first 200 chars (Phase 20 adds Haiku-generated summaries)
-- [V2.2]: Jaccard similarity threshold 0.25 for path recall — balances recall vs noise on short text
-- [V2.2]: Path recall capped at 2 results in PreToolUse to stay within context budget
-- [V2.2]: findRecentActivePath uses 24h window query for cross-session staleness boundary
-- [V2.2]: KISS generation is fire-and-forget (non-blocking) to avoid slowing path resolution
-- [V2.2]: Full KissSummary stored as JSON string in kiss_summary TEXT column
-- [V2.2]: Waypoints pre-filtered to key types and capped at 10 for Haiku prompt efficiency
-- [V2.2]: Path API route order /paths, /paths/active, /paths/:id avoids Hono param matching conflicts
-- [V2.2]: kiss_summary parsed from JSON string to object in GET /paths/:id for frontend convenience
+- [V2.3]: Bundle GSD map-codebase rather than build custom indexer — proven templates, avoid reinventing
+- [V2.3]: Standalone with GSD interop — works without GSD but uses its output when present
+- [V2.3]: Two-pronged freshness (hooks + session-start) — covers Claude-made and external changes
+- [V2.3]: Per-project knowledge scoping — each project isolated
+- [22-01]: Split on ## headings only for useful granularity; pre-classify as 'discovery'
+- [22-01]: detectKnowledgeDir is sync (existsSync); idempotent via soft-delete+recreate
+- [22-02]: Auto-detect knowledge dir from project_metadata table rather than requiring explicit path
+- [22-02]: Delegate codebase analysis to GSD; Laminark handles storage and recall only
 
 ### Pending Todos
 
-- [x] Add PreToolUse hook for proactive context injection — SHIPPED
-- [x] Add toggle to hide edge type labels on graph — SHIPPED
 - [ ] Add server-side SSE project filtering to prevent cross-project spillage
 - [ ] Build comprehensive help page with screenshots and cross-linked feature docs
 
@@ -96,6 +84,6 @@ None active.
 
 ## Session Continuity
 
-Last session: 2026-02-14
-Stopped at: Completed 21-02-PLAN.md (D3 Path Overlay)
+Last session: 2026-02-23
+Stopped at: Completed 22-02-PLAN.md — Phase 22 complete, ready for phase 23
 Resume file: None

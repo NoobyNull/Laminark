@@ -14,6 +14,7 @@ import type { ProjectHashRef } from './shared/types.js';
 import { createServer, startServer } from './mcp/server.js';
 import { registerRecall } from './mcp/tools/recall.js';
 import { registerSaveMemory } from './mcp/tools/save-memory.js';
+import { registerIngestKnowledge } from './mcp/tools/ingest-knowledge.js';
 import { registerTopicContext } from './mcp/tools/topic-context.js';
 import { registerQueryGraph } from './mcp/tools/query-graph.js';
 import { registerGraphStats } from './mcp/tools/graph-stats.js';
@@ -310,6 +311,7 @@ const statusCache = new StatusCache(
 
 const server = createServer();
 registerSaveMemory(server, db.db, projectHashRef, notificationStore, worker, embeddingStore, statusCache);
+registerIngestKnowledge(server, db.db, projectHashRef, notificationStore, statusCache);
 registerRecall(server, db.db, projectHashRef, worker, embeddingStore, notificationStore, statusCache);
 registerTopicContext(server, db.db, projectHashRef, notificationStore);
 registerQueryGraph(server, db.db, projectHashRef, notificationStore);

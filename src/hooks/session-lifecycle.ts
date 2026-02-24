@@ -1,6 +1,7 @@
 import type BetterSqlite3 from 'better-sqlite3';
 
 import type { ObservationRepository } from '../storage/observations.js';
+
 import type { SessionRepository } from '../storage/sessions.js';
 import type { ToolRegistryRepository } from '../storage/tool-registry.js';
 import type { DiscoveredTool } from '../shared/tool-types.js';
@@ -10,6 +11,7 @@ import { scanConfigForTools } from './config-scanner.js';
 import { extractPatterns, storePrecomputedPatterns } from '../routing/intent-patterns.js';
 import type { PathRepository } from '../paths/path-repository.js';
 import type { BranchRepository } from '../branches/branch-repository.js';
+import { runAutoCleanup } from '../graph/hygiene-analyzer.js';
 import { debug } from '../shared/debug.js';
 
 /**
@@ -269,6 +271,8 @@ export function handleStop(
   input: Record<string, unknown>,
   obsRepo: ObservationRepository,
   sessionRepo: SessionRepository,
+  db?: BetterSqlite3.Database,
+  projectHash?: string,
 ): void {
   const sessionId = input.session_id as string | undefined;
 
@@ -289,5 +293,20 @@ export function handleStop(
     });
   } else {
     debug('session', 'No observations to summarize', { sessionId });
+  }
+
+  // Auto-cleanup: purge high-confidence hygiene candidates and orphan graph nodes
+  if (db && projectHash) {
+    try {
+      const cleanup = runAutoCleanup(db, projectHash);
+      if (!cleanup.skipped && (cleanup.observationsPurged > 0 || cleanup.orphanNodesRemoved > 0)) {
+        debug('session', 'Auto-cleanup ran at session end', {
+          observationsPurged: cleanup.observationsPurged,
+          orphanNodesRemoved: cleanup.orphanNodesRemoved,
+        });
+      }
+    } catch {
+      debug('session', 'Auto-cleanup failed (non-fatal)');
+    }
   }
 }

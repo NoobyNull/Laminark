@@ -1,6 +1,6 @@
 {
   "name": "laminark",
-  "version": "2.21.8",
+  "version": "0.1.0",
   "description": "Persistent adaptive memory for Claude Code",
   "type": "module",
   "bin": {
@@ -25,7 +25,9 @@
     "install:global": "./plugin/scripts/install.sh",
     "update": "./plugin/scripts/update.sh",
     "uninstall": "./plugin/scripts/uninstall.sh",
-    "verify": "./plugin/scripts/verify-install.sh"
+    "verify": "./plugin/scripts/verify-install.sh",
+    "sync": "./plugin/scripts/dev-sync.sh",
+    "dev": "npm run build && npm run sync"
   },
   "repository": {
     "type": "git",

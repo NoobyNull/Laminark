@@ -2,13 +2,14 @@
 import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-t8LZeB-u.mjs";
 import { A as hybridSearch, C as getNodesByType, D as upsertNode, E as traverseFrom, F as openDatabase, I as MIGRATIONS, L as runMigrations, M as SessionRepository, N as ObservationRepository, O as SaveGuard, R as debug, S as getNodeByNameAndType, T as insertEdge, _ as detectStaleness, a as ResearchBufferRepository, b as countEdgesForNode, c as inferScope, d as executePurge, f as findAnalysis, g as saveHygieneConfig, h as resetHygieneConfig, i as NotificationStore, j as SearchEngine, k as jaccardSimilarity$1, l as inferToolType, m as loadHygieneConfig, n as PathRepository, o as BranchRepository, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository, u as analyzeObservations, v as flagStaleObservation, w as initGraphSchema, x as getEdgesForNode, y as initStalenessSchema, z as debugTimed } from "./tool-registry-e710BvXq.mjs";
 import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import path from "path";
 import { fileURLToPath } from "url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { readFile, readdir } from "node:fs/promises";
 import { unstable_v2_createSession } from "@anthropic-ai/claude-agent-sdk";
 import { Worker } from "node:worker_threads";
 import { fileURLToPath as fileURLToPath$1 } from "node:url";
@@ -868,6 +869,248 @@ function registerSaveMemory(server, db, projectHashRef, notificationStore = null
 				content: [{
 					type: "text",
 					text: `Failed to save: ${err instanceof Error ? err.message : "Unknown error"}`
+				}],
+				isError: true
+			};
+		}
+	});
+}
+
+//#endregion
+//#region src/ingestion/markdown-parser.ts
+/**
+* Parse a markdown file into discrete sections split on ## headings.
+*
+* - The # (level 1) heading is the doc title, used as prefix: "DocTitle > SectionHeading"
+* - ### subsections stay within their parent ## section (not split separately)
+* - Sections with empty content after trimming are skipped
+* - Content before the first ## heading is skipped
+* - ## inside fenced code blocks are not treated as headings
+*/
+function parseMarkdownSections(fileContent, sourceFile) {
+	const lines = fileContent.split("\n");
+	const sections = [];
+	let docTitle = "";
+	let currentHeading = "";
+	let currentLines = [];
+	let sectionIndex = 0;
+	let inCodeBlock = false;
+	for (const line of lines) {
+		if (line.trimStart().startsWith("```")) inCodeBlock = !inCodeBlock;
+		if (inCodeBlock) {
+			if (currentHeading) currentLines.push(line);
+			continue;
+		}
+		if (/^# (?!#)/.test(line)) {
+			docTitle = line.slice(2).trim();
+			continue;
+		}
+		if (/^## (?!#)/.test(line)) {
+			if (currentHeading) {
+				const content = currentLines.join("\n").trim();
+				if (content.length > 0) {
+					sections.push({
+						title: docTitle ? `${docTitle} > ${currentHeading}` : currentHeading,
+						heading: currentHeading,
+						content,
+						sourceFile,
+						sectionIndex
+					});
+					sectionIndex++;
+				}
+			}
+			currentHeading = line.slice(3).trim();
+			currentLines = [];
+			continue;
+		}
+		if (currentHeading) currentLines.push(line);
+	}
+	if (currentHeading) {
+		const content = currentLines.join("\n").trim();
+		if (content.length > 0) sections.push({
+			title: docTitle ? `${docTitle} > ${currentHeading}` : currentHeading,
+			heading: currentHeading,
+			content,
+			sourceFile,
+			sectionIndex
+		});
+	}
+	return sections;
+}
+
+//#endregion
+//#region src/ingestion/knowledge-ingester.ts
+/**
+* Ingests markdown files into the knowledge store.
+*
+* Creates one observation per ## section, with idempotent re-ingestion
+* that cleans up stale sections without duplication.
+*/
+var KnowledgeIngester = class {
+	db;
+	projectHash;
+	constructor(db, projectHash) {
+		this.db = db;
+		this.projectHash = projectHash;
+	}
+	/**
+	* Detects the knowledge directory for a project.
+	* Checks in order:
+	* 1. {projectRoot}/.planning/codebase/ (GSD output)
+	* 2. {projectRoot}/.laminark/codebase/
+	* Returns the first existing directory, or null if none exist.
+	*/
+	static detectKnowledgeDir(projectRoot) {
+		const candidates = [join(projectRoot, ".planning", "codebase"), join(projectRoot, ".laminark", "codebase")];
+		for (const candidate of candidates) try {
+			if (existsSync(candidate) && statSync(candidate).isDirectory()) return candidate;
+		} catch {}
+		return null;
+	}
+	/**
+	* Ingests all markdown files from a directory.
+	* Reads all files async first, then runs DB operations in a single transaction.
+	*/
+	async ingestDirectory(dirPath) {
+		let files;
+		try {
+			files = await readdir(dirPath);
+		} catch {
+			return {
+				filesProcessed: 0,
+				sectionsCreated: 0,
+				sectionsRemoved: 0
+			};
+		}
+		const mdFiles = files.filter((f) => f.endsWith(".md"));
+		const fileContents = /* @__PURE__ */ new Map();
+		for (const file of mdFiles) {
+			const filePath = join(dirPath, file);
+			try {
+				const content = await readFile(filePath, "utf-8");
+				fileContents.set(file, content);
+			} catch {}
+		}
+		let totalCreated = 0;
+		let totalRemoved = 0;
+		for (const [filename, content] of fileContents) {
+			const stats = this.ingestFileSync(filename, content);
+			totalCreated += stats.sectionsCreated;
+			totalRemoved += stats.sectionsRemoved;
+		}
+		return {
+			filesProcessed: fileContents.size,
+			sectionsCreated: totalCreated,
+			sectionsRemoved: totalRemoved
+		};
+	}
+	/**
+	* Ingests a single markdown file.
+	* Wraps async file reading with sync ingestion.
+	*/
+	async ingestFile(filePath) {
+		try {
+			const content = await readFile(filePath, "utf-8");
+			const filename = basename(filePath);
+			return this.ingestFileSync(filename, content);
+		} catch {
+			return {
+				filesProcessed: 0,
+				sectionsCreated: 0,
+				sectionsRemoved: 0
+			};
+		}
+	}
+	/**
+	* Internal sync ingestion method (runs within transaction).
+	* Implements idempotent upsert via soft-delete + recreate.
+	*/
+	ingestFileSync(filename, fileContent) {
+		const sourceTag = `ingest:${filename}`;
+		const sections = parseMarkdownSections(fileContent, filename);
+		return this.db.transaction(() => {
+			const repo = new ObservationRepository(this.db, this.projectHash);
+			const sectionsRemoved = this.db.prepare(`UPDATE observations
+           SET deleted_at = datetime('now'), updated_at = datetime('now')
+           WHERE project_hash = ? AND source = ? AND deleted_at IS NULL`).run(this.projectHash, sourceTag).changes;
+			let sectionsCreated = 0;
+			for (const section of sections) {
+				repo.createClassified({
+					content: section.content,
+					title: section.title,
+					source: sourceTag,
+					kind: "reference",
+					sessionId: null
+				}, "discovery");
+				sectionsCreated++;
+			}
+			return {
+				filesProcessed: 1,
+				sectionsCreated,
+				sectionsRemoved
+			};
+		})();
+	}
+};
+
+//#endregion
+//#region src/mcp/tools/ingest-knowledge.ts
+/**
+* Registers the ingest_knowledge tool on the MCP server.
+*
+* ingest_knowledge transforms structured markdown documents into per-project
+* reference observations. Supports optional directory path; auto-detects
+* .planning/codebase/ or .laminark/codebase/ from project metadata when
+* directory is omitted.
+*/
+function registerIngestKnowledge(server, db, projectHashRef, notificationStore = null, statusCache = null) {
+	server.registerTool("ingest_knowledge", {
+		title: "Ingest Knowledge",
+		description: "Ingest structured markdown documents from a directory into queryable per-project memories. Reads .md files, splits by ## headings, and stores each section as a reference observation. Supports .planning/codebase/ (GSD output) and .laminark/codebase/.",
+		inputSchema: { directory: z.string().optional().describe("Directory containing .md files to ingest. If omitted, auto-detects .planning/codebase/ or .laminark/codebase/ using the project path from project_metadata.") }
+	}, async (args) => {
+		const projectHash = projectHashRef.current;
+		try {
+			let resolvedDir = args.directory;
+			if (!resolvedDir) {
+				const row = db.prepare("SELECT project_path FROM project_metadata WHERE project_hash = ? ORDER BY last_seen_at DESC LIMIT 1").get(projectHash);
+				if (!row) return {
+					content: [{
+						type: "text",
+						text: "Could not determine project path. Please provide the directory parameter explicitly."
+					}],
+					isError: true
+				};
+				const detected = KnowledgeIngester.detectKnowledgeDir(row.project_path);
+				if (!detected) return {
+					content: [{
+						type: "text",
+						text: "No knowledge directory found. Expected .planning/codebase/ or .laminark/codebase/ in the project root. Run /gsd:map-codebase first or provide a directory path."
+					}],
+					isError: true
+				};
+				resolvedDir = detected;
+			}
+			const stats = await new KnowledgeIngester(db, projectHash).ingestDirectory(resolvedDir);
+			debug("mcp", "ingest_knowledge: completed", {
+				directory: resolvedDir,
+				stats
+			});
+			statusCache?.markDirty();
+			let finalResponse = verboseResponse(`Ingested ${stats.filesProcessed} files: ${stats.sectionsCreated} sections created, ${stats.sectionsRemoved} stale sections removed.`, `Ingested ${stats.filesProcessed} file(s): ${stats.sectionsCreated} sections created, ${stats.sectionsRemoved} removed.`, `Ingested ${stats.filesProcessed} file(s) from ${resolvedDir}: ${stats.sectionsCreated} sections created, ${stats.sectionsRemoved} stale sections removed.`);
+			if (notificationStore) {
+				const pending = notificationStore.consumePending(projectHash);
+				if (pending.length > 0) finalResponse = pending.map((n) => `[Laminark] ${n.message}`).join("\n") + "\n\n" + finalResponse;
+			}
+			return { content: [{
+				type: "text",
+				text: finalResponse
+			}] };
+		} catch (err) {
+			return {
+				content: [{
+					type: "text",
+					text: `Failed to ingest knowledge: ${err instanceof Error ? err.message : "Unknown error"}`
 				}],
 				isError: true
 			};
@@ -7009,6 +7252,7 @@ const embedTimer = setInterval(() => {
 const statusCache = new StatusCache(db.db, projectHashRef, process.cwd(), db.hasVectorSupport, () => worker.isReady());
 const server = createServer();
 registerSaveMemory(server, db.db, projectHashRef, notificationStore, worker, embeddingStore, statusCache);
+registerIngestKnowledge(server, db.db, projectHashRef, notificationStore, statusCache);
 registerRecall(server, db.db, projectHashRef, worker, embeddingStore, notificationStore, statusCache);
 registerTopicContext(server, db.db, projectHashRef, notificationStore);
 registerQueryGraph(server, db.db, projectHashRef, notificationStore);
