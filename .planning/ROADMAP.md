@@ -61,43 +61,24 @@
 
 **Philosophy:** Laminark doesn't duplicate — it delegates, ingests, and understands. GSD maps codebases. Playwright browses. Agent SDK builds agents. Laminark knows what they all do and when to use them.
 
-### Phase 22: Knowledge Ingestion Pipeline ✅ PLANNING COMPLETE
+### Phase 22: Knowledge Ingestion Pipeline
 
-**Goal:** Structured documents become queryable per-project memories
+**Goal:** Structured markdown documents become queryable per-project reference memories
 
-**Status:** Planning complete — 5 documents, 8 design decisions locked in, ready for implementation
+**Requirements:** [FR-2.1, FR-2.2, FR-2.3, FR-2.4, FR-2.5]
 
-**Formats:** Markdown, JSON, CSV, Plaintext, Code (5 parsers)
+**Plans:** 2 plans
+
+Plans:
+- [ ] 22-01-PLAN.md — Markdown parser and KnowledgeIngester with idempotent upsert
+- [ ] 22-02-PLAN.md — MCP tool (ingest_knowledge) and /laminark:map-codebase command
 
 **Key Decisions:**
-- Chunk at format-native boundaries (preserve semantics, enable updates)
-- Store metadata as JSON blobs + document_registry table (minimal schema changes)
-- SHA256 content hash deduplication (enable document lifecycle)
-- Unified FTS5 search (no special indexing, consistent ranking)
-- Graceful degradation to plaintext on parse errors
-
-**Database:** Migration 022 adds document_registry and document_chunks tables
-
-**MCP Tool:** `ingest_document(content, filename, format_hint?, metadata?)`
-
-**Success Criteria:**
-- Query <500ms on 50k+ observations
-- 1MB document ingest <2s
-- Per-project isolation verified
-- 95%+ test coverage
-
-**Files:** 12 new source files + tests + 3 modified files
-
-**Effort:** 12-16 hours development + testing
-
-**Next:** Begin Step 1 — Database schema (Migration 022)
-
-**Planning Docs:**
-- [22-PLAN.md](.planning/phases/22-knowledge-ingestion-pipeline/22-PLAN.md) — Implementation steps
-- [22-ROADMAP.md](.planning/phases/22-knowledge-ingestion-pipeline/22-ROADMAP.md) — Timeline
-- [22-RESEARCH.md](.planning/phases/22-knowledge-ingestion-pipeline/22-RESEARCH.md) — Design decisions
-- [22-CONTEXT.md](.planning/phases/22-knowledge-ingestion-pipeline/22-CONTEXT.md) — Philosophy & constraints
-- [22-SUMMARY.md](.planning/phases/22-knowledge-ingestion-pipeline/22-SUMMARY.md) — Overview
+- No new database tables -- use existing observations with kind="reference" and source="ingest:{filename}"
+- Markdown heading-based splitting only (no JSON/CSV/code parsers -- GSD output is structured markdown)
+- Idempotent via soft-delete + re-create pattern (handles section removals)
+- Pre-classify as 'discovery' to bypass noise filter (immediately searchable)
+- Delegate codebase mapping to GSD; Laminark ingests the output
 
 ### Phase 23: Deep Tool Capability Understanding
 
@@ -163,7 +144,7 @@
 | 19. Path Detection & Storage | v2.2 | 3/3 | Complete | 2026-02-14 |
 | 20. Intelligence & MCP Tools | v2.2 | 3/3 | Complete | 2026-02-14 |
 | 21. Graph Visualization | v2.2 | 3/3 | Complete | 2026-02-14 |
-| 22. Knowledge Ingestion Pipeline | v2.3 | 0/? | Pending | — |
+| 22. Knowledge Ingestion Pipeline | v2.3 | 0/2 | Planned | — |
 | 23. Deep Tool Capability Understanding | v2.3 | 0/? | Pending | — |
 | 24. Hook-Driven Incremental Updates | v2.3 | 0/? | Pending | — |
 | 25. Session-Start Catch-Up | v2.3 | 0/? | Pending | — |
