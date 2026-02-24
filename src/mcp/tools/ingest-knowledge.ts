@@ -64,8 +64,8 @@ export function registerIngestKnowledge(
             };
           }
 
-          resolvedDir = await KnowledgeIngester.detectKnowledgeDir(row.project_path);
-          if (!resolvedDir) {
+          const detected = KnowledgeIngester.detectKnowledgeDir(row.project_path);
+          if (!detected) {
             return {
               content: [
                 {
@@ -76,10 +76,12 @@ export function registerIngestKnowledge(
               isError: true,
             };
           }
+
+          resolvedDir = detected;
         }
 
         const ingester = new KnowledgeIngester(db, projectHash);
-        const stats = await ingester.ingestDirectory(resolvedDir);
+        const stats = await ingester.ingestDirectory(resolvedDir!);
 
         debug('mcp', 'ingest_knowledge: completed', {
           directory: resolvedDir,
