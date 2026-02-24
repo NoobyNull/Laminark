@@ -6,7 +6,7 @@
 - ✅ **v2.0 Global Tool Intelligence** — Phases 9-16 (shipped 2026-02-10)
 - ✅ **v2.1 Agent SDK Migration** — Phases 17-18 (shipped 2026-02-14)
 - ✅ **v2.2 Debug Resolution Paths** — Phases 19-21 (shipped 2026-02-14)
-- 🔄 **v2.3 Codebase Knowledge Pre-loading** — Phases 22-26
+- 🔄 **v2.3 Codebase & Tool Knowledge** — Phases 22-26
 
 ## Phases
 
@@ -55,28 +55,33 @@
 
 </details>
 
-### v2.3 Codebase Knowledge Pre-loading (Phases 22-26)
+### v2.3 Codebase & Tool Knowledge (Phases 22-26)
 
-**Goal:** Eliminate redundant file exploration by pre-loading structured codebase knowledge into queryable memories. Claude queries Laminark instead of re-reading files every session.
+**Goal:** Laminark understands the full environment — codebase structure and tool capabilities equally. It delegates analysis to existing tools (GSD for mapping), ingests their output into queryable knowledge, and deeply understands what every tool can do. No duplication, no bundling — Laminark is the knowledge layer.
 
-### Phase 22: Bundled Codebase Mapper
+**Philosophy:** Laminark doesn't duplicate — it delegates, ingests, and understands. GSD maps codebases. Playwright browses. Agent SDK builds agents. Laminark knows what they all do and when to use them.
 
-**Goal:** Laminark can map a codebase without external dependencies
+### Phase 22: Knowledge Ingestion Pipeline
 
-- Port GSD's map-codebase agent definitions and templates into Laminark plugin (with attribution)
-- Create /laminark:map-codebase skill that spawns 4 parallel mapper agents (tech, architecture, quality, concerns)
-- Produce 7 structured docs: STACK.md, ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, TESTING.md, INTEGRATIONS.md, CONCERNS.md
-- GSD detection: if GSD is installed, delegate to its map-codebase instead of bundled version
-
-### Phase 23: Knowledge Ingestion Pipeline
-
-**Goal:** Mapping output becomes queryable per-project memories
+**Goal:** Structured documents become queryable per-project memories
 
 - Parse structured markdown sections into discrete reference memories (kind="reference")
 - Each section becomes separate memory with title, project tag, source doc reference
 - Idempotent ingestion: re-running replaces stale memories by matching title+project
-- Ingest from either .laminark/codebase/ (bundled mapper output) or .planning/codebase/ (GSD output)
-- New DB columns/tags for codebase knowledge identification
+- Ingest from .planning/codebase/ (GSD output), .laminark/codebase/, or any user-specified directory
+- /laminark:map-codebase skill: thin wrapper that detects GSD → suggests /gsd:map-codebase (or install GSD) → ingests output after mapping completes
+- New DB columns/tags for knowledge source identification
+
+### Phase 23: Deep Tool Capability Understanding
+
+**Goal:** Laminark knows what every tool can actually do, not just that it exists
+
+- Extend tool registry beyond name+description to capture capabilities, parameters, use cases
+- Parse MCP tool input schemas (parameters, types, required fields) from session tool definitions
+- Parse plugin skill/command/agent .md files for rich capability data (beyond frontmatter)
+- Populate trigger_hints for ALL tools — fixes proactive suggestion blind spot where MCP tools have null trigger_hints
+- Result: discover_tools returns what tools can do, not just that they exist
+- Equal coverage: Playwright (screenshot, navigate, click, fill), GSD (plan, execute, debug), Agent SDK (sessions, agents), all first-class
 
 ### Phase 24: Hook-Driven Incremental Updates
 
@@ -94,16 +99,17 @@
 - On SessionStart, run `git diff --name-only` against last-indexed commit hash
 - Queue changed files for incremental re-analysis (same pipeline as Phase 24)
 - Store last-indexed commit hash per project in DB
-- If no prior index exists, include suggestion in context injection to run /laminark:map-codebase
+- If no prior index exists, suggest running /gsd:map-codebase (or installing GSD)
 
-### Phase 26: MCP Tool & Context Integration
+### Phase 26: Context Integration
 
-**Goal:** Claude can explicitly trigger re-indexing and codebase knowledge flows into context injection
+**Goal:** Codebase + tool knowledge flows into context injection and on-demand queries
 
 - `index_project` MCP tool: full or targeted re-index on demand
-- Update context injection to prioritize codebase knowledge for queries about project structure
-- Update CLAUDE.md template/guidance: instruct Claude to query Laminark before file exploration
-- Web UI: index status page showing per-project mapping freshness and coverage
+- Context injection prioritizes codebase knowledge for project structure queries
+- Context injection surfaces tool capabilities for "how do I..." queries
+- Update CLAUDE.md template: instruct Claude to query Laminark before file exploration
+- Web UI: index status page showing per-project knowledge freshness and coverage
 
 ## Progress
 
@@ -130,8 +136,8 @@
 | 19. Path Detection & Storage | v2.2 | 3/3 | Complete | 2026-02-14 |
 | 20. Intelligence & MCP Tools | v2.2 | 3/3 | Complete | 2026-02-14 |
 | 21. Graph Visualization | v2.2 | 3/3 | Complete | 2026-02-14 |
-| 22. Bundled Codebase Mapper | v2.3 | 0/? | Pending | — |
-| 23. Knowledge Ingestion Pipeline | v2.3 | 0/? | Pending | — |
+| 22. Knowledge Ingestion Pipeline | v2.3 | 0/? | Pending | — |
+| 23. Deep Tool Capability Understanding | v2.3 | 0/? | Pending | — |
 | 24. Hook-Driven Incremental Updates | v2.3 | 0/? | Pending | — |
 | 25. Session-Start Catch-Up | v2.3 | 0/? | Pending | — |
-| 26. MCP Tool & Context Integration | v2.3 | 0/? | Pending | — |
+| 26. Context Integration | v2.3 | 0/? | Pending | — |

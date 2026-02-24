@@ -18,17 +18,20 @@ Building v2.3. Laminark is a globally-installed Claude Code plugin with persiste
 - v2.1 Agent SDK Migration (Phases 17-18, 2026-02-14)
 - v2.2 Debug Resolution Paths (Phases 19-21, 2026-02-14)
 
-## Current Milestone: v2.3 Codebase Knowledge Pre-loading
+## Current Milestone: v2.3 Codebase & Tool Knowledge
 
-**Goal:** Eliminate redundant file exploration by pre-loading structured codebase knowledge into Laminark's memory. Claude queries local memories instead of re-reading files every session — the "supply side" that makes memory-first workflows actually work.
+**Goal:** Laminark understands the full environment — codebase structure and tool capabilities equally. It delegates analysis to existing tools (GSD for mapping), ingests their output into queryable knowledge, and deeply understands what every tool can do. No duplication — Laminark is the knowledge layer.
+
+**Philosophy:** Laminark doesn't duplicate — it delegates, ingests, and understands. GSD maps codebases. Playwright browses. Agent SDK builds agents. Laminark knows what they all do and when to use them.
 
 **Target features:**
-- Codebase mapping (bundled from GSD's map-codebase, with attribution) that produces structured analysis docs
-- Automatic ingestion of mapping output into per-project queryable reference memories
-- Hook-driven incremental updates — PostToolUse on Write/Edit re-analyzes changed files in background
-- Session-start catch-up — detect git changes since last index, update affected knowledge
-- MCP tool for on-demand re-indexing of specific files or full project
-- GSD interop — if GSD is installed, use its map-codebase output; if not, use bundled mapper
+- Knowledge ingestion pipeline: structured markdown docs → per-project queryable reference memories
+- /laminark:map-codebase skill: delegates to GSD (or suggests installing it), then ingests output
+- Deep tool capability understanding: parse schemas, .md files, parameters — know what tools CAN DO, not just that they exist
+- Populate trigger_hints for ALL tools (fixing proactive suggestion blind spot for MCP tools)
+- Hook-driven incremental updates on Write/Edit (background re-analysis of changed files)
+- Session-start git-diff catch-up for changes made outside Claude
+- Context injection that surfaces codebase + tool knowledge for relevant queries
 
 ## Requirements
 
@@ -60,13 +63,14 @@ Building v2.3. Laminark is a globally-installed Claude Code plugin with persiste
 
 ### Active
 
-- [ ] Codebase mapping agents that produce structured analysis (bundled from GSD, with attribution)
-- [ ] Ingestion pipeline: mapping docs → per-project reference memories in SQLite
-- [ ] Hook-driven incremental updates on Write/Edit (background re-analysis of changed files)
+- [ ] Knowledge ingestion pipeline: structured markdown → per-project reference memories in SQLite
+- [ ] /laminark:map-codebase skill: delegate to GSD, ingest output
+- [ ] Deep tool capability understanding: schemas, parameters, use cases for all tools
+- [ ] Populate trigger_hints for all tools (not just slash commands/skills)
+- [ ] Hook-driven incremental updates on Write/Edit (background re-analysis)
 - [ ] Session-start git-diff catch-up for changes made outside Claude
 - [ ] MCP tool for on-demand re-index (file, directory, or full project)
-- [ ] GSD interop: detect and ingest existing .planning/codebase/ output
-- [ ] CLAUDE.md guidance: instruct Claude to query memories before file exploration
+- [ ] Context injection: surface codebase + tool knowledge for relevant queries
 
 ### Out of Scope
 
@@ -115,18 +119,19 @@ Claude Code tool scoping model (discovered during V2 planning):
 | Replace regex extraction with Haiku AI | Regex rules too brittle, Haiku provides semantic understanding | ✓ Good |
 | Claude Agent SDK over Anthropic SDK | Routes through subscription auth, no separate API key needed | ✓ Good |
 | V2 session API over V1 query() | Avoids 12s cold-start per call with persistent session singleton | ✓ Good |
-| Bundle GSD map-codebase rather than build custom indexer | GSD already solves parallel codebase analysis with proven templates; avoid reinventing | Pending |
-| Standalone with GSD interop | Laminark works without GSD but uses its output when present; no hard dependency | Pending |
+| Delegate to GSD, don't bundle mapper | Laminark is the knowledge layer, not the analysis layer; avoid duplicating GSD's proven codebase mapping | Pending |
+| Deep tool capability understanding | Tool registry stores names+descriptions but not what tools can DO; proactive suggestions blind to MCP tool capabilities | Pending |
 | Two-pronged freshness (hooks + session-start) | Covers both Claude-made changes (immediate) and external changes (catch-up) | Pending |
 | Per-project knowledge scoping | Each project gets its own indexed knowledge set, isolated from others | Pending |
+| Know all tools equally | Playwright, GSD, Agent SDK, MCP servers — Laminark should understand them all at the same depth, not favor any one ecosystem | Pending |
 
 ## Context
 
 Shipped through v2.2 with 21 phases, 64 plans total. Tech stack: Node.js + TypeScript + SQLite (WAL + FTS5 + sqlite-vec) + Hono web server + D3/vanilla JS UI. All observation enrichment (entity extraction, relationship inference, classification) now flows through Haiku AI via Claude Agent SDK V2 session API — no separate API key required.
 
-v2.3 insight: Laminark captures knowledge well during sessions (observations, debug paths, decisions), but the biggest cost savings come from the **supply side** — pre-loading codebase knowledge so Claude doesn't waste tokens re-exploring files every session. The pattern: GSD's map-codebase already solves the "analyze a codebase" problem with parallel agents producing 7 structured docs. Laminark should bundle this capability (with GSD attribution), ingest the output into queryable per-project memories, and keep them fresh via hooks. This turns Laminark from "remembers what happened" into "already knows the codebase."
+v2.3 insight: Laminark captures knowledge well during sessions but has two gaps on the supply side. First, codebase knowledge — Claude re-explores files every session. GSD already solves this with map-codebase; Laminark should delegate to it and ingest the output, not duplicate it. Second, tool knowledge — Laminark knows tool names and descriptions but not capabilities. It can't tell you that Playwright screenshots pages or that GSD has plan-phase vs execute-phase. Deep tool understanding (schemas, parameters, use cases) makes proactive suggestions actually work for ALL tools, not just slash commands.
 
-Key constraint: must work standalone (no GSD dependency required) but interop with GSD when present. The mapping agents use Claude Code's Task tool to spawn subagents — Laminark bundles the agent definitions and templates. Freshness is two-pronged: immediate PostToolUse updates for files changed by Claude, session-start git-diff catch-up for changes made outside Claude (editor, other tools, git pulls).
+Philosophy shift: Laminark doesn't duplicate — it delegates, ingests, and understands. Each tool in the ecosystem does what it's best at. Laminark's job is to know what they all do and surface that knowledge at the right time. Freshness is two-pronged: immediate PostToolUse updates for files changed by Claude, session-start git-diff catch-up for changes made outside Claude.
 
 ---
-*Last updated: 2026-02-23 after v2.3 milestone start*
+*Last updated: 2026-02-24 after v2.3 philosophy revision — delegate don't duplicate*
