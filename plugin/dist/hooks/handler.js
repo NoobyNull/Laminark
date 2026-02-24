@@ -1,5 +1,5 @@
 import { i as getProjectHash, n as getDatabaseConfig } from "../config-t8LZeB-u.mjs";
-import { C as ObservationRepository, O as debug, S as SessionRepository, T as openDatabase, a as ResearchBufferRepository, c as inferScope, f as getNodeByNameAndType, g as traverseFrom, i as NotificationStore, l as inferToolType, n as PathRepository, o as BranchRepository, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository, v as SaveGuard, w as rowToObservation, x as SearchEngine, y as jaccardSimilarity } from "../tool-registry-FHfSTose.mjs";
+import { E as traverseFrom, F as openDatabase, M as SessionRepository, N as ObservationRepository, O as SaveGuard, P as rowToObservation, R as debug, S as getNodeByNameAndType, a as ResearchBufferRepository, c as inferScope, i as NotificationStore, j as SearchEngine, k as jaccardSimilarity, l as inferToolType, n as PathRepository, o as BranchRepository, p as runAutoCleanup, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository } from "../tool-registry-e710BvXq.mjs";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
@@ -514,17 +514,42 @@ function assembleSessionContext(db, projectHash, toolRegistry) {
 //#region src/hooks/config-scanner.ts
 /**
 * Extracts a description from YAML frontmatter in a Markdown file.
-* Reads only the first 500 bytes for performance.
+* Reads only the first 2000 bytes for performance.
 */
 function extractDescription(filePath) {
 	try {
 		const fmMatch = readFileSync(filePath, {
 			encoding: "utf-8",
 			flag: "r"
-		}).slice(0, 500).match(/^---\n([\s\S]*?)\n---/);
+		}).slice(0, 2e3).match(/^---\n([\s\S]*?)\n---/);
 		if (!fmMatch) return null;
 		const descMatch = fmMatch[1].match(/description:\s*(.+)/);
 		return descMatch ? descMatch[1].trim() : null;
+	} catch {
+		return null;
+	}
+}
+/**
+* Extracts trigger hints from a command/skill file for proactive suggestion matching.
+* Reads YAML frontmatter `description` + content from `<objective>` blocks.
+* Returns a concatenated string or null if nothing found.
+*/
+function extractTriggerHints(filePath) {
+	try {
+		const content = readFileSync(filePath, {
+			encoding: "utf-8",
+			flag: "r"
+		});
+		const head = content.slice(0, 2e3);
+		const parts = [];
+		const fmMatch = head.match(/^---\n([\s\S]*?)\n---/);
+		if (fmMatch) {
+			const descMatch = fmMatch[1].match(/description:\s*(.+)/);
+			if (descMatch) parts.push(descMatch[1].trim());
+		}
+		const objMatch = content.match(/<objective>([\s\S]*?)<\/objective>/);
+		if (objMatch) parts.push(objMatch[1].trim());
+		return parts.length > 0 ? parts.join(" ") : null;
 	} catch {
 		return null;
 	}
@@ -546,7 +571,8 @@ function scanMcpJson(filePath, scope, projectHash, tools) {
 			source: `config:${filePath}`,
 			projectHash,
 			description: null,
-			serverName
+			serverName,
+			triggerHints: null
 		});
 	} catch (err) {
 		debug("scanner", "Failed to scan MCP config", {
@@ -571,7 +597,8 @@ function scanClaudeJson(filePath, tools) {
 			source: "config:~/.claude.json",
 			projectHash: null,
 			description: null,
-			serverName
+			serverName,
+			triggerHints: null
 		});
 		const projects = config.projects;
 		if (projects && typeof projects === "object") for (const projectEntry of Object.values(projects)) {
@@ -583,7 +610,8 @@ function scanClaudeJson(filePath, tools) {
 				source: "config:~/.claude.json",
 				projectHash: null,
 				description: null,
-				serverName
+				serverName,
+				triggerHints: null
 			});
 		}
 	} catch (err) {
@@ -603,7 +631,9 @@ function scanCommands(dirPath, scope, projectHash, tools) {
 		const entries = readdirSync(dirPath, { withFileTypes: true });
 		for (const entry of entries) if (entry.isFile() && entry.name.endsWith(".md")) {
 			const cmdName = `/${basename(entry.name, ".md")}`;
-			const description = extractDescription(join(dirPath, entry.name));
+			const filePath = join(dirPath, entry.name);
+			const description = extractDescription(filePath);
+			const triggerHints = extractTriggerHints(filePath);
 			tools.push({
 				name: cmdName,
 				toolType: "slash_command",
@@ -611,7 +641,8 @@ function scanCommands(dirPath, scope, projectHash, tools) {
 				source: `config:${dirPath}`,
 				projectHash,
 				description,
-				serverName: null
+				serverName: null,
+				triggerHints
 			});
 		} else if (entry.isDirectory()) {
 			const subDir = join(dirPath, entry.name);
@@ -619,7 +650,9 @@ function scanCommands(dirPath, scope, projectHash, tools) {
 				const subEntries = readdirSync(subDir, { withFileTypes: true });
 				for (const subEntry of subEntries) if (subEntry.isFile() && subEntry.name.endsWith(".md")) {
 					const cmdName = `/${entry.name}:${basename(subEntry.name, ".md")}`;
-					const description = extractDescription(join(subDir, subEntry.name));
+					const subFilePath = join(subDir, subEntry.name);
+					const description = extractDescription(subFilePath);
+					const triggerHints = extractTriggerHints(subFilePath);
 					tools.push({
 						name: cmdName,
 						toolType: "slash_command",
@@ -627,7 +660,8 @@ function scanCommands(dirPath, scope, projectHash, tools) {
 						source: `config:${dirPath}`,
 						projectHash,
 						description,
-						serverName: null
+						serverName: null,
+						triggerHints
 					});
 				}
 			} catch {}
@@ -650,6 +684,7 @@ function scanSkills(dirPath, scope, projectHash, tools) {
 			const skillMdPath = join(dirPath, entry.name, "SKILL.md");
 			if (existsSync(skillMdPath)) {
 				const description = extractDescription(skillMdPath);
+				const triggerHints = extractTriggerHints(skillMdPath);
 				tools.push({
 					name: entry.name,
 					toolType: "skill",
@@ -657,7 +692,8 @@ function scanSkills(dirPath, scope, projectHash, tools) {
 					source: `config:${dirPath}`,
 					projectHash,
 					description,
-					serverName: null
+					serverName: null,
+					triggerHints
 				});
 			}
 		}
@@ -691,7 +727,8 @@ function scanInstalledPlugins(filePath, tools) {
 					source: "config:installed_plugins.json",
 					projectHash: null,
 					description: null,
-					serverName: null
+					serverName: null,
+					triggerHints: null
 				});
 				if (typeof inst.installPath === "string") scanMcpJson(join(inst.installPath, ".mcp.json"), "plugin", null, tools);
 			}
@@ -1038,7 +1075,7 @@ function handleSessionEnd(input, sessionRepo) {
 *
 * If the session has zero observations, this is a graceful no-op.
 */
-function handleStop(input, obsRepo, sessionRepo) {
+function handleStop(input, obsRepo, sessionRepo, db, projectHash) {
 	const sessionId = input.session_id;
 	if (!sessionId) {
 		debug("session", "Stop missing session_id, skipping");
@@ -1052,6 +1089,15 @@ function handleStop(input, obsRepo, sessionRepo) {
 		summaryLength: result.summary.length
 	});
 	else debug("session", "No observations to summarize", { sessionId });
+	if (db && projectHash) try {
+		const cleanup = runAutoCleanup(db, projectHash);
+		if (!cleanup.skipped && (cleanup.observationsPurged > 0 || cleanup.orphanNodesRemoved > 0)) debug("session", "Auto-cleanup ran at session end", {
+			observationsPurged: cleanup.observationsPurged,
+			orphanNodesRemoved: cleanup.orphanNodesRemoved
+		});
+	} catch {
+		debug("session", "Auto-cleanup failed (non-fatal)");
+	}
 }
 
 //#endregion
@@ -1597,6 +1643,226 @@ const DEFAULT_ROUTING_CONFIG = {
 };
 
 //#endregion
+//#region src/routing/proactive-suggestions.ts
+/**
+* Loads a lightweight snapshot of current session context.
+* Three small queries, each <3ms on a typical database.
+*/
+function loadContextSnapshot(db, projectHash, sessionId) {
+	let branch = null;
+	try {
+		const row = db.prepare(`
+      SELECT arc_stage, branch_type, observation_count, tool_pattern
+      FROM thought_branches
+      WHERE project_hash = ? AND session_id = ? AND status = 'active'
+      ORDER BY started_at DESC LIMIT 1
+    `).get(projectHash, sessionId);
+		if (row) {
+			let toolPattern = {};
+			try {
+				toolPattern = JSON.parse(row.tool_pattern);
+			} catch {}
+			branch = {
+				arcStage: row.arc_stage,
+				branchType: row.branch_type,
+				observationCount: row.observation_count,
+				toolPattern
+			};
+		}
+	} catch {}
+	let debugPath = null;
+	try {
+		const pathRow = db.prepare(`
+      SELECT dp.status,
+        (SELECT COUNT(*) FROM path_waypoints pw WHERE pw.path_id = dp.id) AS waypoint_count,
+        (SELECT COUNT(*) FROM path_waypoints pw WHERE pw.path_id = dp.id AND pw.waypoint_type = 'error') AS error_count
+      FROM debug_paths dp
+      WHERE dp.project_hash = ? AND dp.status = 'active'
+      ORDER BY dp.started_at DESC LIMIT 1
+    `).get(projectHash);
+		if (pathRow) debugPath = {
+			status: pathRow.status,
+			waypointCount: pathRow.waypoint_count,
+			errorCount: pathRow.error_count
+		};
+	} catch {}
+	let recentClassifications = [];
+	try {
+		recentClassifications = db.prepare(`
+      SELECT classification FROM observations
+      WHERE project_hash = ? AND session_id = ? AND deleted_at IS NULL AND classification IS NOT NULL
+      ORDER BY created_at DESC LIMIT 5
+    `).all(projectHash, sessionId).map((r) => r.classification);
+	} catch {}
+	return {
+		branch,
+		debugPath,
+		recentClassifications
+	};
+}
+/**
+* Rules map context patterns to keyword categories, NOT tool names.
+* The engine then searches the tool registry for matching tools.
+*/
+const CONTEXT_RULES = [
+	{
+		id: "debug-session",
+		searchKeywords: [
+			"debug",
+			"error tracking",
+			"issue investigation",
+			"systematic debugging"
+		],
+		confidence: .8,
+		reason: "Diagnosis stage detected with problems but no active debug path",
+		matches(ctx) {
+			if (!ctx.branch) return false;
+			const inDiagnosis = ctx.branch.arcStage === "diagnosis" || ctx.branch.arcStage === "investigation";
+			const hasProblems = ctx.recentClassifications.some((c) => c === "problem" || c === "error");
+			const noActivePath = !ctx.debugPath;
+			return inDiagnosis && hasProblems && noActivePath;
+		}
+	},
+	{
+		id: "planning-needed",
+		searchKeywords: [
+			"plan",
+			"design",
+			"architecture",
+			"implementation strategy"
+		],
+		confidence: .7,
+		reason: "Investigation phase with 5+ observations suggests planning would help",
+		matches(ctx) {
+			if (!ctx.branch) return false;
+			const inInvestigation = ctx.branch.arcStage === "investigation";
+			const enoughObservations = ctx.branch.observationCount >= 5;
+			const readTools = (ctx.branch.toolPattern["Read"] ?? 0) + (ctx.branch.toolPattern["Grep"] ?? 0) + (ctx.branch.toolPattern["Glob"] ?? 0);
+			const totalTools = Object.values(ctx.branch.toolPattern).reduce((a, b) => a + b, 0);
+			const mostlyReads = totalTools > 0 && readTools / totalTools > .6;
+			return inInvestigation && enoughObservations && mostlyReads;
+		}
+	},
+	{
+		id: "ready-to-commit",
+		searchKeywords: [
+			"commit",
+			"save changes",
+			"checkpoint"
+		],
+		confidence: .75,
+		reason: "Execution stage with recent resolutions — good time to commit",
+		matches(ctx) {
+			if (!ctx.branch) return false;
+			const inExecution = ctx.branch.arcStage === "execution";
+			const hasResolutions = ctx.recentClassifications.some((c) => c === "resolution" || c === "success");
+			const recentSuccesses = ctx.recentClassifications.filter((c) => c === "success" || c === "resolution").length;
+			return inExecution && hasResolutions && recentSuccesses >= 2;
+		}
+	},
+	{
+		id: "verify-work",
+		searchKeywords: [
+			"verify",
+			"validate",
+			"test",
+			"acceptance",
+			"UAT"
+		],
+		confidence: .7,
+		reason: "Feature branch in verification stage",
+		matches(ctx) {
+			if (!ctx.branch) return false;
+			return ctx.branch.branchType === "feature" && ctx.branch.arcStage === "verification";
+		}
+	},
+	{
+		id: "resume-debugging",
+		searchKeywords: [
+			"debug",
+			"continue debugging",
+			"resume investigation"
+		],
+		confidence: .75,
+		reason: "Active debug path with multiple errors detected",
+		matches(ctx) {
+			if (!ctx.branch || !ctx.debugPath) return false;
+			const inInvestigation = ctx.branch.arcStage === "investigation" || ctx.branch.arcStage === "diagnosis";
+			return ctx.debugPath.status === "active" && inInvestigation && ctx.debugPath.errorCount >= 2;
+		}
+	},
+	{
+		id: "check-progress",
+		searchKeywords: [
+			"progress",
+			"status",
+			"milestone",
+			"overview"
+		],
+		confidence: .65,
+		reason: "Extended execution — consider reviewing progress",
+		matches(ctx) {
+			if (!ctx.branch) return false;
+			return ctx.branch.arcStage === "execution" && ctx.branch.observationCount >= 10;
+		}
+	}
+];
+/**
+* Searches suggestable tools for the best match against a set of keywords.
+* Checks trigger_hints, description, and name for substring matches.
+*
+* This is a lightweight in-memory scan, not a DB query.
+*/
+function findMatchingTool(keywords, suggestableTools) {
+	let best = null;
+	for (const tool of suggestableTools) {
+		const searchText = [
+			tool.trigger_hints ?? "",
+			tool.description ?? "",
+			tool.name
+		].join(" ").toLowerCase();
+		let matchCount = 0;
+		for (const keyword of keywords) if (searchText.includes(keyword.toLowerCase())) matchCount++;
+		if (matchCount === 0) continue;
+		const relevance = matchCount / keywords.length;
+		if (!best || relevance > best.relevance) best = {
+			tool,
+			relevance
+		};
+	}
+	return best;
+}
+/**
+* Evaluates proactive suggestions by matching context rules against available tools.
+*
+* Returns the highest-confidence match (rule confidence * tool relevance) that
+* exceeds the threshold, or null if nothing qualifies.
+*/
+function evaluateProactiveSuggestions(ctx, suggestableTools, threshold) {
+	let bestSuggestion = null;
+	let bestScore = 0;
+	for (const rule of CONTEXT_RULES) try {
+		if (!rule.matches(ctx)) continue;
+		const toolMatch = findMatchingTool(rule.searchKeywords, suggestableTools);
+		if (!toolMatch) continue;
+		const combinedScore = rule.confidence * toolMatch.relevance;
+		if (combinedScore > bestScore && combinedScore >= threshold) {
+			bestScore = combinedScore;
+			bestSuggestion = {
+				toolName: toolMatch.tool.name,
+				toolDescription: toolMatch.tool.description,
+				confidence: combinedScore,
+				tier: "proactive",
+				reason: rule.reason
+			};
+		}
+	} catch (err) {
+		debug("proactive", `Rule ${rule.id} failed`, { error: String(err) });
+	}
+	return bestSuggestion;
+}
+
+//#endregion
 //#region src/routing/heuristic-fallback.ts
 /**
 * Stop words filtered from keyword extraction.
@@ -1730,7 +1996,8 @@ function evaluateHeuristic(recentObservations, suggestableTools, confidenceThres
 /**
 * ConversationRouter orchestrates tool suggestion routing.
 *
-* Combines two tiers of suggestion:
+* Combines three tiers of suggestion:
+* - Proactive suggestions: context-aware trigger hint matching (ROUT-05)
 * - Learned patterns: historical tool sequence matching (ROUT-01)
 * - Heuristic fallback: keyword-based cold-start matching (ROUT-04)
 *
@@ -1816,14 +2083,21 @@ var ConversationRouter = class {
 		if (suggestableTools.length === 0) return;
 		const suggestableNames = new Set(suggestableTools.map((t) => t.name));
 		let suggestion = null;
-		if (this.countRecentEvents() >= this.config.minEventsForLearned) suggestion = evaluateLearnedPatterns(this.db, sessionId, this.projectHash, suggestableNames, this.config.confidenceThreshold);
+		suggestion = evaluateProactiveSuggestions(loadContextSnapshot(this.db, this.projectHash, sessionId), suggestableTools, this.config.confidenceThreshold);
+		if (!suggestion) {
+			if (this.countRecentEvents() >= this.config.minEventsForLearned) suggestion = evaluateLearnedPatterns(this.db, sessionId, this.projectHash, suggestableNames, this.config.confidenceThreshold);
+		}
 		if (!suggestion) suggestion = evaluateHeuristic(this.getRecentObservations(sessionId), suggestableTools, this.config.confidenceThreshold);
 		if (!suggestion) return;
 		if (suggestion.confidence < this.config.confidenceThreshold) return;
 		const notifStore = new NotificationStore(this.db);
-		const description = suggestion.toolDescription ? ` -- ${suggestion.toolDescription}` : "";
-		const usageHint = suggestion.tier === "learned" ? ` (${suggestion.reason})` : "";
-		const message = `Tool suggestion: ${suggestion.toolName}${description}${usageHint}`;
+		let message;
+		if (suggestion.tier === "proactive") message = `[Laminark suggests] ${suggestion.reason} -- try ${suggestion.toolName}`;
+		else {
+			const description = suggestion.toolDescription ? ` -- ${suggestion.toolDescription}` : "";
+			const usageHint = suggestion.tier === "learned" ? ` (${suggestion.reason})` : "";
+			message = `Tool suggestion: ${suggestion.toolName}${description}${usageHint}`;
+		}
 		notifStore.add(this.projectHash, message);
 		debug("routing", "Suggestion delivered", {
 			tool: suggestion.toolName,
@@ -1960,7 +2234,8 @@ function processPostToolUseFiltered(input, obsRepo, researchBuffer, toolRegistry
 			source: "hook:PostToolUse",
 			projectHash: projectHash ?? null,
 			description: null,
-			serverName: extractServerName(toolName)
+			serverName: extractServerName(toolName),
+			triggerHints: null
 		}, sessionId ?? null, !isFailure);
 		if (isFailure) {
 			const failures = toolRegistry.getRecentEventsForTool(toolName, projectHash ?? "", 5).filter((e) => e.success === 0).length;
@@ -2119,7 +2394,7 @@ async function main() {
 				handleSessionEnd(input, sessionRepo);
 				break;
 			case "Stop":
-				handleStop(input, obsRepo, sessionRepo);
+				handleStop(input, obsRepo, sessionRepo, laminarkDb.db, projectHash);
 				break;
 			default:
 				debug("hook", "Unknown hook event", { eventName });

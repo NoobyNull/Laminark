@@ -63,6 +63,7 @@ interface DiscoveredTool {
   projectHash: string | null;
   description: string | null;
   serverName: string | null;
+  triggerHints: string | null;
 }
 /**
  * Raw database row from the tool_registry table (snake_case).
@@ -76,6 +77,7 @@ interface ToolRegistryRow {
   project_hash: string | null;
   description: string | null;
   server_name: string | null;
+  trigger_hints: string | null;
   usage_count: number;
   last_used_at: string | null;
   discovered_at: string;

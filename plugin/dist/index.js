@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-t8LZeB-u.mjs";
-import { C as ObservationRepository, D as runMigrations, E as MIGRATIONS, O as debug, S as SessionRepository, T as openDatabase, _ as upsertNode, a as ResearchBufferRepository, b as hybridSearch, c as inferScope, d as getEdgesForNode, f as getNodeByNameAndType, g as traverseFrom, h as insertEdge, i as NotificationStore, k as debugTimed, l as inferToolType, m as initGraphSchema, n as PathRepository, o as BranchRepository, p as getNodesByType, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository, u as countEdgesForNode, v as SaveGuard, w as rowToObservation, x as SearchEngine, y as jaccardSimilarity$1 } from "./tool-registry-FHfSTose.mjs";
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { A as hybridSearch, C as getNodesByType, D as upsertNode, E as traverseFrom, F as openDatabase, I as MIGRATIONS, L as runMigrations, M as SessionRepository, N as ObservationRepository, O as SaveGuard, R as debug, S as getNodeByNameAndType, T as insertEdge, _ as detectStaleness, a as ResearchBufferRepository, b as countEdgesForNode, c as inferScope, d as executePurge, f as findAnalysis, g as saveHygieneConfig, h as resetHygieneConfig, i as NotificationStore, j as SearchEngine, k as jaccardSimilarity$1, l as inferToolType, m as loadHygieneConfig, n as PathRepository, o as BranchRepository, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository, u as analyzeObservations, v as flagStaleObservation, w as initGraphSchema, x as getEdgesForNode, y as initStalenessSchema, z as debugTimed } from "./tool-registry-e710BvXq.mjs";
+import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
@@ -1245,175 +1245,6 @@ function registerQueryGraph(server, db, projectHashRef, notificationStore = null
 }
 
 //#endregion
-//#region src/graph/staleness.ts
-/**
-* Negation patterns: newer observation negates older one.
-* Matches when newer text contains negation keywords absent in older text
-* and both discuss similar subjects.
-*/
-const NEGATION_KEYWORDS = [
-	"not",
-	"don't",
-	"no longer",
-	"stopped",
-	"never",
-	"doesn't",
-	"won't",
-	"isn't",
-	"aren't",
-	"discontinued"
-];
-/**
-* Replacement patterns: newer observation explicitly replaces older approach.
-*/
-const REPLACEMENT_PATTERNS = [
-	/switched\s+(?:from\s+\S+\s+)?to\b/i,
-	/migrated\s+(?:from\s+\S+\s+)?to\b/i,
-	/replaced\s+(?:\S+\s+)?with\b/i,
-	/changed\s+from\b/i,
-	/moved\s+(?:from\s+\S+\s+)?to\b/i,
-	/upgraded\s+(?:from\s+\S+\s+)?to\b/i,
-	/swapped\s+(?:\S+\s+)?(?:for|with)\b/i
-];
-/**
-* Status change patterns: newer observation marks something as inactive.
-*/
-const STATUS_CHANGE_KEYWORDS = [
-	"removed",
-	"deleted",
-	"deprecated",
-	"archived",
-	"dropped",
-	"disabled",
-	"decommissioned",
-	"sunset",
-	"abandoned"
-];
-/**
-* Creates the staleness_flags table if it doesn't exist.
-* Uses a separate table rather than modifying the observations table,
-* keeping staleness metadata decoupled from core observation storage.
-*/
-function initStalenessSchema(db) {
-	db.exec(`
-    CREATE TABLE IF NOT EXISTS staleness_flags (
-      observation_id TEXT PRIMARY KEY,
-      flagged_at TEXT NOT NULL DEFAULT (datetime('now')),
-      reason TEXT NOT NULL,
-      resolved INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE INDEX IF NOT EXISTS idx_staleness_resolved ON staleness_flags(resolved);
-  `);
-}
-/**
-* Detects potential staleness (contradictions) between observations
-* linked to a specific entity.
-*
-* Compares consecutive observation pairs chronologically and checks for:
-* 1. Negation patterns (newer negates older)
-* 2. Replacement patterns (newer replaces older approach)
-* 3. Status change patterns (newer marks something as inactive)
-*
-* This is DETECTION ONLY -- no data is modified.
-*
-* @param db - better-sqlite3 Database handle
-* @param entityId - Graph node ID to check observations for
-* @returns Array of StalenessReport for each detected contradiction
-*/
-function detectStaleness(db, entityId) {
-	const node = db.prepare("SELECT id, name, type, observation_ids FROM graph_nodes WHERE id = ?").get(entityId);
-	if (!node) return [];
-	const obsIds = JSON.parse(node.observation_ids);
-	if (obsIds.length < 2) return [];
-	const placeholders = obsIds.map(() => "?").join(", ");
-	const observations = db.prepare(`SELECT * FROM observations WHERE id IN (${placeholders}) AND deleted_at IS NULL ORDER BY created_at ASC`).all(...obsIds).map(rowToObservation);
-	if (observations.length < 2) return [];
-	const reports = [];
-	const now = (/* @__PURE__ */ new Date()).toISOString();
-	for (let i = 0; i < observations.length - 1; i++) {
-		const older = observations[i];
-		const newer = observations[i + 1];
-		const reason = detectContradiction(older.content, newer.content);
-		if (reason) reports.push({
-			entityId: node.id,
-			entityName: node.name,
-			entityType: node.type,
-			newerObservation: {
-				id: newer.id,
-				text: newer.content,
-				created_at: newer.createdAt
-			},
-			olderObservation: {
-				id: older.id,
-				text: older.content,
-				created_at: older.createdAt
-			},
-			reason,
-			detectedAt: now
-		});
-	}
-	return reports;
-}
-/**
-* Detects contradiction between two observation texts.
-* Returns a human-readable reason string, or null if no contradiction found.
-*/
-function detectContradiction(olderText, newerText) {
-	const olderLower = olderText.toLowerCase();
-	const newerLower = newerText.toLowerCase();
-	const negationResult = detectNegation(olderLower, newerLower);
-	if (negationResult) return negationResult;
-	const replacementResult = detectReplacement(newerLower);
-	if (replacementResult) return replacementResult;
-	const statusResult = detectStatusChange(olderLower, newerLower);
-	if (statusResult) return statusResult;
-	return null;
-}
-/**
-* Detects negation: newer text contains negation keywords that are absent
-* in the older text, suggesting the newer observation contradicts the older.
-*/
-function detectNegation(olderLower, newerLower) {
-	for (const keyword of NEGATION_KEYWORDS) if (newerLower.includes(keyword) && !olderLower.includes(keyword)) return `Newer observation contains negation ("${keyword}") not present in older observation`;
-	return null;
-}
-/**
-* Detects replacement: newer text explicitly mentions switching/replacing.
-*/
-function detectReplacement(newerLower) {
-	for (const pattern of REPLACEMENT_PATTERNS) {
-		const match = newerLower.match(pattern);
-		if (match) return `Newer observation indicates replacement ("${match[0].trim()}")`;
-	}
-	return null;
-}
-/**
-* Detects status change: newer text marks something as removed/deprecated
-* when the older text described it as active/present.
-*/
-function detectStatusChange(olderLower, newerLower) {
-	for (const keyword of STATUS_CHANGE_KEYWORDS) if (newerLower.includes(keyword) && !olderLower.includes(keyword)) return `Newer observation indicates status change ("${keyword}")`;
-	return null;
-}
-/**
-* Flags an observation as stale with an advisory reason.
-*
-* This flag is advisory -- search can use it to deprioritize but never hide
-* the observation. The observation remains fully queryable.
-*
-* Uses INSERT OR REPLACE to allow re-flagging with an updated reason.
-*
-* @param db - better-sqlite3 Database handle
-* @param observationId - ID of the observation to flag
-* @param reason - Human-readable explanation of why it's stale
-*/
-function flagStaleObservation(db, observationId, reason) {
-	initStalenessSchema(db);
-	db.prepare(`INSERT OR REPLACE INTO staleness_flags (observation_id, reason, resolved)
-     VALUES (?, ?, 0)`).run(observationId, reason);
-}
-
-//#endregion
 //#region src/mcp/tools/graph-stats.ts
 /**
 * Collects comprehensive graph statistics directly from the database.
@@ -1552,174 +1383,6 @@ function registerGraphStats(server, db, projectHashRef, notificationStore = null
 			return textResponse$6(`Graph stats error: ${message}`);
 		}
 	});
-}
-
-//#endregion
-//#region src/graph/hygiene-analyzer.ts
-const WEIGHTS = {
-	orphaned: .3,
-	islandNode: .15,
-	noiseClassified: .25,
-	shortContent: .1,
-	autoCaptured: .1,
-	stale: .1
-};
-const SHORT_CONTENT_THRESHOLD = 50;
-/**
-* Analyzes all active observations and scores each on deletion signals.
-* Pure read-only — no data is modified.
-*/
-function analyzeObservations(db, projectHash, opts) {
-	const limit = opts?.limit ?? 50;
-	const minTier = opts?.minTier ?? "medium";
-	debug("hygiene", "Starting analysis", {
-		projectHash,
-		sessionId: opts?.sessionId
-	});
-	let obsSql = `
-    SELECT id, content, title, source, kind, session_id, classification, created_at
-    FROM observations
-    WHERE project_hash = ? AND deleted_at IS NULL
-  `;
-	const obsParams = [projectHash];
-	if (opts?.sessionId) {
-		obsSql += " AND session_id = ?";
-		obsParams.push(opts.sessionId);
-	}
-	obsSql += " ORDER BY created_at DESC";
-	const observations = db.prepare(obsSql).all(...obsParams);
-	const linkedObsIds = /* @__PURE__ */ new Set();
-	const islandObsIds = /* @__PURE__ */ new Set();
-	const allNodes = db.prepare("SELECT id, type, name, observation_ids FROM graph_nodes").all();
-	const edgeCounts = /* @__PURE__ */ new Map();
-	const edgeRows = db.prepare(`SELECT source_id AS nid, COUNT(*) AS cnt FROM graph_edges GROUP BY source_id
-     UNION ALL
-     SELECT target_id AS nid, COUNT(*) AS cnt FROM graph_edges GROUP BY target_id`).all();
-	for (const row of edgeRows) edgeCounts.set(row.nid, (edgeCounts.get(row.nid) ?? 0) + row.cnt);
-	for (const node of allNodes) {
-		let obsIds;
-		try {
-			obsIds = JSON.parse(node.observation_ids);
-		} catch {
-			continue;
-		}
-		const degree = edgeCounts.get(node.id) ?? 0;
-		for (const oid of obsIds) {
-			linkedObsIds.add(oid);
-			if (degree === 0) islandObsIds.add(oid);
-		}
-	}
-	const staleIds = /* @__PURE__ */ new Set();
-	try {
-		initStalenessSchema(db);
-		const staleRows = db.prepare("SELECT observation_id FROM staleness_flags WHERE resolved = 0").all();
-		for (const row of staleRows) staleIds.add(row.observation_id);
-	} catch {}
-	const allCandidates = [];
-	for (const obs of observations) {
-		const signals = {
-			orphaned: !linkedObsIds.has(obs.id),
-			islandNode: islandObsIds.has(obs.id),
-			noiseClassified: obs.classification === "noise",
-			shortContent: obs.content.length < SHORT_CONTENT_THRESHOLD,
-			autoCaptured: obs.source.startsWith("hook:"),
-			stale: staleIds.has(obs.id)
-		};
-		const confidence = (signals.orphaned ? WEIGHTS.orphaned : 0) + (signals.islandNode ? WEIGHTS.islandNode : 0) + (signals.noiseClassified ? WEIGHTS.noiseClassified : 0) + (signals.shortContent ? WEIGHTS.shortContent : 0) + (signals.autoCaptured ? WEIGHTS.autoCaptured : 0) + (signals.stale ? WEIGHTS.stale : 0);
-		const tier = confidence >= .7 ? "high" : confidence >= .5 ? "medium" : "low";
-		if (minTier === "high" && tier !== "high") continue;
-		if (minTier === "medium" && tier === "low") continue;
-		const preview = obs.content.length > 80 ? obs.content.substring(0, 80) + "..." : obs.content;
-		allCandidates.push({
-			id: obs.id,
-			shortId: obs.id.substring(0, 8),
-			sessionId: obs.session_id,
-			kind: obs.kind,
-			source: obs.source,
-			contentPreview: preview,
-			createdAt: obs.created_at,
-			signals,
-			confidence: Math.round(confidence * 100) / 100,
-			tier
-		});
-	}
-	allCandidates.sort((a, b) => b.confidence - a.confidence);
-	const activeObsIds = new Set(observations.map((o) => o.id));
-	const orphanNodes = [];
-	for (const node of allNodes) {
-		if ((edgeCounts.get(node.id) ?? 0) > 0) continue;
-		let obsIds;
-		try {
-			obsIds = JSON.parse(node.observation_ids);
-		} catch {
-			continue;
-		}
-		if (obsIds.length === 0 || obsIds.every((oid) => !activeObsIds.has(oid))) orphanNodes.push({
-			id: node.id,
-			type: node.type,
-			name: node.name,
-			reason: "zero edges, dead observation refs"
-		});
-	}
-	const limited = allCandidates.slice(0, limit);
-	const highCount = allCandidates.filter((c) => c.tier === "high").length;
-	const mediumCount = allCandidates.filter((c) => c.tier === "medium").length;
-	const lowCount = allCandidates.filter((c) => c.tier === "low").length;
-	debug("hygiene", "Analysis complete", {
-		total: observations.length,
-		high: highCount,
-		medium: mediumCount,
-		orphanNodes: orphanNodes.length
-	});
-	return {
-		analyzedAt: (/* @__PURE__ */ new Date()).toISOString(),
-		totalObservations: observations.length,
-		candidates: limited,
-		orphanNodes: orphanNodes.slice(0, limit),
-		summary: {
-			high: highCount,
-			medium: mediumCount,
-			low: lowCount,
-			orphanNodeCount: orphanNodes.length
-		}
-	};
-}
-/**
-* Soft-deletes observations matching the given tier threshold and removes
-* dead orphan graph nodes. Returns counts of affected records.
-*/
-function executePurge(db, projectHash, report, tier) {
-	const candidateIds = report.candidates.filter((c) => {
-		if (tier === "high") return c.tier === "high";
-		if (tier === "medium") return c.tier === "high" || c.tier === "medium";
-		return true;
-	}).map((c) => c.id);
-	debug("hygiene", "Executing purge", {
-		tier,
-		candidates: candidateIds.length
-	});
-	let observationsPurged = 0;
-	const softDeleteStmt = db.prepare(`
-    UPDATE observations
-    SET deleted_at = datetime('now'), updated_at = datetime('now')
-    WHERE id = ? AND project_hash = ? AND deleted_at IS NULL
-  `);
-	return db.transaction(() => {
-		for (const id of candidateIds) {
-			const result = softDeleteStmt.run(id, projectHash);
-			observationsPurged += result.changes;
-		}
-		let orphanNodesRemoved = 0;
-		const deleteNodeStmt = db.prepare("DELETE FROM graph_nodes WHERE id = ?");
-		for (const node of report.orphanNodes) {
-			const result = deleteNodeStmt.run(node.id);
-			orphanNodesRemoved += result.changes;
-		}
-		return {
-			observationsPurged,
-			orphanNodesRemoved
-		};
-	})();
 }
 
 //#endregion
@@ -5819,7 +5482,7 @@ apiRoutes.get("/graph", (c) => {
 		edgeRows = [];
 	}
 	const nodeIdSet = new Set(nodes.map((n) => n.id));
-	const edges = (typeFilter ? edgeRows.filter((e) => nodeIdSet.has(e.source_id) && nodeIdSet.has(e.target_id)) : edgeRows).map((row) => ({
+	const edges = edgeRows.filter((e) => nodeIdSet.has(e.source_id) && nodeIdSet.has(e.target_id)).map((row) => ({
 		id: row.id,
 		source: row.source_id,
 		target: row.target_id,
@@ -6720,6 +6383,14 @@ function safeParseJson(json) {
 *
 * @module web/routes/admin
 */
+const __dirname = dirname(fileURLToPath$1(import.meta.url));
+const LAMINARK_VERSION = (() => {
+	try {
+		return JSON.parse(readFileSync(join(__dirname, "..", "..", "package.json"), "utf-8")).version || "unknown";
+	} catch {
+		return "unknown";
+	}
+})();
 function getDb(c) {
 	return c.get("db");
 }
@@ -6791,6 +6462,51 @@ adminRoutes.get("/stats", (c) => {
 		pendingNotifications,
 		projects,
 		scopedToProject: project || null
+	});
+});
+/**
+* GET /api/admin/system
+*
+* Returns server-scoped system info (not project-scoped).
+*/
+adminRoutes.get("/system", (c) => {
+	const db = getDb(c);
+	const mem = process.memoryUsage();
+	let dbSizeBytes = 0;
+	let pageCount = 0;
+	let pageSize = 4096;
+	try {
+		const pc = db.pragma("page_count", { simple: true });
+		const ps = db.pragma("page_size", { simple: true });
+		pageCount = pc;
+		pageSize = ps;
+		dbSizeBytes = pc * ps;
+	} catch {}
+	let walSizeBytes = 0;
+	try {
+		const dbPath = db.name;
+		if (dbPath) {
+			const walPath = dbPath + "-wal";
+			if (existsSync(walPath)) walSizeBytes = statSync(walPath).size;
+		}
+	} catch {}
+	return c.json({
+		laminarkVersion: LAMINARK_VERSION,
+		nodeVersion: process.version,
+		platform: process.platform,
+		arch: process.arch,
+		uptimeSeconds: Math.floor(process.uptime()),
+		memory: {
+			rssBytes: mem.rss,
+			heapUsedBytes: mem.heapUsed,
+			heapTotalBytes: mem.heapTotal
+		},
+		database: {
+			sizeBytes: dbSizeBytes,
+			walSizeBytes,
+			pageCount,
+			pageSize
+		}
 	});
 });
 /**
@@ -6903,10 +6619,14 @@ adminRoutes.get("/hygiene", (c) => {
 	const project = getProjectHash$1(c);
 	if (!project) return c.json({ error: "No project context available" }, 400);
 	const tier = c.req.query("tier") || "high";
+	const sessionId = c.req.query("session_id");
+	const limit = parseInt(c.req.query("limit") || "50", 10);
+	const config = loadHygieneConfig();
 	const report = analyzeObservations(db, project, {
-		sessionId: c.req.query("session_id"),
-		limit: parseInt(c.req.query("limit") || "50", 10),
-		minTier: tier === "all" ? "low" : tier
+		sessionId,
+		limit,
+		minTier: tier === "all" ? "low" : tier,
+		config
 	});
 	return c.json(report);
 });
@@ -6915,9 +6635,11 @@ adminRoutes.post("/hygiene/purge", async (c) => {
 	const project = getProjectHash$1(c);
 	if (!project) return c.json({ error: "No project context available" }, 400);
 	const tier = (await c.req.json()).tier || "high";
+	const config = loadHygieneConfig();
 	const result = executePurge(db, project, analyzeObservations(db, project, {
 		minTier: tier === "all" ? "low" : tier,
-		limit: 500
+		limit: 500,
+		config
 	}), tier);
 	return c.json({
 		ok: true,
@@ -6925,6 +6647,32 @@ adminRoutes.post("/hygiene/purge", async (c) => {
 		orphanNodesRemoved: result.orphanNodesRemoved,
 		tier
 	});
+});
+adminRoutes.get("/hygiene/find", (c) => {
+	const db = getDb(c);
+	const project = getProjectHash$1(c);
+	if (!project) return c.json({ error: "No project context available" }, 400);
+	const report = findAnalysis(db, project, loadHygieneConfig());
+	return c.json(report);
+});
+adminRoutes.get("/config/hygiene", (c) => {
+	return c.json(loadHygieneConfig());
+});
+adminRoutes.put("/config/hygiene", async (c) => {
+	const body = await c.req.json();
+	const configPath = join(getConfigDir(), "hygiene.json");
+	if (body && body.__reset === true) {
+		try {
+			if (existsSync(configPath)) unlinkSync(configPath);
+		} catch {}
+		return c.json(resetHygieneConfig());
+	}
+	if (typeof body !== "object" || body === null || Array.isArray(body)) return c.json({ error: "Request body must be a JSON object" }, 400);
+	const { __reset: _, ...data } = body;
+	writeFileSync(configPath, JSON.stringify(data, null, 2), "utf-8");
+	const validated = loadHygieneConfig();
+	saveHygieneConfig(validated);
+	return c.json(validated);
 });
 adminRoutes.get("/config/topic-detection", (c) => {
 	return c.json(loadTopicDetectionConfig());

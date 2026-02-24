@@ -1,8 +1,8 @@
-import { a as isDebugEnabled } from "./config-t8LZeB-u.mjs";
+import { a as isDebugEnabled, t as getConfigDir } from "./config-t8LZeB-u.mjs";
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 
@@ -81,6 +81,8 @@ function debugTimed(category, message, fn) {
 * Migration 018: Tool registry FTS5 + vec0 tables for hybrid search on tool descriptions.
 * Migration 019: Add status column (active/stale/demoted) to tool_registry for staleness management.
 * Migration 020: Debug path tables (debug_paths + path_waypoints) for resolution path tracking.
+* Migration 021: Thought branch tables for coherent work unit tracking.
+* Migration 022: Add trigger_hints column to tool_registry for proactive suggestion matching.
 */
 const MIGRATIONS = [
 	{
@@ -624,6 +626,13 @@ const MIGRATIONS = [
         ON thought_branches(started_at DESC);
       CREATE INDEX IF NOT EXISTS idx_branch_observations_obs
         ON branch_observations(observation_id);
+    `
+	},
+	{
+		version: 22,
+		name: "add_tool_registry_trigger_hints",
+		up: `
+      ALTER TABLE tool_registry ADD COLUMN trigger_hints TEXT;
     `
 	}
 ];
@@ -1849,6 +1858,570 @@ function insertEdge(db, edge) {
 }
 
 //#endregion
+//#region src/graph/staleness.ts
+/**
+* Negation patterns: newer observation negates older one.
+* Matches when newer text contains negation keywords absent in older text
+* and both discuss similar subjects.
+*/
+const NEGATION_KEYWORDS = [
+	"not",
+	"don't",
+	"no longer",
+	"stopped",
+	"never",
+	"doesn't",
+	"won't",
+	"isn't",
+	"aren't",
+	"discontinued"
+];
+/**
+* Replacement patterns: newer observation explicitly replaces older approach.
+*/
+const REPLACEMENT_PATTERNS = [
+	/switched\s+(?:from\s+\S+\s+)?to\b/i,
+	/migrated\s+(?:from\s+\S+\s+)?to\b/i,
+	/replaced\s+(?:\S+\s+)?with\b/i,
+	/changed\s+from\b/i,
+	/moved\s+(?:from\s+\S+\s+)?to\b/i,
+	/upgraded\s+(?:from\s+\S+\s+)?to\b/i,
+	/swapped\s+(?:\S+\s+)?(?:for|with)\b/i
+];
+/**
+* Status change patterns: newer observation marks something as inactive.
+*/
+const STATUS_CHANGE_KEYWORDS = [
+	"removed",
+	"deleted",
+	"deprecated",
+	"archived",
+	"dropped",
+	"disabled",
+	"decommissioned",
+	"sunset",
+	"abandoned"
+];
+/**
+* Creates the staleness_flags table if it doesn't exist.
+* Uses a separate table rather than modifying the observations table,
+* keeping staleness metadata decoupled from core observation storage.
+*/
+function initStalenessSchema(db) {
+	db.exec(`
+    CREATE TABLE IF NOT EXISTS staleness_flags (
+      observation_id TEXT PRIMARY KEY,
+      flagged_at TEXT NOT NULL DEFAULT (datetime('now')),
+      reason TEXT NOT NULL,
+      resolved INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_staleness_resolved ON staleness_flags(resolved);
+  `);
+}
+/**
+* Detects potential staleness (contradictions) between observations
+* linked to a specific entity.
+*
+* Compares consecutive observation pairs chronologically and checks for:
+* 1. Negation patterns (newer negates older)
+* 2. Replacement patterns (newer replaces older approach)
+* 3. Status change patterns (newer marks something as inactive)
+*
+* This is DETECTION ONLY -- no data is modified.
+*
+* @param db - better-sqlite3 Database handle
+* @param entityId - Graph node ID to check observations for
+* @returns Array of StalenessReport for each detected contradiction
+*/
+function detectStaleness(db, entityId) {
+	const node = db.prepare("SELECT id, name, type, observation_ids FROM graph_nodes WHERE id = ?").get(entityId);
+	if (!node) return [];
+	const obsIds = JSON.parse(node.observation_ids);
+	if (obsIds.length < 2) return [];
+	const placeholders = obsIds.map(() => "?").join(", ");
+	const observations = db.prepare(`SELECT * FROM observations WHERE id IN (${placeholders}) AND deleted_at IS NULL ORDER BY created_at ASC`).all(...obsIds).map(rowToObservation);
+	if (observations.length < 2) return [];
+	const reports = [];
+	const now = (/* @__PURE__ */ new Date()).toISOString();
+	for (let i = 0; i < observations.length - 1; i++) {
+		const older = observations[i];
+		const newer = observations[i + 1];
+		const reason = detectContradiction(older.content, newer.content);
+		if (reason) reports.push({
+			entityId: node.id,
+			entityName: node.name,
+			entityType: node.type,
+			newerObservation: {
+				id: newer.id,
+				text: newer.content,
+				created_at: newer.createdAt
+			},
+			olderObservation: {
+				id: older.id,
+				text: older.content,
+				created_at: older.createdAt
+			},
+			reason,
+			detectedAt: now
+		});
+	}
+	return reports;
+}
+/**
+* Detects contradiction between two observation texts.
+* Returns a human-readable reason string, or null if no contradiction found.
+*/
+function detectContradiction(olderText, newerText) {
+	const olderLower = olderText.toLowerCase();
+	const newerLower = newerText.toLowerCase();
+	const negationResult = detectNegation(olderLower, newerLower);
+	if (negationResult) return negationResult;
+	const replacementResult = detectReplacement(newerLower);
+	if (replacementResult) return replacementResult;
+	const statusResult = detectStatusChange(olderLower, newerLower);
+	if (statusResult) return statusResult;
+	return null;
+}
+/**
+* Detects negation: newer text contains negation keywords that are absent
+* in the older text, suggesting the newer observation contradicts the older.
+*/
+function detectNegation(olderLower, newerLower) {
+	for (const keyword of NEGATION_KEYWORDS) if (newerLower.includes(keyword) && !olderLower.includes(keyword)) return `Newer observation contains negation ("${keyword}") not present in older observation`;
+	return null;
+}
+/**
+* Detects replacement: newer text explicitly mentions switching/replacing.
+*/
+function detectReplacement(newerLower) {
+	for (const pattern of REPLACEMENT_PATTERNS) {
+		const match = newerLower.match(pattern);
+		if (match) return `Newer observation indicates replacement ("${match[0].trim()}")`;
+	}
+	return null;
+}
+/**
+* Detects status change: newer text marks something as removed/deprecated
+* when the older text described it as active/present.
+*/
+function detectStatusChange(olderLower, newerLower) {
+	for (const keyword of STATUS_CHANGE_KEYWORDS) if (newerLower.includes(keyword) && !olderLower.includes(keyword)) return `Newer observation indicates status change ("${keyword}")`;
+	return null;
+}
+/**
+* Flags an observation as stale with an advisory reason.
+*
+* This flag is advisory -- search can use it to deprioritize but never hide
+* the observation. The observation remains fully queryable.
+*
+* Uses INSERT OR REPLACE to allow re-flagging with an updated reason.
+*
+* @param db - better-sqlite3 Database handle
+* @param observationId - ID of the observation to flag
+* @param reason - Human-readable explanation of why it's stale
+*/
+function flagStaleObservation(db, observationId, reason) {
+	initStalenessSchema(db);
+	db.prepare(`INSERT OR REPLACE INTO staleness_flags (observation_id, reason, resolved)
+     VALUES (?, ?, 0)`).run(observationId, reason);
+}
+
+//#endregion
+//#region src/config/hygiene-config.ts
+/**
+* Database Hygiene Configuration
+*
+* Controls signal weights and tier thresholds used by the hygiene
+* analyzer to score observations for deletion candidacy.
+*
+* Configuration is loaded from .laminark/hygiene.json with
+* a 5-second cache to avoid repeated disk reads.
+*/
+const DEFAULT_AUTO_CLEANUP = {
+	enabled: true,
+	tier: "high",
+	maxOrphanNodes: 500
+};
+const DEFAULTS = {
+	signalWeights: {
+		orphaned: .3,
+		islandNode: .25,
+		noiseClassified: .25,
+		shortContent: .1,
+		autoCaptured: .1,
+		stale: .1
+	},
+	tierThresholds: {
+		high: .7,
+		medium: .5
+	},
+	shortContentThreshold: 50,
+	autoCleanup: { ...DEFAULT_AUTO_CLEANUP }
+};
+const CACHE_TTL_MS = 5e3;
+let cachedConfig = null;
+let cachedAt = 0;
+function clamp(value, min, max) {
+	return Math.max(min, Math.min(max, value));
+}
+function validate(raw) {
+	const config = { ...DEFAULTS };
+	if (raw.signalWeights && typeof raw.signalWeights === "object" && !Array.isArray(raw.signalWeights)) {
+		const sw = raw.signalWeights;
+		const weights = { ...DEFAULTS.signalWeights };
+		for (const key of Object.keys(DEFAULTS.signalWeights)) if (typeof sw[key] === "number") weights[key] = clamp(sw[key], 0, 1);
+		config.signalWeights = weights;
+	}
+	if (raw.tierThresholds && typeof raw.tierThresholds === "object" && !Array.isArray(raw.tierThresholds)) {
+		const tt = raw.tierThresholds;
+		let high = typeof tt.high === "number" ? clamp(tt.high, 0, 1) : DEFAULTS.tierThresholds.high;
+		let medium = typeof tt.medium === "number" ? clamp(tt.medium, 0, 1) : DEFAULTS.tierThresholds.medium;
+		if (medium >= high) medium = Math.max(0, high - .1);
+		config.tierThresholds = {
+			high,
+			medium
+		};
+	}
+	if (typeof raw.shortContentThreshold === "number") config.shortContentThreshold = Math.max(0, Math.round(raw.shortContentThreshold));
+	if (raw.autoCleanup && typeof raw.autoCleanup === "object" && !Array.isArray(raw.autoCleanup)) {
+		const ac = raw.autoCleanup;
+		const cleanup = { ...DEFAULT_AUTO_CLEANUP };
+		if (typeof ac.enabled === "boolean") cleanup.enabled = ac.enabled;
+		if (ac.tier === "high" || ac.tier === "medium" || ac.tier === "all") cleanup.tier = ac.tier;
+		if (typeof ac.maxOrphanNodes === "number") cleanup.maxOrphanNodes = Math.max(0, Math.round(ac.maxOrphanNodes));
+		config.autoCleanup = cleanup;
+	}
+	return config;
+}
+/**
+* Loads hygiene configuration from disk with a 5-second cache.
+*/
+function loadHygieneConfig() {
+	const now = Date.now();
+	if (cachedConfig && now - cachedAt < CACHE_TTL_MS) return cachedConfig;
+	const configPath = join(getConfigDir(), "hygiene.json");
+	try {
+		const content = readFileSync(configPath, "utf-8");
+		cachedConfig = validate(JSON.parse(content));
+		debug("config", "Loaded hygiene config", cachedConfig);
+	} catch {
+		cachedConfig = {
+			...DEFAULTS,
+			signalWeights: { ...DEFAULTS.signalWeights },
+			tierThresholds: { ...DEFAULTS.tierThresholds }
+		};
+	}
+	cachedAt = now;
+	return cachedConfig;
+}
+/**
+* Saves hygiene configuration to disk and invalidates cache.
+*/
+function saveHygieneConfig(config) {
+	writeFileSync(join(getConfigDir(), "hygiene.json"), JSON.stringify(config, null, 2), "utf-8");
+	cachedConfig = config;
+	cachedAt = Date.now();
+}
+/**
+* Resets hygiene config to defaults by invalidating cache.
+*/
+function resetHygieneConfig() {
+	cachedConfig = null;
+	cachedAt = 0;
+	return {
+		...DEFAULTS,
+		signalWeights: { ...DEFAULTS.signalWeights },
+		tierThresholds: { ...DEFAULTS.tierThresholds },
+		autoCleanup: { ...DEFAULT_AUTO_CLEANUP }
+	};
+}
+
+//#endregion
+//#region src/graph/hygiene-analyzer.ts
+function buildSignalLookups(db) {
+	const linkedObsIds = /* @__PURE__ */ new Set();
+	const islandObsIds = /* @__PURE__ */ new Set();
+	const allNodes = db.prepare("SELECT id, type, name, observation_ids FROM graph_nodes").all();
+	const edgeCounts = /* @__PURE__ */ new Map();
+	const edgeRows = db.prepare(`SELECT source_id AS nid, COUNT(*) AS cnt FROM graph_edges GROUP BY source_id
+     UNION ALL
+     SELECT target_id AS nid, COUNT(*) AS cnt FROM graph_edges GROUP BY target_id`).all();
+	for (const row of edgeRows) edgeCounts.set(row.nid, (edgeCounts.get(row.nid) ?? 0) + row.cnt);
+	for (const node of allNodes) {
+		let obsIds;
+		try {
+			obsIds = JSON.parse(node.observation_ids);
+		} catch {
+			continue;
+		}
+		const degree = edgeCounts.get(node.id) ?? 0;
+		for (const oid of obsIds) {
+			linkedObsIds.add(oid);
+			if (degree === 0) islandObsIds.add(oid);
+		}
+	}
+	const staleIds = /* @__PURE__ */ new Set();
+	try {
+		initStalenessSchema(db);
+		const staleRows = db.prepare("SELECT observation_id FROM staleness_flags WHERE resolved = 0").all();
+		for (const row of staleRows) staleIds.add(row.observation_id);
+	} catch {}
+	return {
+		linkedObsIds,
+		islandObsIds,
+		staleIds,
+		allNodes,
+		edgeCounts
+	};
+}
+function scoreObservation(obs, lookups, config) {
+	const weights = config.signalWeights;
+	const thresholds = config.tierThresholds;
+	const signals = {
+		orphaned: !lookups.linkedObsIds.has(obs.id),
+		islandNode: lookups.islandObsIds.has(obs.id),
+		noiseClassified: obs.classification === "noise",
+		shortContent: obs.content.length < config.shortContentThreshold,
+		autoCaptured: obs.source.startsWith("hook:"),
+		stale: lookups.staleIds.has(obs.id)
+	};
+	const confidence = (signals.orphaned ? weights.orphaned : 0) + (signals.islandNode ? weights.islandNode : 0) + (signals.noiseClassified ? weights.noiseClassified : 0) + (signals.shortContent ? weights.shortContent : 0) + (signals.autoCaptured ? weights.autoCaptured : 0) + (signals.stale ? weights.stale : 0);
+	const tier = confidence >= thresholds.high ? "high" : confidence >= thresholds.medium ? "medium" : "low";
+	return {
+		signals,
+		confidence: Math.round(confidence * 100) / 100,
+		tier
+	};
+}
+/**
+* Analyzes all active observations and scores each on deletion signals.
+* Pure read-only — no data is modified.
+*/
+function analyzeObservations(db, projectHash, opts) {
+	const limit = opts?.limit ?? 50;
+	const minTier = opts?.minTier ?? "medium";
+	const config = opts?.config ?? loadHygieneConfig();
+	debug("hygiene", "Starting analysis", {
+		projectHash,
+		sessionId: opts?.sessionId
+	});
+	let obsSql = `
+    SELECT id, content, title, source, kind, session_id, classification, created_at
+    FROM observations
+    WHERE project_hash = ? AND deleted_at IS NULL
+  `;
+	const obsParams = [projectHash];
+	if (opts?.sessionId) {
+		obsSql += " AND session_id = ?";
+		obsParams.push(opts.sessionId);
+	}
+	obsSql += " ORDER BY created_at DESC";
+	const observations = db.prepare(obsSql).all(...obsParams);
+	const lookups = buildSignalLookups(db);
+	const allCandidates = [];
+	for (const obs of observations) {
+		const { signals, confidence, tier } = scoreObservation(obs, lookups, config);
+		if (minTier === "high" && tier !== "high") continue;
+		if (minTier === "medium" && tier === "low") continue;
+		const preview = obs.content.length > 80 ? obs.content.substring(0, 80) + "..." : obs.content;
+		allCandidates.push({
+			id: obs.id,
+			shortId: obs.id.substring(0, 8),
+			sessionId: obs.session_id,
+			kind: obs.kind,
+			source: obs.source,
+			contentPreview: preview,
+			createdAt: obs.created_at,
+			signals,
+			confidence,
+			tier
+		});
+	}
+	allCandidates.sort((a, b) => b.confidence - a.confidence);
+	const activeObsIds = new Set(observations.map((o) => o.id));
+	const orphanNodes = [];
+	for (const node of lookups.allNodes) {
+		if ((lookups.edgeCounts.get(node.id) ?? 0) > 0) continue;
+		let obsIds;
+		try {
+			obsIds = JSON.parse(node.observation_ids);
+		} catch {
+			continue;
+		}
+		const allDead = obsIds.length === 0 || obsIds.every((oid) => !activeObsIds.has(oid));
+		orphanNodes.push({
+			id: node.id,
+			type: node.type,
+			name: node.name,
+			reason: allDead ? "zero edges, dead observation refs" : "zero edges (island node)"
+		});
+	}
+	const limited = allCandidates.slice(0, limit);
+	const highCount = allCandidates.filter((c) => c.tier === "high").length;
+	const mediumCount = allCandidates.filter((c) => c.tier === "medium").length;
+	const lowCount = allCandidates.filter((c) => c.tier === "low").length;
+	debug("hygiene", "Analysis complete", {
+		total: observations.length,
+		high: highCount,
+		medium: mediumCount,
+		orphanNodes: orphanNodes.length
+	});
+	return {
+		analyzedAt: (/* @__PURE__ */ new Date()).toISOString(),
+		totalObservations: observations.length,
+		candidates: limited,
+		orphanNodes: orphanNodes.slice(0, limit),
+		summary: {
+			high: highCount,
+			medium: mediumCount,
+			low: lowCount,
+			orphanNodeCount: orphanNodes.length
+		}
+	};
+}
+/**
+* Produces a score distribution report across all observations.
+* Shows signal counts, confidence histogram, and island node summary
+* so users can tune thresholds to catch the right candidates.
+*/
+function findAnalysis(db, projectHash, config) {
+	const cfg = config ?? loadHygieneConfig();
+	const observations = db.prepare(`
+    SELECT id, content, title, source, kind, session_id, classification, created_at
+    FROM observations
+    WHERE project_hash = ? AND deleted_at IS NULL
+    ORDER BY created_at DESC
+  `).all(projectHash);
+	const lookups = buildSignalLookups(db);
+	const bySignal = {
+		orphaned: 0,
+		islandNode: 0,
+		noiseClassified: 0,
+		shortContent: 0,
+		autoCaptured: 0,
+		stale: 0
+	};
+	const buckets = new Array(10).fill(0);
+	const islandConfidences = [];
+	for (const obs of observations) {
+		const { signals, confidence } = scoreObservation(obs, lookups, cfg);
+		if (signals.orphaned) bySignal.orphaned++;
+		if (signals.islandNode) bySignal.islandNode++;
+		if (signals.noiseClassified) bySignal.noiseClassified++;
+		if (signals.shortContent) bySignal.shortContent++;
+		if (signals.autoCaptured) bySignal.autoCaptured++;
+		if (signals.stale) bySignal.stale++;
+		const bucketIdx = Math.min(Math.floor(confidence * 10), 9);
+		buckets[bucketIdx]++;
+		if (signals.islandNode) islandConfidences.push(confidence);
+	}
+	const distribution = buckets.map((count, i) => ({
+		range: `${(i / 10).toFixed(1)}-${((i + 1) / 10).toFixed(1)}`,
+		count
+	}));
+	islandConfidences.sort((a, b) => a - b);
+	const islandTotal = islandConfidences.length;
+	const minConf = islandTotal > 0 ? islandConfidences[0] : 0;
+	const maxConf = islandTotal > 0 ? islandConfidences[islandTotal - 1] : 0;
+	const medianConf = islandTotal > 0 ? islandConfidences[Math.floor(islandTotal / 2)] : 0;
+	const capturedHigh = islandConfidences.filter((c) => c >= cfg.tierThresholds.high).length;
+	const capturedMedium = islandConfidences.filter((c) => c >= cfg.tierThresholds.medium).length;
+	return {
+		total: observations.length,
+		bySignal,
+		distribution,
+		islandNodes: {
+			total: islandTotal,
+			minConfidence: Math.round(minConf * 100) / 100,
+			maxConfidence: Math.round(maxConf * 100) / 100,
+			medianConfidence: Math.round(medianConf * 100) / 100,
+			capturedAtCurrentThresholds: {
+				high: capturedHigh,
+				medium: capturedMedium,
+				all: islandTotal
+			}
+		}
+	};
+}
+/**
+* Runs automatic hygiene cleanup at session end.
+*
+* Analyzes observations and purges candidates matching the configured tier.
+* Orphan graph node removal is capped by autoCleanup.maxOrphanNodes.
+* Safe to call on every session end — skips quickly if disabled.
+*/
+function runAutoCleanup(db, projectHash, config) {
+	const cfg = config ?? loadHygieneConfig();
+	const auto = cfg.autoCleanup;
+	if (!auto.enabled) return {
+		skipped: true,
+		reason: "disabled",
+		observationsPurged: 0,
+		orphanNodesRemoved: 0
+	};
+	debug("hygiene", "Auto-cleanup starting", {
+		tier: auto.tier,
+		maxOrphanNodes: auto.maxOrphanNodes
+	});
+	const report = analyzeObservations(db, projectHash, {
+		limit: 200,
+		minTier: auto.tier === "all" ? "low" : auto.tier,
+		config: cfg
+	});
+	if (report.orphanNodes.length > auto.maxOrphanNodes) report.orphanNodes = report.orphanNodes.slice(0, auto.maxOrphanNodes);
+	if (report.candidates.length + report.orphanNodes.length === 0) {
+		debug("hygiene", "Auto-cleanup: nothing to clean");
+		return {
+			skipped: false,
+			observationsPurged: 0,
+			orphanNodesRemoved: 0
+		};
+	}
+	const result = executePurge(db, projectHash, report, auto.tier);
+	debug("hygiene", "Auto-cleanup complete", {
+		observationsPurged: result.observationsPurged,
+		orphanNodesRemoved: result.orphanNodesRemoved
+	});
+	return {
+		skipped: false,
+		...result
+	};
+}
+function executePurge(db, projectHash, report, tier) {
+	const candidateIds = report.candidates.filter((c) => {
+		if (tier === "high") return c.tier === "high";
+		if (tier === "medium") return c.tier === "high" || c.tier === "medium";
+		return true;
+	}).map((c) => c.id);
+	debug("hygiene", "Executing purge", {
+		tier,
+		candidates: candidateIds.length
+	});
+	let observationsPurged = 0;
+	const softDeleteStmt = db.prepare(`
+    UPDATE observations
+    SET deleted_at = datetime('now'), updated_at = datetime('now')
+    WHERE id = ? AND project_hash = ? AND deleted_at IS NULL
+  `);
+	return db.transaction(() => {
+		for (const id of candidateIds) {
+			const result = softDeleteStmt.run(id, projectHash);
+			observationsPurged += result.changes;
+		}
+		let orphanNodesRemoved = 0;
+		const deleteNodeStmt = db.prepare("DELETE FROM graph_nodes WHERE id = ?");
+		for (const node of report.orphanNodes) {
+			const result = deleteNodeStmt.run(node.id);
+			orphanNodesRemoved += result.changes;
+		}
+		return {
+			observationsPurged,
+			orphanNodesRemoved
+		};
+	})();
+}
+
+//#endregion
 //#region src/hooks/tool-name-parser.ts
 /**
 * Infers the tool type from a tool name seen in PostToolUse.
@@ -2518,11 +3091,12 @@ var ToolRegistryRepository = class {
 		this.db = db;
 		try {
 			this.stmtUpsert = db.prepare(`
-        INSERT INTO tool_registry (name, tool_type, scope, source, project_hash, description, server_name, discovered_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        INSERT INTO tool_registry (name, tool_type, scope, source, project_hash, description, server_name, trigger_hints, discovered_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT (name, COALESCE(project_hash, ''))
         DO UPDATE SET
           description = COALESCE(excluded.description, tool_registry.description),
+          trigger_hints = COALESCE(excluded.trigger_hints, tool_registry.trigger_hints),
           source = excluded.source,
           status = 'active',
           updated_at = datetime('now')
@@ -2653,7 +3227,7 @@ var ToolRegistryRepository = class {
 	*/
 	upsert(tool) {
 		try {
-			this.stmtUpsert.run(tool.name, tool.toolType, tool.scope, tool.source, tool.projectHash, tool.description, tool.serverName);
+			this.stmtUpsert.run(tool.name, tool.toolType, tool.scope, tool.source, tool.projectHash, tool.description, tool.serverName, tool.triggerHints);
 			debug("tool-registry", "Upserted tool", {
 				name: tool.name,
 				scope: tool.scope
@@ -2996,5 +3570,5 @@ var ToolRegistryRepository = class {
 };
 
 //#endregion
-export { ObservationRepository as C, runMigrations as D, MIGRATIONS as E, debug as O, SessionRepository as S, openDatabase as T, upsertNode as _, ResearchBufferRepository as a, hybridSearch as b, inferScope as c, getEdgesForNode as d, getNodeByNameAndType as f, traverseFrom as g, insertEdge as h, NotificationStore as i, debugTimed as k, inferToolType as l, initGraphSchema as m, PathRepository as n, BranchRepository as o, getNodesByType as p, initPathSchema as r, extractServerName as s, ToolRegistryRepository as t, countEdgesForNode as u, SaveGuard as v, rowToObservation as w, SearchEngine as x, jaccardSimilarity as y };
-//# sourceMappingURL=tool-registry-FHfSTose.mjs.map
+export { hybridSearch as A, getNodesByType as C, upsertNode as D, traverseFrom as E, openDatabase as F, MIGRATIONS as I, runMigrations as L, SessionRepository as M, ObservationRepository as N, SaveGuard as O, rowToObservation as P, debug as R, getNodeByNameAndType as S, insertEdge as T, detectStaleness as _, ResearchBufferRepository as a, countEdgesForNode as b, inferScope as c, executePurge as d, findAnalysis as f, saveHygieneConfig as g, resetHygieneConfig as h, NotificationStore as i, SearchEngine as j, jaccardSimilarity as k, inferToolType as l, loadHygieneConfig as m, PathRepository as n, BranchRepository as o, runAutoCleanup as p, initPathSchema as r, extractServerName as s, ToolRegistryRepository as t, analyzeObservations as u, flagStaleObservation as v, initGraphSchema as w, getEdgesForNode as x, initStalenessSchema as y, debugTimed as z };
+//# sourceMappingURL=tool-registry-e710BvXq.mjs.map
