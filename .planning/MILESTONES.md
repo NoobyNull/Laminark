@@ -66,5 +66,19 @@
 - Path detail panel with ordered waypoint timeline and KISS summary display
 - Toggle control for showing/hiding path overlay without affecting knowledge graph
 
+### v2.3 — Codebase Knowledge Pre-loading
+
+**Started:** 2026-02-23
+**Phases:** 22-26
+**Last phase number:** 26
+
+**Target:**
+- Bundled codebase mapper (adapted from GSD, with attribution) producing 7 structured analysis docs
+- Knowledge ingestion pipeline: markdown docs → per-project queryable reference memories
+- Hook-driven incremental updates on Write/Edit for real-time freshness
+- Session-start git-diff catch-up for external changes
+- MCP tool for on-demand re-indexing
+- GSD interop: detect and ingest existing .planning/codebase/ output when present
+
 ---
 

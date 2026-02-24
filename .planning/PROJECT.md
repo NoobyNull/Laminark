@@ -10,26 +10,25 @@ You never lose context. No matter how many tangents, topic jumps, or scattered s
 
 ## Current State
 
-Building v2.2. Laminark is a globally-installed Claude Code plugin with persistent adaptive memory, intelligent tool routing, and AI-powered observation enrichment via Claude Agent SDK.
+Building v2.3. Laminark is a globally-installed Claude Code plugin with persistent adaptive memory, intelligent tool routing, AI-powered observation enrichment via Claude Agent SDK, and debug resolution path tracking.
 
 **Shipped versions:**
 - v1.0 Persistent Adaptive Memory (Phases 1-8, 2026-02-09)
 - v2.0 Global Tool Intelligence (Phases 9-16, 2026-02-10)
 - v2.1 Agent SDK Migration (Phases 17-18, 2026-02-14)
+- v2.2 Debug Resolution Paths (Phases 19-21, 2026-02-14)
 
-## Current Milestone: v2.2 Debug Resolution Paths
+## Current Milestone: v2.3 Codebase Knowledge Pre-loading
 
-**Goal:** Make the debugging journey a first-class knowledge artifact — Laminark automatically tracks the path from problem to resolution, captures what was tried and why it failed, and distills the KISS fix.
+**Goal:** Eliminate redundant file exploration by pre-loading structured codebase knowledge into Laminark's memory. Claude queries local memories instead of re-reading files every session — the "supply side" that makes memory-first workflows actually work.
 
 **Target features:**
-- Automatic debug session detection (Haiku recognizes error/failure patterns in PostToolUse stream)
-- Automatic waypoint capture (breadcrumbs recorded from tool activity — edits, tests, reverts, approach changes)
-- Automatic resolution detection (tests passing, error pattern stops, clean commit)
-- KISS summary generation (Haiku distills "next time, just do X" from the messy journey)
-- Path as first-class graph entity (connected to files, decisions, problems touched along the way)
-- MCP tools for explicit control (path start/resolve/show) and querying past paths
-- D3 graph overlay for visualizing breadcrumb trails on the knowledge graph
-- Multi-layer path dimensions (logical, programmatic, development)
+- Codebase mapping (bundled from GSD's map-codebase, with attribution) that produces structured analysis docs
+- Automatic ingestion of mapping output into per-project queryable reference memories
+- Hook-driven incremental updates — PostToolUse on Write/Edit re-analyzes changed files in background
+- Session-start catch-up — detect git changes since last index, update affected knowledge
+- MCP tool for on-demand re-indexing of specific files or full project
+- GSD interop — if GSD is installed, use its map-codebase output; if not, use bundled mapper
 
 ## Requirements
 
@@ -61,14 +60,13 @@ Building v2.2. Laminark is a globally-installed Claude Code plugin with persiste
 
 ### Active
 
-- [ ] Automatic debug session detection from error/failure patterns
-- [ ] Automatic waypoint capture from PostToolUse activity stream
-- [ ] Automatic resolution detection and path closure
-- [ ] KISS summary generation via Haiku on path resolution
-- [ ] Path as first-class graph entity with typed relationships
-- [ ] MCP tools: path start, path resolve, path show
-- [ ] D3 graph breadcrumb trail overlay
-- [ ] Multi-layer path dimensions (logical, programmatic, development)
+- [ ] Codebase mapping agents that produce structured analysis (bundled from GSD, with attribution)
+- [ ] Ingestion pipeline: mapping docs → per-project reference memories in SQLite
+- [ ] Hook-driven incremental updates on Write/Edit (background re-analysis of changed files)
+- [ ] Session-start git-diff catch-up for changes made outside Claude
+- [ ] MCP tool for on-demand re-index (file, directory, or full project)
+- [ ] GSD interop: detect and ingest existing .planning/codebase/ output
+- [ ] CLAUDE.md guidance: instruct Claude to query memories before file exploration
 
 ### Out of Scope
 
@@ -117,14 +115,18 @@ Claude Code tool scoping model (discovered during V2 planning):
 | Replace regex extraction with Haiku AI | Regex rules too brittle, Haiku provides semantic understanding | ✓ Good |
 | Claude Agent SDK over Anthropic SDK | Routes through subscription auth, no separate API key needed | ✓ Good |
 | V2 session API over V1 query() | Avoids 12s cold-start per call with persistent session singleton | ✓ Good |
+| Bundle GSD map-codebase rather than build custom indexer | GSD already solves parallel codebase analysis with proven templates; avoid reinventing | Pending |
+| Standalone with GSD interop | Laminark works without GSD but uses its output when present; no hard dependency | Pending |
+| Two-pronged freshness (hooks + session-start) | Covers both Claude-made changes (immediate) and external changes (catch-up) | Pending |
+| Per-project knowledge scoping | Each project gets its own indexed knowledge set, isolated from others | Pending |
 
 ## Context
 
-Shipped through v2.1 with 18 phases, 55 plans total. Tech stack: Node.js + TypeScript + SQLite (WAL + FTS5 + sqlite-vec) + Hono web server + D3/vanilla JS UI. All observation enrichment (entity extraction, relationship inference, classification) now flows through Haiku AI via Claude Agent SDK V2 session API — no separate API key required.
+Shipped through v2.2 with 21 phases, 64 plans total. Tech stack: Node.js + TypeScript + SQLite (WAL + FTS5 + sqlite-vec) + Hono web server + D3/vanilla JS UI. All observation enrichment (entity extraction, relationship inference, classification) now flows through Haiku AI via Claude Agent SDK V2 session API — no separate API key required.
 
-v2.2 insight: During debugging, developers accumulate layers of attempted fixes — patches on patches — and the final codebase carries cruft even when the actual solution was simple. The principle: the knowledge graph gets the full story (every attempt, failure, reasoning), the codebase gets only the KISS result. Debug paths are first-class memory artifacts, not throwaway noise. This extends Laminark's core value ("you never lose context") to the debugging journey itself.
+v2.3 insight: Laminark captures knowledge well during sessions (observations, debug paths, decisions), but the biggest cost savings come from the **supply side** — pre-loading codebase knowledge so Claude doesn't waste tokens re-exploring files every session. The pattern: GSD's map-codebase already solves the "analyze a codebase" problem with parallel agents producing 7 structured docs. Laminark should bundle this capability (with GSD attribution), ingest the output into queryable per-project memories, and keep them fresh via hooks. This turns Laminark from "remembers what happened" into "already knows the codebase."
 
-Key constraint: path detection and waypoint capture must be fully automatic ("vibe tool"). Errors during any task constitute debugging — not just explicit debug sessions. Haiku analyzes the PostToolUse stream to detect patterns: repeated failures, reverts, approach changes, resolution.
+Key constraint: must work standalone (no GSD dependency required) but interop with GSD when present. The mapping agents use Claude Code's Task tool to spawn subagents — Laminark bundles the agent definitions and templates. Freshness is two-pronged: immediate PostToolUse updates for files changed by Claude, session-start git-diff catch-up for changes made outside Claude (editor, other tools, git pulls).
 
 ---
-*Last updated: 2026-02-14 after v2.2 milestone start*
+*Last updated: 2026-02-23 after v2.3 milestone start*

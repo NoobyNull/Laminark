@@ -6,6 +6,7 @@
 - ✅ **v2.0 Global Tool Intelligence** — Phases 9-16 (shipped 2026-02-10)
 - ✅ **v2.1 Agent SDK Migration** — Phases 17-18 (shipped 2026-02-14)
 - ✅ **v2.2 Debug Resolution Paths** — Phases 19-21 (shipped 2026-02-14)
+- 🔄 **v2.3 Codebase Knowledge Pre-loading** — Phases 22-26
 
 ## Phases
 
@@ -54,6 +55,46 @@
 
 </details>
 
+### v2.3 Codebase Knowledge Pre-loading (Phases 22-26)
+
+**Goal:** Eliminate redundant file exploration by pre-loading structured codebase knowledge into queryable memories. Claude queries Laminark instead of re-reading files every session.
+
+- [ ] Phase 22: Bundled Codebase Mapper
+  - **Goal:** Laminark can map a codebase without external dependencies
+  - Port GSD's map-codebase agent definitions and templates into Laminark plugin (with attribution)
+  - Create /laminark:map-codebase skill that spawns 4 parallel mapper agents (tech, architecture, quality, concerns)
+  - Produce 7 structured docs: STACK.md, ARCHITECTURE.md, STRUCTURE.md, CONVENTIONS.md, TESTING.md, INTEGRATIONS.md, CONCERNS.md
+  - GSD detection: if GSD is installed, delegate to its map-codebase instead of bundled version
+
+- [ ] Phase 23: Knowledge Ingestion Pipeline
+  - **Goal:** Mapping output becomes queryable per-project memories
+  - Parse structured markdown sections into discrete reference memories (kind="reference")
+  - Each section → separate memory with title, project tag, source doc reference
+  - Idempotent ingestion: re-running replaces stale memories by matching title+project
+  - Ingest from either .laminark/codebase/ (bundled mapper output) or .planning/codebase/ (GSD output)
+  - New DB columns/tags for codebase knowledge identification
+
+- [ ] Phase 24: Hook-Driven Incremental Updates
+  - **Goal:** Knowledge stays current as Claude edits files
+  - PostToolUse hook on Write/Edit extracts file path from tool input
+  - Background re-analysis: determine which knowledge sections the file affects
+  - Haiku-powered targeted update: re-analyze only the relevant section(s), update memory
+  - Non-blocking: updates happen after tool response, in background processing queue
+
+- [ ] Phase 25: Session-Start Catch-Up
+  - **Goal:** External changes (editor, git pull, other tools) don't leave knowledge stale
+  - On SessionStart, run `git diff --name-only` against last-indexed commit hash
+  - Queue changed files for incremental re-analysis (same pipeline as Phase 24)
+  - Store last-indexed commit hash per project in DB
+  - If no prior index exists, include suggestion in context injection to run /laminark:map-codebase
+
+- [ ] Phase 26: MCP Tool & Context Integration
+  - **Goal:** Claude can explicitly trigger re-indexing and codebase knowledge flows into context injection
+  - `index_project` MCP tool: full or targeted re-index on demand
+  - Update context injection to prioritize codebase knowledge for queries about project structure
+  - Update CLAUDE.md template/guidance: instruct Claude to query Laminark before file exploration
+  - Web UI: index status page showing per-project mapping freshness and coverage
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -79,3 +120,8 @@
 | 19. Path Detection & Storage | v2.2 | 3/3 | Complete | 2026-02-14 |
 | 20. Intelligence & MCP Tools | v2.2 | 3/3 | Complete | 2026-02-14 |
 | 21. Graph Visualization | v2.2 | 3/3 | Complete | 2026-02-14 |
+| 22. Bundled Codebase Mapper | v2.3 | 0/? | Pending | — |
+| 23. Knowledge Ingestion Pipeline | v2.3 | 0/? | Pending | — |
+| 24. Hook-Driven Incremental Updates | v2.3 | 0/? | Pending | — |
+| 25. Session-Start Catch-Up | v2.3 | 0/? | Pending | — |
+| 26. MCP Tool & Context Integration | v2.3 | 0/? | Pending | — |
