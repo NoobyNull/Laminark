@@ -36,6 +36,8 @@ export interface Migration {
  * Migration 018: Tool registry FTS5 + vec0 tables for hybrid search on tool descriptions.
  * Migration 019: Add status column (active/stale/demoted) to tool_registry for staleness management.
  * Migration 020: Debug path tables (debug_paths + path_waypoints) for resolution path tracking.
+ * Migration 021: Thought branch tables for coherent work unit tracking.
+ * Migration 022: Add trigger_hints column to tool_registry for proactive suggestion matching.
  */
 export const MIGRATIONS: Migration[] = [
   {
@@ -619,6 +621,13 @@ export const MIGRATIONS: Migration[] = [
         ON thought_branches(started_at DESC);
       CREATE INDEX IF NOT EXISTS idx_branch_observations_obs
         ON branch_observations(observation_id);
+    `,
+  },
+  {
+    version: 22,
+    name: 'add_tool_registry_trigger_hints',
+    up: `
+      ALTER TABLE tool_registry ADD COLUMN trigger_hints TEXT;
     `,
   },
 ];

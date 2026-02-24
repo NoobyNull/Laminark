@@ -41,11 +41,12 @@ export class ToolRegistryRepository {
 
     try {
       this.stmtUpsert = db.prepare(`
-        INSERT INTO tool_registry (name, tool_type, scope, source, project_hash, description, server_name, discovered_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        INSERT INTO tool_registry (name, tool_type, scope, source, project_hash, description, server_name, trigger_hints, discovered_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT (name, COALESCE(project_hash, ''))
         DO UPDATE SET
           description = COALESCE(excluded.description, tool_registry.description),
+          trigger_hints = COALESCE(excluded.trigger_hints, tool_registry.trigger_hints),
           source = excluded.source,
           status = 'active',
           updated_at = datetime('now')
@@ -204,6 +205,7 @@ export class ToolRegistryRepository {
         tool.projectHash,
         tool.description,
         tool.serverName,
+        tool.triggerHints,
       );
       debug('tool-registry', 'Upserted tool', { name: tool.name, scope: tool.scope });
     } catch (err) {

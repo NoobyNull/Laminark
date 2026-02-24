@@ -7,16 +7,44 @@ import type { DiscoveredTool, ToolScope } from '../shared/tool-types.js';
 
 /**
  * Extracts a description from YAML frontmatter in a Markdown file.
- * Reads only the first 500 bytes for performance.
+ * Reads only the first 2000 bytes for performance.
  */
 function extractDescription(filePath: string): string | null {
   try {
     const fd = readFileSync(filePath, { encoding: 'utf-8', flag: 'r' });
-    const head = fd.slice(0, 500);
+    const head = fd.slice(0, 2000);
     const fmMatch = head.match(/^---\n([\s\S]*?)\n---/);
     if (!fmMatch) return null;
     const descMatch = fmMatch[1].match(/description:\s*(.+)/);
     return descMatch ? descMatch[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extracts trigger hints from a command/skill file for proactive suggestion matching.
+ * Reads YAML frontmatter `description` + content from `<objective>` blocks.
+ * Returns a concatenated string or null if nothing found.
+ */
+export function extractTriggerHints(filePath: string): string | null {
+  try {
+    const content = readFileSync(filePath, { encoding: 'utf-8', flag: 'r' });
+    const head = content.slice(0, 2000);
+    const parts: string[] = [];
+
+    // Extract description from YAML frontmatter
+    const fmMatch = head.match(/^---\n([\s\S]*?)\n---/);
+    if (fmMatch) {
+      const descMatch = fmMatch[1].match(/description:\s*(.+)/);
+      if (descMatch) parts.push(descMatch[1].trim());
+    }
+
+    // Extract content from <objective> blocks
+    const objMatch = content.match(/<objective>([\s\S]*?)<\/objective>/);
+    if (objMatch) parts.push(objMatch[1].trim());
+
+    return parts.length > 0 ? parts.join(' ') : null;
   } catch {
     return null;
   }
@@ -50,6 +78,7 @@ function scanMcpJson(
         projectHash,
         description: null,
         serverName,
+        triggerHints: null,
       });
     }
   } catch (err) {
@@ -79,6 +108,7 @@ function scanClaudeJson(filePath: string, tools: DiscoveredTool[]): void {
           projectHash: null,
           description: null,
           serverName,
+          triggerHints: null,
         });
       }
     }
@@ -98,6 +128,7 @@ function scanClaudeJson(filePath: string, tools: DiscoveredTool[]): void {
               projectHash: null,
               description: null,
               serverName,
+              triggerHints: null,
             });
           }
         }
@@ -126,7 +157,9 @@ function scanCommands(
     for (const entry of entries) {
       if (entry.isFile() && entry.name.endsWith('.md')) {
         const cmdName = `/${basename(entry.name, '.md')}`;
-        const description = extractDescription(join(dirPath, entry.name));
+        const filePath = join(dirPath, entry.name);
+        const description = extractDescription(filePath);
+        const triggerHints = extractTriggerHints(filePath);
         tools.push({
           name: cmdName,
           toolType: 'slash_command',
@@ -135,6 +168,7 @@ function scanCommands(
           projectHash,
           description,
           serverName: null,
+          triggerHints,
         });
       } else if (entry.isDirectory()) {
         // One level deep: namespaced commands
@@ -144,7 +178,9 @@ function scanCommands(
           for (const subEntry of subEntries) {
             if (subEntry.isFile() && subEntry.name.endsWith('.md')) {
               const cmdName = `/${entry.name}:${basename(subEntry.name, '.md')}`;
-              const description = extractDescription(join(subDir, subEntry.name));
+              const subFilePath = join(subDir, subEntry.name);
+              const description = extractDescription(subFilePath);
+              const triggerHints = extractTriggerHints(subFilePath);
               tools.push({
                 name: cmdName,
                 toolType: 'slash_command',
@@ -153,6 +189,7 @@ function scanCommands(
                 projectHash,
                 description,
                 serverName: null,
+                triggerHints,
               });
             }
           }
@@ -185,6 +222,7 @@ function scanSkills(
         const skillMdPath = join(dirPath, entry.name, 'SKILL.md');
         if (existsSync(skillMdPath)) {
           const description = extractDescription(skillMdPath);
+          const triggerHints = extractTriggerHints(skillMdPath);
           tools.push({
             name: entry.name,
             toolType: 'skill',
@@ -193,6 +231,7 @@ function scanSkills(
             projectHash,
             description,
             serverName: null,
+            triggerHints,
           });
         }
       }
@@ -232,6 +271,7 @@ function scanInstalledPlugins(filePath: string, tools: DiscoveredTool[]): void {
           projectHash: null,
           description: null,
           serverName: null,
+          triggerHints: null,
         });
 
         // If the installation has an installPath, scan its .mcp.json for MCP servers

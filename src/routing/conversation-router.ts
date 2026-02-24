@@ -2,6 +2,7 @@ import type BetterSqlite3 from 'better-sqlite3';
 
 import type { RoutingConfig, RoutingSuggestion } from './types.js';
 import { DEFAULT_ROUTING_CONFIG } from './types.js';
+import { loadContextSnapshot, evaluateProactiveSuggestions } from './proactive-suggestions.js';
 import { evaluateLearnedPatterns } from './intent-patterns.js';
 import { evaluateHeuristic } from './heuristic-fallback.js';
 import { inferToolType } from '../hooks/tool-name-parser.js';
@@ -14,7 +15,8 @@ import { debug } from '../shared/debug.js';
 /**
  * ConversationRouter orchestrates tool suggestion routing.
  *
- * Combines two tiers of suggestion:
+ * Combines three tiers of suggestion:
+ * - Proactive suggestions: context-aware trigger hint matching (ROUT-05)
  * - Learned patterns: historical tool sequence matching (ROUT-01)
  * - Heuristic fallback: keyword-based cold-start matching (ROUT-04)
  *
@@ -125,37 +127,52 @@ export class ConversationRouter {
 
     const suggestableNames = new Set(suggestableTools.map((t: ToolRegistryRow) => t.name));
 
-    // 9. Try learned patterns first (if enough historical data)
+    // 9. Tier 0: Try proactive suggestions first (context-aware rules)
     let suggestion: RoutingSuggestion | null = null;
 
-    const eventCount = this.countRecentEvents();
-    if (eventCount >= this.config.minEventsForLearned) {
-      suggestion = evaluateLearnedPatterns(
-        this.db,
-        sessionId,
-        this.projectHash,
-        suggestableNames,
-        this.config.confidenceThreshold,
-      );
+    const contextSnapshot = loadContextSnapshot(this.db, this.projectHash, sessionId);
+    suggestion = evaluateProactiveSuggestions(
+      contextSnapshot,
+      suggestableTools,
+      this.config.confidenceThreshold,
+    );
+
+    // 10. Tier 1: Try learned patterns if no proactive suggestion (if enough historical data)
+    if (!suggestion) {
+      const eventCount = this.countRecentEvents();
+      if (eventCount >= this.config.minEventsForLearned) {
+        suggestion = evaluateLearnedPatterns(
+          this.db,
+          sessionId,
+          this.projectHash,
+          suggestableNames,
+          this.config.confidenceThreshold,
+        );
+      }
     }
 
-    // 10. Fall back to heuristic if no learned suggestion
+    // 11. Tier 2: Fall back to heuristic if no proactive or learned suggestion
     if (!suggestion) {
       const recentObservations = this.getRecentObservations(sessionId);
       suggestion = evaluateHeuristic(recentObservations, suggestableTools, this.config.confidenceThreshold);
     }
 
-    // 11. If no suggestion from either tier: return
+    // 12. If no suggestion from any tier: return
     if (!suggestion) return;
 
-    // 12. Confidence gate (belt-and-suspenders -- tiers already check, but guard here too)
+    // 13. Confidence gate (belt-and-suspenders -- tiers already check, but guard here too)
     if (suggestion.confidence < this.config.confidenceThreshold) return;
 
-    // 13. Deliver via NotificationStore
+    // 14. Deliver via NotificationStore
     const notifStore = new NotificationStore(this.db);
-    const description = suggestion.toolDescription ? ` -- ${suggestion.toolDescription}` : '';
-    const usageHint = suggestion.tier === 'learned' ? ` (${suggestion.reason})` : '';
-    const message = `Tool suggestion: ${suggestion.toolName}${description}${usageHint}`;
+    let message: string;
+    if (suggestion.tier === 'proactive') {
+      message = `[Laminark suggests] ${suggestion.reason} -- try ${suggestion.toolName}`;
+    } else {
+      const description = suggestion.toolDescription ? ` -- ${suggestion.toolDescription}` : '';
+      const usageHint = suggestion.tier === 'learned' ? ` (${suggestion.reason})` : '';
+      message = `Tool suggestion: ${suggestion.toolName}${description}${usageHint}`;
+    }
     notifStore.add(this.projectHash, message);
 
     debug('routing', 'Suggestion delivered', {
@@ -164,7 +181,7 @@ export class ConversationRouter {
       confidence: suggestion.confidence,
     });
 
-    // 14. Update routing state: increment suggestions_made, reset cooldown
+    // 15. Update routing state: increment suggestions_made, reset cooldown
     state.suggestionsMade++;
     state.lastSuggestionAt = new Date().toISOString();
     state.toolCallsSinceSuggestion = 0;

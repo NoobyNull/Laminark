@@ -10,7 +10,7 @@ export interface RoutingSuggestion {
   /** Confidence score from 0.0 to 1.0. */
   confidence: number;
   /** Which routing tier produced this suggestion. */
-  tier: 'heuristic' | 'learned';
+  tier: 'heuristic' | 'learned' | 'proactive';
   /** Human-readable explanation for why this tool was suggested. */
   reason: string;
 }

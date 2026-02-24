@@ -91,6 +91,7 @@ export function processPostToolUseFiltered(
         projectHash: projectHash ?? null,
         description: null,
         serverName: extractServerName(toolName),
+        triggerHints: null,
       }, sessionId ?? null, !isFailure);
 
       // STAL-03: Failure-driven demotion / success restoration
@@ -310,7 +311,7 @@ async function main(): Promise<void> {
         handleSessionEnd(input, sessionRepo);
         break;
       case 'Stop':
-        handleStop(input, obsRepo, sessionRepo);
+        handleStop(input, obsRepo, sessionRepo, laminarkDb.db, projectHash);
         break;
       default:
         debug('hook', 'Unknown hook event', { eventName });

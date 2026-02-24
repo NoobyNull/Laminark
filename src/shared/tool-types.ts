@@ -20,6 +20,7 @@ export interface DiscoveredTool {
   projectHash: string | null;
   description: string | null;
   serverName: string | null;  // for MCP servers/tools: the server name key
+  triggerHints: string | null;  // machine-oriented context for proactive suggestion matching
 }
 
 /**
@@ -34,6 +35,7 @@ export interface ToolRegistryRow {
   project_hash: string | null;
   description: string | null;
   server_name: string | null;
+  trigger_hints: string | null;
   usage_count: number;
   last_used_at: string | null;
   discovered_at: string;

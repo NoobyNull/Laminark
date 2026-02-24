@@ -356,6 +356,7 @@ describe('tool ranking and sub-budget', () => {
         projectHash: null,
         description: null,
         serverName: `server${i}`,
+        triggerHints: null,
       });
     }
 
@@ -485,6 +486,7 @@ describe('tool ranking and sub-budget', () => {
         projectHash: PROJECT_HASH,
         description: null,
         serverName: null,
+        triggerHints: null,
       });
       toolRegistry.recordOrCreate(name, {
         toolType: 'slash_command',
