@@ -67,6 +67,7 @@
               <button class="layout-btn" data-layout="hierarchical" title="Top-down tree layout">Hierarchical</button>
               <button class="layout-btn" data-layout="concentric" title="Rings by entity type">Concentric</button>
               <button class="layout-btn" data-layout="communities" title="Community-grouped layout">Communities</button>
+              <button class="layout-btn" data-layout="detangle" title="Minimize edge crossings">Detangle</button>
             </div>
             <button id="edge-labels-btn" class="edge-labels-btn active" title="Toggle edge labels">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -179,409 +180,518 @@
     </div>
 
     <div id="settings-view" class="view-container">
-      <div class="settings-container">
-        <h2 class="settings-heading">Database Statistics</h2>
-        <div id="db-stats-grid" class="db-stats-grid">
-          <p class="empty-state">Loading statistics...</p>
-        </div>
+      <div class="settings-layout">
+        <nav class="settings-sidebar">
+          <div class="settings-sidebar-item active" data-settings-tab="overview">Overview</div>
+          <div class="settings-sidebar-item" data-settings-tab="database">Database</div>
+          <div class="settings-sidebar-item" data-settings-tab="intelligence">Intelligence</div>
+          <div class="settings-sidebar-item" data-settings-tab="configuration">Configuration</div>
+          <div class="settings-sidebar-item settings-sidebar-item-danger" data-settings-tab="danger">Danger Zone</div>
+        </nav>
 
-        <div id="settings-success" class="settings-success hidden"></div>
+        <div class="settings-content">
+          <div id="settings-success" class="settings-success hidden"></div>
 
-        <!-- Database Hygiene -->
-        <div id="hygiene-section" class="config-section collapsed">
-          <div class="config-section-header" data-config-toggle="hygiene">
-            <h3><span class="toggle-icon">&#9660;</span> Database Hygiene</h3>
-            <span id="hy-status" class="config-section-status disabled">Not scanned</span>
-          </div>
-          <div class="config-section-body" id="hy-body">
-            <p class="config-field-desc" style="margin-bottom: 12px;">
-              Analyze observations for deletion candidates scored on 6 signals: orphaned, island node, noise classified, short content, auto-captured, stale.
-            </p>
-
-            <div class="config-field">
-              <div class="config-field-label">Tier Filter</div>
-              <div class="config-field-desc">Which confidence tier to analyze</div>
-              <div class="config-radio-group" id="hy-tier">
-                <button class="config-radio active" data-value="high">High (&ge; 0.7)</button>
-                <button class="config-radio" data-value="medium">Medium+ (&ge; 0.5)</button>
-                <button class="config-radio" data-value="all">All</button>
-              </div>
+          <!-- Overview Panel -->
+          <div class="settings-panel active" data-settings-panel="overview">
+            <h2 class="settings-heading">Database Statistics</h2>
+            <div id="db-stats-grid" class="db-stats-grid">
+              <p class="empty-state">Loading statistics...</p>
             </div>
 
-            <div class="config-actions" style="margin-bottom: 16px;">
-              <button class="btn-config-save" id="hy-scan">Scan Now</button>
+            <h2 class="settings-heading" style="margin-top:24px;">System Info</h2>
+            <div id="system-info-grid" class="db-stats-grid system-info-grid">
+              <p class="empty-state">Loading...</p>
             </div>
 
-            <div id="hy-results" class="hygiene-results hidden">
-              <div id="hy-summary" class="hygiene-summary"></div>
-              <div id="hy-table-wrap" class="hygiene-table-wrap">
-                <table id="hy-table" class="hygiene-table">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Kind</th>
-                      <th>Source</th>
-                      <th>Confidence</th>
-                      <th>Signals</th>
-                      <th>Preview</th>
-                    </tr>
-                  </thead>
-                  <tbody id="hy-table-body"></tbody>
-                </table>
-              </div>
-              <div class="config-actions" style="margin-top: 12px;">
-                <button class="btn-danger" id="hy-purge">Purge Selected Tier</button>
-              </div>
+            <h2 class="settings-heading" style="margin-top:24px;">Database Storage</h2>
+            <div id="db-storage-grid" class="db-stats-grid">
+              <p class="empty-state">Loading...</p>
+            </div>
+
+            <h2 class="settings-heading" style="margin-top:24px;">Process Memory</h2>
+            <div id="process-memory-grid" class="db-stats-grid">
+              <p class="empty-state">Loading...</p>
             </div>
           </div>
-        </div>
 
-        <!-- Tool Response Verbosity Config -->
-        <div id="tool-verbosity-section" class="config-section collapsed">
-          <div class="config-section-header" data-config-toggle="tool-verbosity">
-            <h3><span class="toggle-icon">&#9660;</span> Tool Response Verbosity</h3>
-            <span id="tv-status" class="config-section-status enabled">Standard</span>
-          </div>
-          <div class="config-section-body" id="tv-body">
-            <div class="config-field">
-              <div class="config-field-label">Verbosity Level</div>
-              <div class="config-field-desc">Controls how much detail MCP tool responses include</div>
-              <div class="config-radio-group" id="tv-level">
-                <button class="config-radio" data-value="1">Minimal</button>
-                <button class="config-radio active" data-value="2">Standard</button>
-                <button class="config-radio" data-value="3">Verbose</button>
-              </div>
-            </div>
+          <!-- Database Panel -->
+          <div class="settings-panel" data-settings-panel="database">
+            <h2 class="settings-heading">Database Hygiene</h2>
+            <div id="hygiene-section" class="config-section">
+              <div class="config-section-body" id="hy-body" style="border-top:none;">
+                <p class="config-field-desc" style="margin-bottom: 12px;">
+                  Analyze observations for deletion candidates scored on 6 signals: orphaned, island node, noise classified, short content, auto-captured, stale.
+                </p>
+                <span id="hy-status" class="config-section-status disabled" style="margin-bottom:12px;display:inline-block;">Not scanned</span>
 
-            <div class="config-field">
-              <div class="config-field-desc" style="margin-top: 4px; line-height: 1.6;">
-                <strong>Minimal:</strong> Just confirms the tool ran<br>
-                <strong>Standard:</strong> Shows titles and key info<br>
-                <strong>Verbose:</strong> Full text with all details
-              </div>
-            </div>
-
-            <div class="config-actions">
-              <button class="btn-config-save" id="tv-save">Save</button>
-              <button class="btn-config-defaults" id="tv-defaults">Reset to Defaults</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Topic Detection Config -->
-        <div id="topic-detection-section" class="config-section collapsed">
-          <div class="config-section-header" data-config-toggle="topic-detection">
-            <h3><span class="toggle-icon">&#9660;</span> Topic Detection</h3>
-            <span id="td-status" class="config-section-status enabled">Enabled</span>
-          </div>
-          <div class="config-section-body" id="td-body">
-            <div class="config-field">
-              <div class="config-field-header">
-                <span class="config-field-label">Enabled</span>
-                <label class="config-toggle">
-                  <input type="checkbox" id="td-enabled" checked>
-                  <span class="config-toggle-slider"></span>
-                </label>
-              </div>
-              <div class="config-field-desc">Master toggle for topic shift detection</div>
-            </div>
-
-            <div id="td-fields">
-              <div class="config-field">
-                <div class="config-field-label">Sensitivity Preset</div>
-                <div class="config-field-desc">Controls how easily topic shifts are detected</div>
-                <div class="config-radio-group" id="td-preset">
-                  <button class="config-radio" data-value="sensitive">Sensitive</button>
-                  <button class="config-radio active" data-value="balanced">Balanced</button>
-                  <button class="config-radio" data-value="relaxed">Relaxed</button>
-                </div>
-              </div>
-
-              <div class="config-field">
-                <div class="config-field-label">Sensitivity Multiplier</div>
-                <div class="config-field-desc">Multiplied with EWMA stddev for threshold (auto-filled from preset)</div>
-                <div class="config-field-value">
-                  <input type="number" id="td-multiplier" class="config-number-input" step="0.1" min="0.1" value="1.5">
-                </div>
-              </div>
-
-              <div class="config-field">
-                <div class="config-field-header">
-                  <span class="config-field-label">Manual Threshold</span>
-                  <label class="config-toggle">
-                    <input type="checkbox" id="td-manual-enabled">
-                    <span class="config-toggle-slider"></span>
-                  </label>
-                </div>
-                <div class="config-field-desc">Override adaptive threshold with a fixed value</div>
-                <div class="config-field-value">
-                  <input type="number" id="td-manual-value" class="config-number-input" step="0.01" min="0" value="0.3" disabled>
-                </div>
-              </div>
-
-              <div class="config-field">
-                <div class="config-field-label">EWMA Alpha</div>
-                <div class="config-field-desc">Decay factor for exponentially weighted moving average (0.01 - 1.0)</div>
-                <div class="config-field-value">
-                  <input type="range" id="td-ewma" class="config-slider" min="0.01" max="1" step="0.01" value="0.3">
-                  <span id="td-ewma-val" class="config-slider-value">0.30</span>
-                </div>
-              </div>
-
-              <div class="config-field">
-                <div class="config-field-label">Threshold Bounds</div>
-                <div class="config-field-desc">Hard min/max limits for the adaptive threshold</div>
-                <div class="config-field-row">
-                  <div class="config-field-inline">
-                    <span>Min</span>
-                    <input type="number" id="td-bounds-min" class="config-number-input" step="0.01" min="0.05" max="0.95" value="0.15">
+                <div class="config-field">
+                  <div class="config-field-label">Tier Filter</div>
+                  <div class="config-field-desc">Which confidence tier to analyze</div>
+                  <div class="config-radio-group" id="hy-tier">
+                    <button class="config-radio active" data-value="high">High (&ge; 0.7)</button>
+                    <button class="config-radio" data-value="medium">Medium+ (&ge; 0.5)</button>
+                    <button class="config-radio" data-value="all">All</button>
                   </div>
-                  <div class="config-field-inline">
-                    <span>Max</span>
-                    <input type="number" id="td-bounds-max" class="config-number-input" step="0.01" min="0.05" max="0.95" value="0.6">
+                </div>
+
+                <div class="config-actions" style="margin-bottom: 16px;">
+                  <button class="btn-config-save" id="hy-scan">Scan Now</button>
+                </div>
+
+                <div id="hy-results" class="hygiene-results hidden">
+                  <div id="hy-summary" class="hygiene-summary"></div>
+                  <div id="hy-table-wrap" class="hygiene-table-wrap">
+                    <table id="hy-table" class="hygiene-table">
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>Kind</th>
+                          <th>Source</th>
+                          <th>Confidence</th>
+                          <th>Signals</th>
+                          <th>Preview</th>
+                        </tr>
+                      </thead>
+                      <tbody id="hy-table-body"></tbody>
+                    </table>
+                  </div>
+                  <div class="config-actions" style="margin-top: 12px;">
+                    <button class="btn-danger" id="hy-purge">Purge Selected Tier</button>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div class="config-actions">
-              <button class="btn-config-save" id="td-save">Save</button>
-              <button class="btn-config-defaults" id="td-defaults">Reset to Defaults</button>
-            </div>
-          </div>
-        </div>
+            <h2 class="settings-heading" style="margin-top:24px;">Hygiene Settings</h2>
+            <div id="hygiene-config-section" class="config-section">
+              <div class="config-section-body" id="hc-body" style="border-top:none;">
+                <p class="config-field-desc" style="margin-bottom: 12px;">
+                  Configure signal weights and tier thresholds used to score deletion candidates.
+                </p>
 
-        <!-- Graph Extraction Config -->
-        <div id="graph-extraction-section" class="config-section collapsed">
-          <div class="config-section-header" data-config-toggle="graph-extraction">
-            <h3><span class="toggle-icon">&#9660;</span> Graph Extraction</h3>
-            <span id="ge-status" class="config-section-status enabled">Enabled</span>
-          </div>
-          <div class="config-section-body" id="ge-body">
-            <div class="config-field">
-              <div class="config-field-header">
-                <span class="config-field-label">Enabled</span>
-                <label class="config-toggle">
-                  <input type="checkbox" id="ge-enabled" checked>
-                  <span class="config-toggle-slider"></span>
-                </label>
-              </div>
-              <div class="config-field-desc">Master toggle for knowledge graph extraction</div>
-            </div>
+                <div class="config-field-group-label">Signal Weights</div>
 
-            <div id="ge-fields">
-              <div class="config-field-group-label">Temporal Decay</div>
-
-              <div class="config-field">
-                <div class="config-field-label">Half-Life (days)</div>
-                <div class="config-field-desc">How many days until edge weight decays to 50%</div>
-                <div class="config-field-value">
-                  <input type="number" id="ge-halflife" class="config-number-input" min="1" value="30">
-                </div>
-              </div>
-
-              <div class="config-field">
-                <div class="config-field-label">Minimum Floor</div>
-                <div class="config-field-desc">Lowest weight an edge can decay to before deletion check</div>
-                <div class="config-field-value">
-                  <input type="range" id="ge-minfloor" class="config-slider" min="0" max="0.99" step="0.01" value="0.05">
-                  <span id="ge-minfloor-val" class="config-slider-value">0.05</span>
-                </div>
-              </div>
-
-              <div class="config-field">
-                <div class="config-field-label">Deletion Threshold</div>
-                <div class="config-field-desc">Edges below this weight are deleted during curation</div>
-                <div class="config-field-value">
-                  <input type="range" id="ge-delthresh" class="config-slider" min="0" max="0.99" step="0.01" value="0.08">
-                  <span id="ge-delthresh-val" class="config-slider-value">0.08</span>
-                </div>
-              </div>
-
-              <div class="config-field">
-                <div class="config-field-label">Max Age (days)</div>
-                <div class="config-field-desc">Maximum age before forced deletion regardless of weight</div>
-                <div class="config-field-value">
-                  <input type="number" id="ge-maxage" class="config-number-input" min="1" value="180">
-                </div>
-              </div>
-
-              <div class="config-field-group-label">Fuzzy Deduplication</div>
-
-              <div class="config-field">
-                <div class="config-field-label">Max Levenshtein Distance</div>
-                <div class="config-field-desc">Maximum edit distance for typo matching</div>
-                <div class="config-field-value">
-                  <input type="number" id="ge-levenshtein" class="config-number-input" min="1" max="10" value="2">
-                </div>
-              </div>
-
-              <div class="config-field">
-                <div class="config-field-label">Jaccard Threshold</div>
-                <div class="config-field-desc">Minimum word-overlap similarity for dedup matching</div>
-                <div class="config-field-value">
-                  <input type="range" id="ge-jaccard" class="config-slider" min="0" max="1" step="0.01" value="0.7">
-                  <span id="ge-jaccard-val" class="config-slider-value">0.70</span>
-                </div>
-              </div>
-
-              <div class="config-field-group-label">Quality Gate</div>
-
-              <div class="config-field">
-                <div class="config-field-label">Max Files per Observation</div>
-                <div class="config-field-desc">Maximum File nodes extracted from a single observation</div>
-                <div class="config-field-value">
-                  <input type="number" id="ge-maxfiles" class="config-number-input" min="1" value="5">
-                </div>
-              </div>
-
-              <div class="config-field">
-                <div class="config-field-label">Type Confidence Thresholds</div>
-                <div class="config-field-desc">Minimum confidence to persist each entity type</div>
-                <div class="config-threshold-grid" id="ge-thresholds">
+                <div class="config-threshold-grid" id="hc-weights">
                   <div class="config-threshold-row">
-                    <span class="config-threshold-label">File</span>
-                    <input type="range" class="config-slider" data-type="File" min="0" max="1" step="0.01" value="0.95">
-                    <span class="config-slider-value">0.95</span>
+                    <span class="config-threshold-label">Orphaned</span>
+                    <input type="range" class="config-slider" id="hc-w-orphaned" min="0" max="1" step="0.01" value="0.30">
+                    <span class="config-slider-value" id="hc-w-orphaned-val">0.30</span>
                   </div>
                   <div class="config-threshold-row">
-                    <span class="config-threshold-label">Project</span>
-                    <input type="range" class="config-slider" data-type="Project" min="0" max="1" step="0.01" value="0.8">
-                    <span class="config-slider-value">0.80</span>
+                    <span class="config-threshold-label">Island Node</span>
+                    <input type="range" class="config-slider" id="hc-w-islandNode" min="0" max="1" step="0.01" value="0.25">
+                    <span class="config-slider-value" id="hc-w-islandNode-val">0.25</span>
                   </div>
                   <div class="config-threshold-row">
-                    <span class="config-threshold-label">Reference</span>
-                    <input type="range" class="config-slider" data-type="Reference" min="0" max="1" step="0.01" value="0.85">
-                    <span class="config-slider-value">0.85</span>
+                    <span class="config-threshold-label">Noise</span>
+                    <input type="range" class="config-slider" id="hc-w-noiseClassified" min="0" max="1" step="0.01" value="0.25">
+                    <span class="config-slider-value" id="hc-w-noiseClassified-val">0.25</span>
                   </div>
                   <div class="config-threshold-row">
-                    <span class="config-threshold-label">Decision</span>
-                    <input type="range" class="config-slider" data-type="Decision" min="0" max="1" step="0.01" value="0.65">
-                    <span class="config-slider-value">0.65</span>
+                    <span class="config-threshold-label">Short Content</span>
+                    <input type="range" class="config-slider" id="hc-w-shortContent" min="0" max="1" step="0.01" value="0.10">
+                    <span class="config-slider-value" id="hc-w-shortContent-val">0.10</span>
                   </div>
                   <div class="config-threshold-row">
-                    <span class="config-threshold-label">Problem</span>
-                    <input type="range" class="config-slider" data-type="Problem" min="0" max="1" step="0.01" value="0.6">
-                    <span class="config-slider-value">0.60</span>
+                    <span class="config-threshold-label">Auto-Captured</span>
+                    <input type="range" class="config-slider" id="hc-w-autoCaptured" min="0" max="1" step="0.01" value="0.10">
+                    <span class="config-slider-value" id="hc-w-autoCaptured-val">0.10</span>
                   </div>
                   <div class="config-threshold-row">
-                    <span class="config-threshold-label">Solution</span>
-                    <input type="range" class="config-slider" data-type="Solution" min="0" max="1" step="0.01" value="0.6">
-                    <span class="config-slider-value">0.60</span>
+                    <span class="config-threshold-label">Stale</span>
+                    <input type="range" class="config-slider" id="hc-w-stale" min="0" max="1" step="0.01" value="0.10">
+                    <span class="config-slider-value" id="hc-w-stale-val">0.10</span>
                   </div>
                 </div>
-              </div>
 
-              <div class="config-field">
-                <div class="config-field-label">File Non-Change Multiplier</div>
-                <div class="config-field-desc">Confidence multiplier for File paths from non-change observations</div>
-                <div class="config-field-value">
-                  <input type="range" id="ge-filenonchange" class="config-slider" min="0" max="1" step="0.01" value="0.74">
-                  <span id="ge-filenonchange-val" class="config-slider-value">0.74</span>
-                </div>
-              </div>
+                <div class="config-field-group-label">Thresholds</div>
 
-              <div class="config-field">
-                <div class="config-field-row">
-                  <div class="config-field-inline">
-                    <span>Min Name Length</span>
-                    <input type="number" id="ge-minname" class="config-number-input" min="1" value="3">
+                <div class="config-threshold-grid" id="hc-thresholds">
+                  <div class="config-threshold-row">
+                    <span class="config-threshold-label">High Tier &ge;</span>
+                    <input type="range" class="config-slider" id="hc-t-high" min="0" max="1" step="0.01" value="0.70">
+                    <span class="config-slider-value" id="hc-t-high-val">0.70</span>
                   </div>
-                  <div class="config-field-inline">
-                    <span>Max Name Length</span>
-                    <input type="number" id="ge-maxname" class="config-number-input" min="10" value="200">
+                  <div class="config-threshold-row">
+                    <span class="config-threshold-label">Medium Tier &ge;</span>
+                    <input type="range" class="config-slider" id="hc-t-medium" min="0" max="1" step="0.01" value="0.50">
+                    <span class="config-slider-value" id="hc-t-medium-val">0.50</span>
                   </div>
                 </div>
-              </div>
 
-              <div class="config-field-group-label">Relationship Detector</div>
+                <div class="config-field">
+                  <div class="config-field-label">Short Content Threshold (chars)</div>
+                  <div class="config-field-value">
+                    <input type="number" id="hc-short-threshold" class="config-number-input" min="0" value="50">
+                  </div>
+                </div>
 
-              <div class="config-field">
-                <div class="config-field-label">Min Edge Confidence</div>
-                <div class="config-field-desc">Minimum confidence to persist a relationship edge</div>
-                <div class="config-field-value">
-                  <input type="range" id="ge-minedge" class="config-slider" min="0" max="1" step="0.01" value="0.45">
-                  <span id="ge-minedge-val" class="config-slider-value">0.45</span>
+                <div class="config-actions">
+                  <button class="btn-config-save" id="hc-save">Save</button>
+                  <button class="btn-config-defaults" id="hc-defaults">Reset to Defaults</button>
+                </div>
+
+                <div class="config-field-group-label" style="margin-top:16px;">Find Analysis</div>
+                <p class="config-field-desc" style="margin-bottom: 12px;">
+                  Score distribution of all observations using current weights. Shows where the cutoff line falls.
+                </p>
+                <div class="config-actions" style="margin-bottom: 12px;">
+                  <button class="btn-config-save" id="hc-find">Find</button>
+                </div>
+                <div id="hc-find-results" class="hidden">
+                  <div id="hc-find-summary" class="hygiene-summary"></div>
+                  <div id="hc-find-histogram" class="hygiene-distribution"></div>
+                  <div id="hc-find-islands" class="hygiene-summary" style="margin-top:8px;"></div>
                 </div>
               </div>
+            </div>
+          </div>
 
-              <div class="config-field-group-label">Signal Classifier</div>
+          <!-- Intelligence Panel -->
+          <div class="settings-panel" data-settings-panel="intelligence">
+            <h2 class="settings-heading">Topic Detection</h2>
+            <div id="topic-detection-section" class="config-section">
+              <div class="config-section-body" id="td-body" style="border-top:none;">
+                <div class="config-field">
+                  <div class="config-field-header">
+                    <span class="config-field-label">Enabled</span>
+                    <label class="config-toggle">
+                      <input type="checkbox" id="td-enabled" checked>
+                      <span class="config-toggle-slider"></span>
+                    </label>
+                  </div>
+                  <div class="config-field-desc">Master toggle for topic shift detection</div>
+                  <span id="td-status" class="config-section-status enabled" style="margin-top:8px;display:inline-block;">Enabled</span>
+                </div>
 
-              <div class="config-field">
-                <div class="config-field-label">Min Content Length</div>
-                <div class="config-field-desc">Minimum characters required to process an observation</div>
-                <div class="config-field-value">
-                  <input type="number" id="ge-mincontent" class="config-number-input" min="0" value="30">
+                <div id="td-fields">
+                  <div class="config-field">
+                    <div class="config-field-label">Sensitivity Preset</div>
+                    <div class="config-field-desc">Controls how easily topic shifts are detected</div>
+                    <div class="config-radio-group" id="td-preset">
+                      <button class="config-radio" data-value="sensitive">Sensitive</button>
+                      <button class="config-radio active" data-value="balanced">Balanced</button>
+                      <button class="config-radio" data-value="relaxed">Relaxed</button>
+                    </div>
+                  </div>
+
+                  <div class="config-field">
+                    <div class="config-field-label">Sensitivity Multiplier</div>
+                    <div class="config-field-desc">Multiplied with EWMA stddev for threshold (auto-filled from preset)</div>
+                    <div class="config-field-value">
+                      <input type="number" id="td-multiplier" class="config-number-input" step="0.1" min="0.1" value="1.5">
+                    </div>
+                  </div>
+
+                  <div class="config-field">
+                    <div class="config-field-header">
+                      <span class="config-field-label">Manual Threshold</span>
+                      <label class="config-toggle">
+                        <input type="checkbox" id="td-manual-enabled">
+                        <span class="config-toggle-slider"></span>
+                      </label>
+                    </div>
+                    <div class="config-field-desc">Override adaptive threshold with a fixed value</div>
+                    <div class="config-field-value">
+                      <input type="number" id="td-manual-value" class="config-number-input" step="0.01" min="0" value="0.3" disabled>
+                    </div>
+                  </div>
+
+                  <div class="config-field">
+                    <div class="config-field-label">EWMA Alpha</div>
+                    <div class="config-field-desc">Decay factor for exponentially weighted moving average (0.01 - 1.0)</div>
+                    <div class="config-field-value">
+                      <input type="range" id="td-ewma" class="config-slider" min="0.01" max="1" step="0.01" value="0.3">
+                      <span id="td-ewma-val" class="config-slider-value">0.30</span>
+                    </div>
+                  </div>
+
+                  <div class="config-field">
+                    <div class="config-field-label">Threshold Bounds</div>
+                    <div class="config-field-desc">Hard min/max limits for the adaptive threshold</div>
+                    <div class="config-field-row">
+                      <div class="config-field-inline">
+                        <span>Min</span>
+                        <input type="number" id="td-bounds-min" class="config-number-input" step="0.01" min="0.05" max="0.95" value="0.15">
+                      </div>
+                      <div class="config-field-inline">
+                        <span>Max</span>
+                        <input type="number" id="td-bounds-max" class="config-number-input" step="0.01" min="0.05" max="0.95" value="0.6">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="config-actions">
+                  <button class="btn-config-save" id="td-save">Save</button>
+                  <button class="btn-config-defaults" id="td-defaults">Reset to Defaults</button>
                 </div>
               </div>
             </div>
 
-            <div class="config-actions">
-              <button class="btn-config-save" id="ge-save">Save</button>
-              <button class="btn-config-defaults" id="ge-defaults">Reset to Defaults</button>
-            </div>
-          </div>
-        </div>
+            <h2 class="settings-heading" style="margin-top:24px;">Graph Extraction</h2>
+            <div id="graph-extraction-section" class="config-section">
+              <div class="config-section-body" id="ge-body" style="border-top:none;">
+                <div class="config-field">
+                  <div class="config-field-header">
+                    <span class="config-field-label">Enabled</span>
+                    <label class="config-toggle">
+                      <input type="checkbox" id="ge-enabled" checked>
+                      <span class="config-toggle-slider"></span>
+                    </label>
+                  </div>
+                  <div class="config-field-desc">Master toggle for knowledge graph extraction</div>
+                  <span id="ge-status" class="config-section-status enabled" style="margin-top:8px;display:inline-block;">Enabled</span>
+                </div>
 
-        <!-- Cross-Project Access Config -->
-        <div id="cross-access-section" class="config-section collapsed">
-          <div class="config-section-header" data-config-toggle="cross-access">
-            <h3><span class="toggle-icon">&#9660;</span> Cross-Project Access</h3>
-            <span id="ca-status" class="config-section-status disabled">0 projects</span>
-          </div>
-          <div class="config-section-body" id="ca-body">
-            <p class="config-field-desc" style="margin-bottom: 12px;">Allow the current project to read memories from other projects. Read-only &mdash; no writes cross projects.</p>
-            <div class="cross-access-lists">
-              <div class="cross-access-list">
-                <div class="cross-access-list-header">Available</div>
-                <ul id="ca-available" class="cross-access-items"></ul>
+                <div id="ge-fields">
+                  <div class="config-field-group-label">Temporal Decay</div>
+
+                  <div class="config-field">
+                    <div class="config-field-label">Half-Life (days)</div>
+                    <div class="config-field-desc">How many days until edge weight decays to 50%</div>
+                    <div class="config-field-value">
+                      <input type="number" id="ge-halflife" class="config-number-input" min="1" value="30">
+                    </div>
+                  </div>
+
+                  <div class="config-field">
+                    <div class="config-field-label">Minimum Floor</div>
+                    <div class="config-field-desc">Lowest weight an edge can decay to before deletion check</div>
+                    <div class="config-field-value">
+                      <input type="range" id="ge-minfloor" class="config-slider" min="0" max="0.99" step="0.01" value="0.05">
+                      <span id="ge-minfloor-val" class="config-slider-value">0.05</span>
+                    </div>
+                  </div>
+
+                  <div class="config-field">
+                    <div class="config-field-label">Deletion Threshold</div>
+                    <div class="config-field-desc">Edges below this weight are deleted during curation</div>
+                    <div class="config-field-value">
+                      <input type="range" id="ge-delthresh" class="config-slider" min="0" max="0.99" step="0.01" value="0.08">
+                      <span id="ge-delthresh-val" class="config-slider-value">0.08</span>
+                    </div>
+                  </div>
+
+                  <div class="config-field">
+                    <div class="config-field-label">Max Age (days)</div>
+                    <div class="config-field-desc">Maximum age before forced deletion regardless of weight</div>
+                    <div class="config-field-value">
+                      <input type="number" id="ge-maxage" class="config-number-input" min="1" value="180">
+                    </div>
+                  </div>
+
+                  <div class="config-field-group-label">Fuzzy Deduplication</div>
+
+                  <div class="config-field">
+                    <div class="config-field-label">Max Levenshtein Distance</div>
+                    <div class="config-field-desc">Maximum edit distance for typo matching</div>
+                    <div class="config-field-value">
+                      <input type="number" id="ge-levenshtein" class="config-number-input" min="1" max="10" value="2">
+                    </div>
+                  </div>
+
+                  <div class="config-field">
+                    <div class="config-field-label">Jaccard Threshold</div>
+                    <div class="config-field-desc">Minimum word-overlap similarity for dedup matching</div>
+                    <div class="config-field-value">
+                      <input type="range" id="ge-jaccard" class="config-slider" min="0" max="1" step="0.01" value="0.7">
+                      <span id="ge-jaccard-val" class="config-slider-value">0.70</span>
+                    </div>
+                  </div>
+
+                  <div class="config-field-group-label">Quality Gate</div>
+
+                  <div class="config-field">
+                    <div class="config-field-label">Max Files per Observation</div>
+                    <div class="config-field-desc">Maximum File nodes extracted from a single observation</div>
+                    <div class="config-field-value">
+                      <input type="number" id="ge-maxfiles" class="config-number-input" min="1" value="5">
+                    </div>
+                  </div>
+
+                  <div class="config-field">
+                    <div class="config-field-label">Type Confidence Thresholds</div>
+                    <div class="config-field-desc">Minimum confidence to persist each entity type</div>
+                    <div class="config-threshold-grid" id="ge-thresholds">
+                      <div class="config-threshold-row">
+                        <span class="config-threshold-label">File</span>
+                        <input type="range" class="config-slider" data-type="File" min="0" max="1" step="0.01" value="0.95">
+                        <span class="config-slider-value">0.95</span>
+                      </div>
+                      <div class="config-threshold-row">
+                        <span class="config-threshold-label">Project</span>
+                        <input type="range" class="config-slider" data-type="Project" min="0" max="1" step="0.01" value="0.8">
+                        <span class="config-slider-value">0.80</span>
+                      </div>
+                      <div class="config-threshold-row">
+                        <span class="config-threshold-label">Reference</span>
+                        <input type="range" class="config-slider" data-type="Reference" min="0" max="1" step="0.01" value="0.85">
+                        <span class="config-slider-value">0.85</span>
+                      </div>
+                      <div class="config-threshold-row">
+                        <span class="config-threshold-label">Decision</span>
+                        <input type="range" class="config-slider" data-type="Decision" min="0" max="1" step="0.01" value="0.65">
+                        <span class="config-slider-value">0.65</span>
+                      </div>
+                      <div class="config-threshold-row">
+                        <span class="config-threshold-label">Problem</span>
+                        <input type="range" class="config-slider" data-type="Problem" min="0" max="1" step="0.01" value="0.6">
+                        <span class="config-slider-value">0.60</span>
+                      </div>
+                      <div class="config-threshold-row">
+                        <span class="config-threshold-label">Solution</span>
+                        <input type="range" class="config-slider" data-type="Solution" min="0" max="1" step="0.01" value="0.6">
+                        <span class="config-slider-value">0.60</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="config-field">
+                    <div class="config-field-label">File Non-Change Multiplier</div>
+                    <div class="config-field-desc">Confidence multiplier for File paths from non-change observations</div>
+                    <div class="config-field-value">
+                      <input type="range" id="ge-filenonchange" class="config-slider" min="0" max="1" step="0.01" value="0.74">
+                      <span id="ge-filenonchange-val" class="config-slider-value">0.74</span>
+                    </div>
+                  </div>
+
+                  <div class="config-field">
+                    <div class="config-field-row">
+                      <div class="config-field-inline">
+                        <span>Min Name Length</span>
+                        <input type="number" id="ge-minname" class="config-number-input" min="1" value="3">
+                      </div>
+                      <div class="config-field-inline">
+                        <span>Max Name Length</span>
+                        <input type="number" id="ge-maxname" class="config-number-input" min="10" value="200">
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="config-field-group-label">Relationship Detector</div>
+
+                  <div class="config-field">
+                    <div class="config-field-label">Min Edge Confidence</div>
+                    <div class="config-field-desc">Minimum confidence to persist a relationship edge</div>
+                    <div class="config-field-value">
+                      <input type="range" id="ge-minedge" class="config-slider" min="0" max="1" step="0.01" value="0.45">
+                      <span id="ge-minedge-val" class="config-slider-value">0.45</span>
+                    </div>
+                  </div>
+
+                  <div class="config-field-group-label">Signal Classifier</div>
+
+                  <div class="config-field">
+                    <div class="config-field-label">Min Content Length</div>
+                    <div class="config-field-desc">Minimum characters required to process an observation</div>
+                    <div class="config-field-value">
+                      <input type="number" id="ge-mincontent" class="config-number-input" min="0" value="30">
+                    </div>
+                  </div>
+                </div>
+
+                <div class="config-actions">
+                  <button class="btn-config-save" id="ge-save">Save</button>
+                  <button class="btn-config-defaults" id="ge-defaults">Reset to Defaults</button>
+                </div>
               </div>
-              <div class="cross-access-list">
-                <div class="cross-access-list-header">Can Read From</div>
-                <ul id="ca-readable" class="cross-access-items"></ul>
+            </div>
+          </div>
+
+          <!-- Configuration Panel -->
+          <div class="settings-panel" data-settings-panel="configuration">
+            <h2 class="settings-heading">Tool Response Verbosity</h2>
+            <div id="tool-verbosity-section" class="config-section">
+              <div class="config-section-body" id="tv-body" style="border-top:none;">
+                <div class="config-field">
+                  <div class="config-field-label">Verbosity Level</div>
+                  <div class="config-field-desc">Controls how much detail MCP tool responses include</div>
+                  <span id="tv-status" class="config-section-status enabled" style="margin-bottom:8px;display:inline-block;">Standard</span>
+                  <div class="config-radio-group" id="tv-level">
+                    <button class="config-radio" data-value="1">Minimal</button>
+                    <button class="config-radio active" data-value="2">Standard</button>
+                    <button class="config-radio" data-value="3">Verbose</button>
+                  </div>
+                </div>
+
+                <div class="config-field">
+                  <div class="config-field-desc" style="margin-top: 4px; line-height: 1.6;">
+                    <strong>Minimal:</strong> Just confirms the tool ran<br>
+                    <strong>Standard:</strong> Shows titles and key info<br>
+                    <strong>Verbose:</strong> Full text with all details
+                  </div>
+                </div>
+
+                <div class="config-actions">
+                  <button class="btn-config-save" id="tv-save">Save</button>
+                  <button class="btn-config-defaults" id="tv-defaults">Reset to Defaults</button>
+                </div>
               </div>
             </div>
-            <div class="config-actions">
-              <button class="btn-config-save" id="ca-save">Save</button>
-              <button class="btn-config-defaults" id="ca-defaults">Reset to Defaults</button>
-            </div>
-          </div>
-        </div>
 
-        <h2 class="settings-heading settings-heading-danger">Danger Zone</h2>
-        <div class="settings-scope">
-          <label class="scope-radio"><input type="radio" name="reset-scope" value="current" checked> Current project only (<span id="reset-scope-project-name">—</span>)</label>
-          <label class="scope-radio"><input type="radio" name="reset-scope" value="all"> All projects</label>
-        </div>
+            <h2 class="settings-heading" style="margin-top:24px;">Cross-Project Access</h2>
+            <div id="cross-access-section" class="config-section">
+              <div class="config-section-body" id="ca-body" style="border-top:none;">
+                <p class="config-field-desc" style="margin-bottom: 12px;">Allow the current project to read memories from other projects. Read-only &mdash; no writes cross projects.</p>
+                <span id="ca-status" class="config-section-status disabled" style="margin-bottom:12px;display:inline-block;">0 projects</span>
+                <div class="cross-access-lists">
+                  <div class="cross-access-list">
+                    <div class="cross-access-list-header">Available</div>
+                    <ul id="ca-available" class="cross-access-items"></ul>
+                  </div>
+                  <div class="cross-access-list">
+                    <div class="cross-access-list-header">Can Read From</div>
+                    <ul id="ca-readable" class="cross-access-items"></ul>
+                  </div>
+                </div>
+                <div class="config-actions">
+                  <button class="btn-config-save" id="ca-save">Save</button>
+                  <button class="btn-config-defaults" id="ca-defaults">Reset to Defaults</button>
+                </div>
+              </div>
+            </div>
+          </div>
 
-        <div class="danger-zone">
-          <div class="reset-action-card">
-            <div class="reset-action-info">
-              <h3>Reset Observations</h3>
-              <p>Delete all observations, FTS indexes, and vector embeddings.</p>
+          <!-- Danger Zone Panel -->
+          <div class="settings-panel" data-settings-panel="danger">
+            <h2 class="settings-heading settings-heading-danger">Danger Zone</h2>
+            <div class="settings-scope">
+              <label class="scope-radio"><input type="radio" name="reset-scope" value="current" checked> Current project only (<span id="reset-scope-project-name">—</span>)</label>
+              <label class="scope-radio"><input type="radio" name="reset-scope" value="all"> All projects</label>
             </div>
-            <button class="btn-danger reset-action-btn" data-reset-type="observations">Reset Observations</button>
-          </div>
-          <div class="reset-action-card">
-            <div class="reset-action-info">
-              <h3>Reset Knowledge Graph</h3>
-              <p>Delete all graph nodes and edges.</p>
+
+            <div class="danger-zone">
+              <div class="reset-action-card">
+                <div class="reset-action-info">
+                  <h3>Reset Observations</h3>
+                  <p>Delete all observations, FTS indexes, and vector embeddings.</p>
+                </div>
+                <button class="btn-danger reset-action-btn" data-reset-type="observations">Reset Observations</button>
+              </div>
+              <div class="reset-action-card">
+                <div class="reset-action-info">
+                  <h3>Reset Knowledge Graph</h3>
+                  <p>Delete all graph nodes and edges.</p>
+                </div>
+                <button class="btn-danger reset-action-btn" data-reset-type="graph">Reset Graph</button>
+              </div>
+              <div class="reset-action-card">
+                <div class="reset-action-info">
+                  <h3>Reset Sessions &amp; Intelligence</h3>
+                  <p>Delete all sessions, context stashes, threshold history, and shift decisions.</p>
+                </div>
+                <button class="btn-danger reset-action-btn" data-reset-type="sessions">Reset Sessions</button>
+              </div>
+              <div class="reset-action-card reset-action-card-destructive">
+                <div class="reset-action-info">
+                  <h3>Reset Everything</h3>
+                  <p>Delete all data across all table groups. This cannot be undone.</p>
+                </div>
+                <button class="btn-danger-primary reset-action-btn" data-reset-type="all">Reset Everything</button>
+              </div>
             </div>
-            <button class="btn-danger reset-action-btn" data-reset-type="graph">Reset Graph</button>
-          </div>
-          <div class="reset-action-card">
-            <div class="reset-action-info">
-              <h3>Reset Sessions &amp; Intelligence</h3>
-              <p>Delete all sessions, context stashes, threshold history, and shift decisions.</p>
-            </div>
-            <button class="btn-danger reset-action-btn" data-reset-type="sessions">Reset Sessions</button>
-          </div>
-          <div class="reset-action-card reset-action-card-destructive">
-            <div class="reset-action-info">
-              <h3>Reset Everything</h3>
-              <p>Delete all data across all table groups. This cannot be undone.</p>
-            </div>
-            <button class="btn-danger-primary reset-action-btn" data-reset-type="all">Reset Everything</button>
           </div>
         </div>
       </div>

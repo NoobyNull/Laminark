@@ -4,14 +4,24 @@
  * @module web/routes/admin
  */
 
-import { existsSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { Hono } from 'hono';
 import type BetterSqlite3 from 'better-sqlite3';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const LAMINARK_VERSION = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf-8'));
+    return pkg.version || 'unknown';
+  } catch { return 'unknown'; }
+})();
+
 import { getConfigDir } from '../../shared/config.js';
-import { analyzeObservations, executePurge } from '../../graph/hygiene-analyzer.js';
+import { analyzeObservations, executePurge, findAnalysis } from '../../graph/hygiene-analyzer.js';
+import { loadHygieneConfig, saveHygieneConfig, resetHygieneConfig } from '../../config/hygiene-config.js';
 import { loadTopicDetectionConfig } from '../../config/topic-detection-config.js';
 import { loadGraphExtractionConfig } from '../../config/graph-extraction-config.js';
 import { loadCrossAccessConfig, saveCrossAccessConfig, resetCrossAccessConfig } from '../../config/cross-access.js';
@@ -94,6 +104,57 @@ adminRoutes.get('/stats', (c) => {
     pendingNotifications,
     projects,
     scopedToProject: project || null,
+  });
+});
+
+/**
+ * GET /api/admin/system
+ *
+ * Returns server-scoped system info (not project-scoped).
+ */
+adminRoutes.get('/system', (c) => {
+  const db = getDb(c);
+  const mem = process.memoryUsage();
+
+  let dbSizeBytes = 0;
+  let pageCount = 0;
+  let pageSize = 4096;
+  try {
+    const pc = db.pragma('page_count', { simple: true }) as number;
+    const ps = db.pragma('page_size', { simple: true }) as number;
+    pageCount = pc;
+    pageSize = ps;
+    dbSizeBytes = pc * ps;
+  } catch { /* ignore */ }
+
+  let walSizeBytes = 0;
+  try {
+    const dbPath = db.name;
+    if (dbPath) {
+      const walPath = dbPath + '-wal';
+      if (existsSync(walPath)) {
+        walSizeBytes = statSync(walPath).size;
+      }
+    }
+  } catch { /* ignore */ }
+
+  return c.json({
+    laminarkVersion: LAMINARK_VERSION,
+    nodeVersion: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    uptimeSeconds: Math.floor(process.uptime()),
+    memory: {
+      rssBytes: mem.rss,
+      heapUsedBytes: mem.heapUsed,
+      heapTotalBytes: mem.heapTotal,
+    },
+    database: {
+      sizeBytes: dbSizeBytes,
+      walSizeBytes,
+      pageCount,
+      pageSize,
+    },
   });
 });
 
@@ -225,9 +286,10 @@ adminRoutes.get('/hygiene', (c) => {
   const tier = (c.req.query('tier') || 'high') as 'high' | 'medium' | 'all';
   const sessionId = c.req.query('session_id');
   const limit = parseInt(c.req.query('limit') || '50', 10);
+  const config = loadHygieneConfig();
 
   const minTier = tier === 'all' ? 'low' as const : tier;
-  const report = analyzeObservations(db, project, { sessionId, limit, minTier });
+  const report = analyzeObservations(db, project, { sessionId, limit, minTier, config });
 
   return c.json(report);
 });
@@ -239,9 +301,10 @@ adminRoutes.post('/hygiene/purge', async (c) => {
 
   const body = await c.req.json<{ tier?: string }>();
   const tier = (body.tier || 'high') as 'high' | 'medium' | 'all';
+  const config = loadHygieneConfig();
 
   const minTier = tier === 'all' ? 'low' as const : tier;
-  const report = analyzeObservations(db, project, { minTier, limit: 500 });
+  const report = analyzeObservations(db, project, { minTier, limit: 500, config });
   const result = executePurge(db, project, report, tier);
 
   return c.json({
@@ -252,9 +315,44 @@ adminRoutes.post('/hygiene/purge', async (c) => {
   });
 });
 
+adminRoutes.get('/hygiene/find', (c) => {
+  const db = getDb(c);
+  const project = getProjectHash(c);
+  if (!project) return c.json({ error: 'No project context available' }, 400);
+
+  const config = loadHygieneConfig();
+  const report = findAnalysis(db, project, config);
+  return c.json(report);
+});
+
 // =========================================================================
 // Configuration endpoints
 // =========================================================================
+
+adminRoutes.get('/config/hygiene', (c) => {
+  return c.json(loadHygieneConfig());
+});
+
+adminRoutes.put('/config/hygiene', async (c) => {
+  const body = await c.req.json();
+  const configPath = join(getConfigDir(), 'hygiene.json');
+
+  if (body && body.__reset === true) {
+    try { if (existsSync(configPath)) unlinkSync(configPath); } catch { /* ignore */ }
+    return c.json(resetHygieneConfig());
+  }
+
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return c.json({ error: 'Request body must be a JSON object' }, 400);
+  }
+
+  const { __reset: _, ...data } = body;
+  writeFileSync(configPath, JSON.stringify(data, null, 2), 'utf-8');
+  const validated = loadHygieneConfig();
+  // Re-write validated config to ensure clean file
+  saveHygieneConfig(validated);
+  return c.json(validated);
+});
 
 adminRoutes.get('/config/topic-detection', (c) => {
   return c.json(loadTopicDetectionConfig());

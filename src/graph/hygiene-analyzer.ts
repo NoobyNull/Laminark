@@ -8,6 +8,8 @@
 
 import type BetterSqlite3 from 'better-sqlite3';
 
+import type { HygieneConfig, AutoCleanupConfig } from '../config/hygiene-config.js';
+import { loadHygieneConfig } from '../config/hygiene-config.js';
 import { debug } from '../shared/debug.js';
 import { initStalenessSchema } from './staleness.js';
 
@@ -55,20 +57,25 @@ export interface HygieneReport {
   };
 }
 
-// =============================================================================
-// Signal Weights
-// =============================================================================
-
-const WEIGHTS = {
-  orphaned: 0.30,
-  islandNode: 0.15,
-  noiseClassified: 0.25,
-  shortContent: 0.10,
-  autoCaptured: 0.10,
-  stale: 0.10,
-} as const;
-
-const SHORT_CONTENT_THRESHOLD = 50;
+export interface FindAnalysisReport {
+  total: number;
+  bySignal: {
+    orphaned: number;
+    islandNode: number;
+    noiseClassified: number;
+    shortContent: number;
+    autoCaptured: number;
+    stale: number;
+  };
+  distribution: { range: string; count: number }[];
+  islandNodes: {
+    total: number;
+    minConfidence: number;
+    maxConfidence: number;
+    medianConfidence: number;
+    capturedAtCurrentThresholds: { high: number; medium: number; all: number };
+  };
+}
 
 // =============================================================================
 // Internal Row Types
@@ -93,57 +100,25 @@ interface GraphNodeRow {
 }
 
 // =============================================================================
-// Analysis
+// Shared: build signal lookups
 // =============================================================================
 
-export interface AnalyzeOptions {
-  sessionId?: string;
-  limit?: number;
-  minTier?: 'high' | 'medium' | 'low';
+interface SignalLookups {
+  linkedObsIds: Set<string>;
+  islandObsIds: Set<string>;
+  staleIds: Set<string>;
+  allNodes: GraphNodeRow[];
+  edgeCounts: Map<string, number>;
 }
 
-/**
- * Analyzes all active observations and scores each on deletion signals.
- * Pure read-only — no data is modified.
- */
-export function analyzeObservations(
-  db: BetterSqlite3.Database,
-  projectHash: string,
-  opts?: AnalyzeOptions,
-): HygieneReport {
-  const limit = opts?.limit ?? 50;
-  const minTier = opts?.minTier ?? 'medium';
-
-  debug('hygiene', 'Starting analysis', { projectHash, sessionId: opts?.sessionId });
-
-  // 1. Fetch all active observations for this project
-  let obsSql = `
-    SELECT id, content, title, source, kind, session_id, classification, created_at
-    FROM observations
-    WHERE project_hash = ? AND deleted_at IS NULL
-  `;
-  const obsParams: unknown[] = [projectHash];
-
-  if (opts?.sessionId) {
-    obsSql += ' AND session_id = ?';
-    obsParams.push(opts.sessionId);
-  }
-
-  obsSql += ' ORDER BY created_at DESC';
-  const observations = db.prepare(obsSql).all(...obsParams) as ObsRow[];
-
-  // 2. Build lookup sets for signal detection
-
-  // Set of observation IDs linked to at least one graph node
+function buildSignalLookups(db: BetterSqlite3.Database): SignalLookups {
   const linkedObsIds = new Set<string>();
-  // Set of observation IDs linked to island nodes (nodes with zero edges)
   const islandObsIds = new Set<string>();
 
   const allNodes = db.prepare(
     'SELECT id, type, name, observation_ids FROM graph_nodes',
   ).all() as GraphNodeRow[];
 
-  // Precompute edge counts per node
   const edgeCounts = new Map<string, number>();
   const edgeRows = db.prepare(
     `SELECT source_id AS nid, COUNT(*) AS cnt FROM graph_edges GROUP BY source_id
@@ -172,7 +147,6 @@ export function analyzeObservations(
     }
   }
 
-  // Staleness flags set
   const staleIds = new Set<string>();
   try {
     initStalenessSchema(db);
@@ -186,29 +160,90 @@ export function analyzeObservations(
     // staleness_flags may not exist
   }
 
+  return { linkedObsIds, islandObsIds, staleIds, allNodes, edgeCounts };
+}
+
+function scoreObservation(
+  obs: ObsRow,
+  lookups: SignalLookups,
+  config: HygieneConfig,
+): { signals: HygieneCandidate['signals']; confidence: number; tier: 'high' | 'medium' | 'low' } {
+  const weights = config.signalWeights;
+  const thresholds = config.tierThresholds;
+
+  const signals = {
+    orphaned: !lookups.linkedObsIds.has(obs.id),
+    islandNode: lookups.islandObsIds.has(obs.id),
+    noiseClassified: obs.classification === 'noise',
+    shortContent: obs.content.length < config.shortContentThreshold,
+    autoCaptured: obs.source.startsWith('hook:'),
+    stale: lookups.staleIds.has(obs.id),
+  };
+
+  const confidence =
+    (signals.orphaned ? weights.orphaned : 0) +
+    (signals.islandNode ? weights.islandNode : 0) +
+    (signals.noiseClassified ? weights.noiseClassified : 0) +
+    (signals.shortContent ? weights.shortContent : 0) +
+    (signals.autoCaptured ? weights.autoCaptured : 0) +
+    (signals.stale ? weights.stale : 0);
+
+  const tier: 'high' | 'medium' | 'low' =
+    confidence >= thresholds.high ? 'high' : confidence >= thresholds.medium ? 'medium' : 'low';
+
+  return { signals, confidence: Math.round(confidence * 100) / 100, tier };
+}
+
+// =============================================================================
+// Analysis
+// =============================================================================
+
+export interface AnalyzeOptions {
+  sessionId?: string;
+  limit?: number;
+  minTier?: 'high' | 'medium' | 'low';
+  config?: HygieneConfig;
+}
+
+/**
+ * Analyzes all active observations and scores each on deletion signals.
+ * Pure read-only — no data is modified.
+ */
+export function analyzeObservations(
+  db: BetterSqlite3.Database,
+  projectHash: string,
+  opts?: AnalyzeOptions,
+): HygieneReport {
+  const limit = opts?.limit ?? 50;
+  const minTier = opts?.minTier ?? 'medium';
+  const config = opts?.config ?? loadHygieneConfig();
+
+  debug('hygiene', 'Starting analysis', { projectHash, sessionId: opts?.sessionId });
+
+  // 1. Fetch all active observations for this project
+  let obsSql = `
+    SELECT id, content, title, source, kind, session_id, classification, created_at
+    FROM observations
+    WHERE project_hash = ? AND deleted_at IS NULL
+  `;
+  const obsParams: unknown[] = [projectHash];
+
+  if (opts?.sessionId) {
+    obsSql += ' AND session_id = ?';
+    obsParams.push(opts.sessionId);
+  }
+
+  obsSql += ' ORDER BY created_at DESC';
+  const observations = db.prepare(obsSql).all(...obsParams) as ObsRow[];
+
+  // 2. Build lookup sets for signal detection
+  const lookups = buildSignalLookups(db);
+
   // 3. Score each observation
   const allCandidates: HygieneCandidate[] = [];
 
   for (const obs of observations) {
-    const signals = {
-      orphaned: !linkedObsIds.has(obs.id),
-      islandNode: islandObsIds.has(obs.id),
-      noiseClassified: obs.classification === 'noise',
-      shortContent: obs.content.length < SHORT_CONTENT_THRESHOLD,
-      autoCaptured: obs.source.startsWith('hook:'),
-      stale: staleIds.has(obs.id),
-    };
-
-    const confidence =
-      (signals.orphaned ? WEIGHTS.orphaned : 0) +
-      (signals.islandNode ? WEIGHTS.islandNode : 0) +
-      (signals.noiseClassified ? WEIGHTS.noiseClassified : 0) +
-      (signals.shortContent ? WEIGHTS.shortContent : 0) +
-      (signals.autoCaptured ? WEIGHTS.autoCaptured : 0) +
-      (signals.stale ? WEIGHTS.stale : 0);
-
-    const tier: 'high' | 'medium' | 'low' =
-      confidence >= 0.7 ? 'high' : confidence >= 0.5 ? 'medium' : 'low';
+    const { signals, confidence, tier } = scoreObservation(obs, lookups, config);
 
     // Filter by minimum tier
     if (minTier === 'high' && tier !== 'high') continue;
@@ -227,7 +262,7 @@ export function analyzeObservations(
       contentPreview: preview,
       createdAt: obs.created_at,
       signals,
-      confidence: Math.round(confidence * 100) / 100,
+      confidence,
       tier,
     });
   }
@@ -239,8 +274,8 @@ export function analyzeObservations(
   const activeObsIds = new Set(observations.map(o => o.id));
   const orphanNodes: OrphanNode[] = [];
 
-  for (const node of allNodes) {
-    const degree = edgeCounts.get(node.id) ?? 0;
+  for (const node of lookups.allNodes) {
+    const degree = lookups.edgeCounts.get(node.id) ?? 0;
     if (degree > 0) continue;
 
     let obsIds: string[];
@@ -250,16 +285,15 @@ export function analyzeObservations(
       continue;
     }
 
-    // Check if all observation refs are dead (deleted or missing)
+    // Zero-edge nodes are island nodes — they add no graph connectivity.
+    // Flag them all as orphans regardless of whether observation refs are alive.
     const allDead = obsIds.length === 0 || obsIds.every(oid => !activeObsIds.has(oid));
-    if (allDead) {
-      orphanNodes.push({
-        id: node.id,
-        type: node.type,
-        name: node.name,
-        reason: 'zero edges, dead observation refs',
-      });
-    }
+    orphanNodes.push({
+      id: node.id,
+      type: node.type,
+      name: node.name,
+      reason: allDead ? 'zero edges, dead observation refs' : 'zero edges (island node)',
+    });
   }
 
   // 5. Build summary
@@ -290,6 +324,99 @@ export function analyzeObservations(
 }
 
 // =============================================================================
+// Find Analysis
+// =============================================================================
+
+/**
+ * Produces a score distribution report across all observations.
+ * Shows signal counts, confidence histogram, and island node summary
+ * so users can tune thresholds to catch the right candidates.
+ */
+export function findAnalysis(
+  db: BetterSqlite3.Database,
+  projectHash: string,
+  config?: HygieneConfig,
+): FindAnalysisReport {
+  const cfg = config ?? loadHygieneConfig();
+
+  const observations = db.prepare(`
+    SELECT id, content, title, source, kind, session_id, classification, created_at
+    FROM observations
+    WHERE project_hash = ? AND deleted_at IS NULL
+    ORDER BY created_at DESC
+  `).all(projectHash) as ObsRow[];
+
+  const lookups = buildSignalLookups(db);
+
+  const bySignal = {
+    orphaned: 0,
+    islandNode: 0,
+    noiseClassified: 0,
+    shortContent: 0,
+    autoCaptured: 0,
+    stale: 0,
+  };
+
+  // 10 histogram buckets: 0.0-0.1, 0.1-0.2, ... 0.9-1.0
+  const buckets = new Array(10).fill(0) as number[];
+
+  // Track island-linked observation confidences
+  const islandConfidences: number[] = [];
+
+  for (const obs of observations) {
+    const { signals, confidence } = scoreObservation(obs, lookups, cfg);
+
+    if (signals.orphaned) bySignal.orphaned++;
+    if (signals.islandNode) bySignal.islandNode++;
+    if (signals.noiseClassified) bySignal.noiseClassified++;
+    if (signals.shortContent) bySignal.shortContent++;
+    if (signals.autoCaptured) bySignal.autoCaptured++;
+    if (signals.stale) bySignal.stale++;
+
+    const bucketIdx = Math.min(Math.floor(confidence * 10), 9);
+    buckets[bucketIdx]++;
+
+    if (signals.islandNode) {
+      islandConfidences.push(confidence);
+    }
+  }
+
+  const distribution = buckets.map((count, i) => ({
+    range: `${(i / 10).toFixed(1)}-${((i + 1) / 10).toFixed(1)}`,
+    count,
+  }));
+
+  // Island node summary
+  islandConfidences.sort((a, b) => a - b);
+  const islandTotal = islandConfidences.length;
+  const minConf = islandTotal > 0 ? islandConfidences[0] : 0;
+  const maxConf = islandTotal > 0 ? islandConfidences[islandTotal - 1] : 0;
+  const medianConf = islandTotal > 0
+    ? islandConfidences[Math.floor(islandTotal / 2)]
+    : 0;
+
+  const capturedHigh = islandConfidences.filter(c => c >= cfg.tierThresholds.high).length;
+  const capturedMedium = islandConfidences.filter(c => c >= cfg.tierThresholds.medium).length;
+
+  return {
+    total: observations.length,
+    bySignal,
+    distribution,
+    islandNodes: {
+      total: islandTotal,
+      minConfidence: Math.round(minConf * 100) / 100,
+      maxConfidence: Math.round(maxConf * 100) / 100,
+      medianConfidence: Math.round(medianConf * 100) / 100,
+      capturedAtCurrentThresholds: {
+        high: capturedHigh,
+        medium: capturedMedium,
+        all: islandTotal,
+      },
+    },
+  };
+}
+
+// =============================================================================
 // Purge Execution
 // =============================================================================
 
@@ -302,6 +429,62 @@ export interface PurgeResult {
  * Soft-deletes observations matching the given tier threshold and removes
  * dead orphan graph nodes. Returns counts of affected records.
  */
+export interface AutoCleanupResult {
+  skipped: boolean;
+  reason?: string;
+  observationsPurged: number;
+  orphanNodesRemoved: number;
+}
+
+/**
+ * Runs automatic hygiene cleanup at session end.
+ *
+ * Analyzes observations and purges candidates matching the configured tier.
+ * Orphan graph node removal is capped by autoCleanup.maxOrphanNodes.
+ * Safe to call on every session end — skips quickly if disabled.
+ */
+export function runAutoCleanup(
+  db: BetterSqlite3.Database,
+  projectHash: string,
+  config?: HygieneConfig,
+): AutoCleanupResult {
+  const cfg = config ?? loadHygieneConfig();
+  const auto = cfg.autoCleanup;
+
+  if (!auto.enabled) {
+    return { skipped: true, reason: 'disabled', observationsPurged: 0, orphanNodesRemoved: 0 };
+  }
+
+  debug('hygiene', 'Auto-cleanup starting', { tier: auto.tier, maxOrphanNodes: auto.maxOrphanNodes });
+
+  const minTier = auto.tier === 'all' ? 'low' as const : auto.tier;
+  const report = analyzeObservations(db, projectHash, {
+    limit: 200,
+    minTier,
+    config: cfg,
+  });
+
+  // Cap orphan node removal
+  if (report.orphanNodes.length > auto.maxOrphanNodes) {
+    report.orphanNodes = report.orphanNodes.slice(0, auto.maxOrphanNodes);
+  }
+
+  const totalWork = report.candidates.length + report.orphanNodes.length;
+  if (totalWork === 0) {
+    debug('hygiene', 'Auto-cleanup: nothing to clean');
+    return { skipped: false, observationsPurged: 0, orphanNodesRemoved: 0 };
+  }
+
+  const result = executePurge(db, projectHash, report, auto.tier);
+
+  debug('hygiene', 'Auto-cleanup complete', {
+    observationsPurged: result.observationsPurged,
+    orphanNodesRemoved: result.orphanNodesRemoved,
+  });
+
+  return { skipped: false, ...result };
+}
+
 export function executePurge(
   db: BetterSqlite3.Database,
   projectHash: string,

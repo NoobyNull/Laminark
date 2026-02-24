@@ -325,14 +325,6 @@
   }
 
   function initTopicDetection() {
-    // Collapsible section
-    var header = document.querySelector('[data-config-toggle="topic-detection"]');
-    if (header) {
-      header.addEventListener('click', function () {
-        document.getElementById('topic-detection-section').classList.toggle('collapsed');
-      });
-    }
-
     // Enabled toggle
     var enabled = document.getElementById('td-enabled');
     if (enabled) {
@@ -532,14 +524,6 @@
   }
 
   function initGraphExtraction() {
-    // Collapsible section
-    var header = document.querySelector('[data-config-toggle="graph-extraction"]');
-    if (header) {
-      header.addEventListener('click', function () {
-        document.getElementById('graph-extraction-section').classList.toggle('collapsed');
-      });
-    }
-
     // Enabled toggle
     var enabled = document.getElementById('ge-enabled');
     if (enabled) {
@@ -724,14 +708,6 @@
   }
 
   function initCrossAccess() {
-    // Collapsible section
-    var header = document.querySelector('[data-config-toggle="cross-access"]');
-    if (header) {
-      header.addEventListener('click', function () {
-        document.getElementById('cross-access-section').classList.toggle('collapsed');
-      });
-    }
-
     // Save button
     var saveBtn = document.getElementById('ca-save');
     if (saveBtn) {
@@ -938,14 +914,6 @@
   }
 
   function initHygiene() {
-    // Collapsible section
-    var header = document.querySelector('[data-config-toggle="hygiene"]');
-    if (header) {
-      header.addEventListener('click', function () {
-        document.getElementById('hygiene-section').classList.toggle('collapsed');
-      });
-    }
-
     // Tier radio buttons
     var tierBtns = document.querySelectorAll('#hy-tier .config-radio');
     tierBtns.forEach(function (btn) {
@@ -966,6 +934,193 @@
     if (purgeBtn) {
       purgeBtn.addEventListener('click', runHygienePurge);
     }
+  }
+
+  // =========================================================================
+  // Hygiene Config
+  // =========================================================================
+
+  var HC_WEIGHT_KEYS = ['orphaned', 'islandNode', 'noiseClassified', 'shortContent', 'autoCaptured', 'stale'];
+
+  function populateHygieneConfig(config) {
+    HC_WEIGHT_KEYS.forEach(function (key) {
+      var slider = document.getElementById('hc-w-' + key);
+      var label = document.getElementById('hc-w-' + key + '-val');
+      if (slider) slider.value = config.signalWeights[key];
+      if (label) label.textContent = config.signalWeights[key].toFixed(2);
+    });
+
+    setSlider('hc-t-high', 'hc-t-high-val', config.tierThresholds.high);
+    setSlider('hc-t-medium', 'hc-t-medium-val', config.tierThresholds.medium);
+    setVal('hc-short-threshold', config.shortContentThreshold);
+  }
+
+  function gatherHygieneConfig() {
+    var weights = {};
+    HC_WEIGHT_KEYS.forEach(function (key) {
+      var slider = document.getElementById('hc-w-' + key);
+      weights[key] = slider ? parseFloat(slider.value) : 0;
+    });
+
+    return {
+      signalWeights: weights,
+      tierThresholds: {
+        high: parseFloat(document.getElementById('hc-t-high').value) || 0.70,
+        medium: parseFloat(document.getElementById('hc-t-medium').value) || 0.50,
+      },
+      shortContentThreshold: parseInt(document.getElementById('hc-short-threshold').value, 10) || 50,
+    };
+  }
+
+  async function loadHygieneConfig() {
+    try {
+      var res = await fetch('/api/admin/config/hygiene');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var config = await res.json();
+      populateHygieneConfig(config);
+    } catch (err) {
+      console.error('[laminark] Failed to load hygiene config:', err);
+    }
+  }
+
+  async function saveHygieneConfig(data) {
+    try {
+      var res = await fetch('/api/admin/config/hygiene', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var config = await res.json();
+      populateHygieneConfig(config);
+      return config;
+    } catch (err) {
+      console.error('[laminark] Failed to save hygiene config:', err);
+      return null;
+    }
+  }
+
+  async function runFindAnalysis() {
+    var project = getProjectHash();
+    if (!project) return;
+
+    var findBtn = document.getElementById('hc-find');
+    if (findBtn) { findBtn.textContent = 'Analyzing...'; findBtn.disabled = true; }
+
+    try {
+      var res = await fetch('/api/admin/hygiene/find?project=' + encodeURIComponent(project));
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var report = await res.json();
+      renderFindResults(report);
+    } catch (err) {
+      console.error('[laminark] Find analysis failed:', err);
+    }
+
+    if (findBtn) { findBtn.textContent = 'Find'; findBtn.disabled = false; }
+  }
+
+  function renderFindResults(report) {
+    var container = document.getElementById('hc-find-results');
+    if (container) container.classList.remove('hidden');
+
+    // Summary
+    var summary = document.getElementById('hc-find-summary');
+    if (summary) {
+      var signals = report.bySignal;
+      summary.innerHTML =
+        '<div class="hygiene-summary-row">' +
+          '<span class="hygiene-stat"><strong>' + report.total.toLocaleString() + '</strong> total</span>' +
+          '<span class="hygiene-stat"><strong>' + signals.orphaned + '</strong> orphaned</span>' +
+          '<span class="hygiene-stat"><strong>' + signals.islandNode + '</strong> island</span>' +
+          '<span class="hygiene-stat"><strong>' + signals.noiseClassified + '</strong> noise</span>' +
+          '<span class="hygiene-stat"><strong>' + signals.shortContent + '</strong> short</span>' +
+          '<span class="hygiene-stat"><strong>' + signals.autoCaptured + '</strong> auto</span>' +
+          '<span class="hygiene-stat"><strong>' + signals.stale + '</strong> stale</span>' +
+        '</div>';
+    }
+
+    // Histogram
+    var histogram = document.getElementById('hc-find-histogram');
+    if (histogram) {
+      var maxCount = 0;
+      report.distribution.forEach(function (d) { if (d.count > maxCount) maxCount = d.count; });
+
+      var html = '<div class="hygiene-histogram">';
+      report.distribution.forEach(function (d) {
+        var pct = maxCount > 0 ? (d.count / maxCount * 100) : 0;
+        html += '<div class="hygiene-histogram-bar-wrap">' +
+          '<div class="hygiene-histogram-bar" style="height:' + Math.max(pct, 2) + '%;" title="' + d.range + ': ' + d.count + '"></div>' +
+          '<div class="hygiene-histogram-label">' + d.range.split('-')[0] + '</div>' +
+          '</div>';
+      });
+      html += '</div>';
+      histogram.innerHTML = html;
+    }
+
+    // Island nodes
+    var islands = document.getElementById('hc-find-islands');
+    if (islands && report.islandNodes) {
+      var isl = report.islandNodes;
+      var cap = isl.capturedAtCurrentThresholds;
+      islands.innerHTML =
+        '<div class="hygiene-summary-row">' +
+          '<span class="hygiene-stat"><strong>' + isl.total + '</strong> island obs</span>' +
+          '<span class="hygiene-stat">conf: ' + isl.minConfidence.toFixed(2) + ' &ndash; ' + isl.maxConfidence.toFixed(2) + '</span>' +
+          '<span class="hygiene-stat">median: <strong>' + isl.medianConfidence.toFixed(2) + '</strong></span>' +
+          '<span class="hygiene-stat hy-high">high: <strong>' + cap.high + '</strong></span>' +
+          '<span class="hygiene-stat hy-medium">medium+: <strong>' + cap.medium + '</strong></span>' +
+          '<span class="hygiene-stat">all: <strong>' + cap.all + '</strong></span>' +
+        '</div>';
+    }
+  }
+
+  function initHygieneConfig() {
+    // Bind sliders
+    HC_WEIGHT_KEYS.forEach(function (key) {
+      bindSlider('hc-w-' + key, 'hc-w-' + key + '-val');
+    });
+    bindSlider('hc-t-high', 'hc-t-high-val');
+    bindSlider('hc-t-medium', 'hc-t-medium-val');
+
+    // Save button
+    var saveBtn = document.getElementById('hc-save');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async function () {
+        var data = gatherHygieneConfig();
+        var result = await saveHygieneConfig(data);
+        if (result) showSuccessMessage('Hygiene settings saved.');
+      });
+    }
+
+    // Reset to defaults
+    var defaultsBtn = document.getElementById('hc-defaults');
+    if (defaultsBtn) {
+      var hcResetTimer = null;
+      defaultsBtn.addEventListener('click', async function () {
+        if (defaultsBtn.classList.contains('confirming')) {
+          clearTimeout(hcResetTimer);
+          defaultsBtn.classList.remove('confirming');
+          defaultsBtn.textContent = 'Reset to Defaults';
+          var result = await saveHygieneConfig({ __reset: true });
+          if (result) showSuccessMessage('Hygiene settings reset to defaults.');
+        } else {
+          defaultsBtn.classList.add('confirming');
+          defaultsBtn.textContent = 'Confirm?';
+          hcResetTimer = setTimeout(function () {
+            defaultsBtn.classList.remove('confirming');
+            defaultsBtn.textContent = 'Reset to Defaults';
+          }, 3000);
+        }
+      });
+    }
+
+    // Find button
+    var findBtn = document.getElementById('hc-find');
+    if (findBtn) {
+      findBtn.addEventListener('click', runFindAnalysis);
+    }
+
+    loadHygieneConfig();
   }
 
   // =========================================================================
@@ -1015,14 +1170,6 @@
   }
 
   function initToolVerbosity() {
-    // Collapsible section
-    var header = document.querySelector('[data-config-toggle="tool-verbosity"]');
-    if (header) {
-      header.addEventListener('click', function () {
-        document.getElementById('tool-verbosity-section').classList.toggle('collapsed');
-      });
-    }
-
     // Level radio buttons
     var levelBtns = document.querySelectorAll('#tv-level .config-radio');
     levelBtns.forEach(function (btn) {
@@ -1069,10 +1216,131 @@
   }
 
   // =========================================================================
+  // System Info
+  // =========================================================================
+
+  function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    var units = ['B', 'KB', 'MB', 'GB'];
+    var i = Math.floor(Math.log(bytes) / Math.log(1024));
+    if (i >= units.length) i = units.length - 1;
+    return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
+  }
+
+  function formatUptime(seconds) {
+    var d = Math.floor(seconds / 86400);
+    var h = Math.floor((seconds % 86400) / 3600);
+    var m = Math.floor((seconds % 3600) / 60);
+    if (d > 0) return d + 'd ' + h + 'h';
+    if (h > 0) return h + 'h ' + m + 'm';
+    return m + 'm';
+  }
+
+  function makeStatCard(id, value, label) {
+    var el = document.createElement('div');
+    el.className = 'stat-card';
+    if (id) el.id = id;
+
+    var valueEl = document.createElement('div');
+    valueEl.className = 'stat-value';
+    valueEl.textContent = value;
+
+    var labelEl = document.createElement('div');
+    labelEl.className = 'stat-label';
+    labelEl.textContent = label;
+
+    el.appendChild(valueEl);
+    el.appendChild(labelEl);
+    return el;
+  }
+
+  async function fetchSystemInfo() {
+    try {
+      var res = await fetch('/api/admin/system');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return await res.json();
+    } catch (err) {
+      console.error('[laminark] Failed to fetch system info:', err);
+      return null;
+    }
+  }
+
+  function renderSystemInfo(info) {
+    if (!info) return;
+
+    // System Info grid
+    var sysGrid = document.getElementById('system-info-grid');
+    if (sysGrid) {
+      sysGrid.innerHTML = '';
+      sysGrid.appendChild(makeStatCard(null, info.laminarkVersion, 'Laminark'));
+      sysGrid.appendChild(makeStatCard(null, info.nodeVersion, 'Node.js'));
+      sysGrid.appendChild(makeStatCard(null, info.platform + ' ' + info.arch, 'Platform'));
+      sysGrid.appendChild(makeStatCard(null, formatUptime(info.uptimeSeconds), 'Uptime'));
+    }
+
+    // Database Storage grid
+    var dbGrid = document.getElementById('db-storage-grid');
+    if (dbGrid) {
+      dbGrid.innerHTML = '';
+      dbGrid.appendChild(makeStatCard(null, formatBytes(info.database.sizeBytes), 'DB Size'));
+      dbGrid.appendChild(makeStatCard(null, formatBytes(info.database.walSizeBytes), 'WAL Size'));
+      dbGrid.appendChild(makeStatCard(null, info.database.pageCount.toLocaleString(), 'Page Count'));
+      dbGrid.appendChild(makeStatCard(null, formatBytes(info.database.pageSize), 'Page Size'));
+    }
+
+    // Process Memory grid
+    var memGrid = document.getElementById('process-memory-grid');
+    if (memGrid) {
+      memGrid.innerHTML = '';
+      memGrid.appendChild(makeStatCard(null, formatBytes(info.memory.rssBytes), 'RSS'));
+      memGrid.appendChild(makeStatCard(null, formatBytes(info.memory.heapUsedBytes), 'Heap Used'));
+      memGrid.appendChild(makeStatCard(null, formatBytes(info.memory.heapTotalBytes), 'Heap Total'));
+    }
+  }
+
+  async function refreshSystemInfo() {
+    var info = await fetchSystemInfo();
+    renderSystemInfo(info);
+  }
+
+  // =========================================================================
+  // Sidebar Navigation
+  // =========================================================================
+
+  function initSettingsSidebar() {
+    var items = document.querySelectorAll('.settings-sidebar-item');
+    var panels = document.querySelectorAll('.settings-panel');
+
+    function activateTab(tabName) {
+      items.forEach(function (item) {
+        item.classList.toggle('active', item.getAttribute('data-settings-tab') === tabName);
+      });
+      panels.forEach(function (panel) {
+        panel.classList.toggle('active', panel.getAttribute('data-settings-panel') === tabName);
+      });
+      try { localStorage.setItem('laminark-settings-tab', tabName); } catch (e) {}
+    }
+
+    items.forEach(function (item) {
+      item.addEventListener('click', function () {
+        activateTab(item.getAttribute('data-settings-tab'));
+      });
+    });
+
+    // Restore last-selected tab
+    var saved = null;
+    try { saved = localStorage.getItem('laminark-settings-tab'); } catch (e) {}
+    if (saved && document.querySelector('[data-settings-panel="' + saved + '"]')) {
+      activateTab(saved);
+    }
+  }
+
+  // =========================================================================
   // Init
   // =========================================================================
 
   function initSettings() {
+    initSettingsSidebar();
     // Reset action buttons
     var resetBtns = document.querySelectorAll('.reset-action-btn');
     resetBtns.forEach(function (btn) {
@@ -1114,8 +1382,12 @@
       projectSelector.addEventListener('change', updateResetScopeProjectName);
     }
 
+    // System info (fetched once, not re-fetched on project change)
+    refreshSystemInfo();
+
     // Config sections
     initHygiene();
+    initHygieneConfig();
     initToolVerbosity();
     initTopicDetection();
     initGraphExtraction();

@@ -353,8 +353,11 @@ function createSimulation() {
   var width = containerEl ? containerEl.clientWidth : 800;
   var height = containerEl ? containerEl.clientHeight : 600;
 
+  var simNodeIds = new Set(nodeData.filter(function (d) { return !d.hidden; }).map(function (d) { return d.id; }));
   var visibleEdges = edgeData.filter(function (d) {
-    return !d.source.hidden && !d.target.hidden;
+    var srcId = typeof d.source === 'object' ? d.source.id : d.source;
+    var tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+    return simNodeIds.has(srcId) && simNodeIds.has(tgtId);
   });
 
   // Degree-scaled repulsion: more links = stronger push away
@@ -1638,7 +1641,7 @@ function updateBreadcrumbs() {
 // ---------------------------------------------------------------------------
 
 function setLayout(layoutName) {
-  var validLayouts = ['clustered', 'hierarchical', 'concentric', 'communities'];
+  var validLayouts = ['clustered', 'hierarchical', 'concentric', 'communities', 'detangle'];
   if (validLayouts.indexOf(layoutName) === -1) return;
 
   var previousLayout = currentLayout;
@@ -1661,6 +1664,8 @@ function setLayout(layoutName) {
       applyHierarchicalLayout();
     } else if (layoutName === 'concentric') {
       applyConcentricLayout();
+    } else if (layoutName === 'detangle') {
+      applyDetangleLayout();
     } else {
       applyClusteredLayout();
     }
@@ -1870,6 +1875,119 @@ function applyCommunitiesLayout() {
       console.error('[laminark:graph] Failed to fetch communities:', err);
       applyClusteredLayout();
     });
+}
+
+// ---------------------------------------------------------------------------
+// Detangle layout — minimizes edge crossings via custom force
+// ---------------------------------------------------------------------------
+
+/**
+ * Tests whether line segment (p1→p2) crosses (p3→p4).
+ * Returns true if the segments properly intersect.
+ */
+function segmentsIntersect(p1x, p1y, p2x, p2y, p3x, p3y, p4x, p4y) {
+  var d1x = p2x - p1x, d1y = p2y - p1y;
+  var d2x = p4x - p3x, d2y = p4y - p3y;
+  var cross = d1x * d2y - d1y * d2x;
+  if (Math.abs(cross) < 1e-10) return false;
+  var t = ((p3x - p1x) * d2y - (p3y - p1y) * d2x) / cross;
+  var u = ((p3x - p1x) * d1y - (p3y - p1y) * d1x) / cross;
+  return t > 0.01 && t < 0.99 && u > 0.01 && u < 0.99;
+}
+
+/**
+ * Custom D3 force that detects edge crossings and pushes nodes apart
+ * to untangle the graph. Runs O(E^2) per tick — fine for <1000 edges.
+ */
+function forceUncross(edges) {
+  var strength = 8;
+  var nodes;
+
+  function force(alpha) {
+    if (!nodes || edges.length < 2) return;
+    var effectiveStrength = strength * alpha;
+
+    for (var i = 0; i < edges.length; i++) {
+      var e1 = edges[i];
+      var s1 = e1.source, t1 = e1.target;
+      if (!s1 || !t1 || s1.x == null || t1.x == null) continue;
+
+      for (var j = i + 1; j < edges.length; j++) {
+        var e2 = edges[j];
+        var s2 = e2.source, t2 = e2.target;
+        if (!s2 || !t2 || s2.x == null || t2.x == null) continue;
+
+        // Skip if edges share a node
+        if (s1 === s2 || s1 === t2 || t1 === s2 || t1 === t2) continue;
+
+        if (segmentsIntersect(s1.x, s1.y, t1.x, t1.y, s2.x, s2.y, t2.x, t2.y)) {
+          // Push the midpoints of the two edges apart
+          var m1x = (s1.x + t1.x) / 2, m1y = (s1.y + t1.y) / 2;
+          var m2x = (s2.x + t2.x) / 2, m2y = (s2.y + t2.y) / 2;
+          var dx = m1x - m2x, dy = m1y - m2y;
+          var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          var push = effectiveStrength / dist;
+          var fx = dx * push, fy = dy * push;
+
+          // Apply to non-fixed nodes of edge 1 (push away from edge 2)
+          if (s1.fx == null) { s1.vx += fx * 0.5; s1.vy += fy * 0.5; }
+          if (t1.fx == null) { t1.vx += fx * 0.5; t1.vy += fy * 0.5; }
+          // Apply to non-fixed nodes of edge 2 (push opposite direction)
+          if (s2.fx == null) { s2.vx -= fx * 0.5; s2.vy -= fy * 0.5; }
+          if (t2.fx == null) { t2.vx -= fx * 0.5; t2.vy -= fy * 0.5; }
+        }
+      }
+    }
+  }
+
+  force.initialize = function (_nodes) { nodes = _nodes; };
+  force.strength = function (s) { if (!arguments.length) return strength; strength = s; return force; };
+
+  return force;
+}
+
+function applyDetangleLayout() {
+  isStaticLayout = false;
+  nodeData.forEach(function (d) { d.fx = null; d.fy = null; });
+
+  // Let renderGraph create the standard simulation first (it calls createSimulation)
+  renderGraph();
+
+  // Now enhance the existing simulation with the uncross force
+  if (simulation) {
+    var simNodeIds = new Set(nodeData.filter(function (d) { return !d.hidden; }).map(function (d) { return d.id; }));
+    var visibleEdges = edgeData.filter(function (d) {
+      var srcId = typeof d.source === 'object' ? d.source.id : d.source;
+      var tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+      return simNodeIds.has(srcId) && simNodeIds.has(tgtId);
+    });
+
+    var width = containerEl ? containerEl.clientWidth : 800;
+    var height = containerEl ? containerEl.clientHeight : 600;
+
+    // Widen link distances and strengthen repulsion for more spacing
+    simulation
+      .force('link', d3.forceLink(visibleEdges)
+        .id(function (d) { return d.id; })
+        .distance(function (d) {
+          var srcDeg = (typeof d.source === 'object' ? d.source._degree : 0) || 0;
+          var tgtDeg = (typeof d.target === 'object' ? d.target._degree : 0) || 0;
+          return 140 + Math.sqrt(srcDeg + tgtDeg) * 25;
+        })
+        .strength(0.8))
+      .force('collide', d3.forceCollide().radius(function (d) {
+        return getNodeSize(d) + 20;
+      }).strength(1))
+      .force('uncross', forceUncross(visibleEdges).strength(12))
+      .force('x', d3.forceX(width / 2).strength(0.02))
+      .force('y', d3.forceY(height / 2).strength(0.02))
+      .alphaDecay(0.01)
+      .velocityDecay(0.4)
+      .alpha(1)
+      .restart();
+  }
+
+  setTimeout(function () { fitToView(); }, 1500);
 }
 
 function initLayoutSelector() {
