@@ -1,157 +1,181 @@
 ---
 phase: 22-knowledge-ingestion-pipeline
 plan: 02
-completed_at: 2026-02-23T22:04:30Z
-status: complete
+wave: 2
+completed: 2026-02-23
 ---
 
-# Phase 22-02: MCP Tool Integration & Map-Codebase Command — COMPLETE
+# Phase 22 Wave 2 - Summary
 
-## Summary
+## Objectives
+Wire the knowledge ingestion pipeline into Laminark's MCP tool interface and create the `/laminark:map-codebase` slash command for user-facing ingestion workflows.
 
-Wired the knowledge ingestion pipeline into Laminark's MCP tool interface and created the `/laminark:map-codebase` slash command. Claude can now trigger ingestion programmatically, and users have a guided workflow for codebase documentation integration.
+**Status: ✅ COMPLETE**
 
 ## Deliverables
 
-### 1. `src/mcp/tools/ingest-knowledge.ts`
+### Task 1: ingest_knowledge MCP Tool ✅
+**File:** `src/mcp/tools/ingest-knowledge.ts`
 
-**Exports:**
-- `registerIngestKnowledge(server, db, projectHashRef, statusCache): void`
+Implements the `registerIngestKnowledge` function that:
 
-**Tool Registration:**
-- Name: `'ingest_knowledge'`
-- Title: "Ingest Knowledge"
-- Description: "Ingest structured markdown documents from a directory into queryable per-project memories."
-
-**Input Schema:**
+**Function Signature:**
 ```typescript
-{
-  directory?: string  // Optional; auto-detects if omitted
-}
+export function registerIngestKnowledge(
+  server: McpServer,
+  db: BetterSqlite3.Database,
+  projectHashRef: ProjectHashRef,
+  notificationStore: NotificationStore | null = null,
+  statusCache: StatusCache | null = null,
+): void
 ```
 
-**Behavior:**
-- If directory provided: ingests that directory directly
-- If directory omitted:
-  1. Queries `project_metadata` table for `project_path` matching current `projectHash`
-  2. Calls `KnowledgeIngester.detectKnowledgeDir(projectPath)` to find `.planning/codebase/` or `.laminark/codebase/`
-  3. Returns clear error if project path not found or knowledge directory doesn't exist
+**Tool Configuration:**
+- Name: `ingest_knowledge`
+- Title: "Ingest Knowledge"
+- Description: "Ingest structured markdown documents from a directory into queryable per-project memories. Reads .md files, splits by ## headings, and stores each section as a reference observation. Supports .planning/codebase/ (GSD output) and .laminark/codebase/."
+- Input schema: `directory` (string, optional)
 
-**Response:**
-- Success: `"Ingested {filesProcessed} files: {sectionsCreated} sections created, {sectionsRemoved} stale sections removed."`
-- Error: Clear, actionable error message with troubleshooting steps
+**Implementation Details:**
+- **Auto-detection:** When directory is omitted, queries project_metadata table to find project_path, then calls `KnowledgeIngester.detectKnowledgeDir()` to locate .planning/codebase/ or .laminark/codebase/
+- **Error handling:** Returns clear error messages if project path cannot be resolved or knowledge directory not found
+- **Ingestion:** Creates `KnowledgeIngester` instance and calls `ingestDirectory(resolvedDir)`
+- **Response formatting:** Uses `verboseResponse()` to return stats-based message with three verbosity levels
+- **Notification integration:** Prepends pending notifications to response via `notificationStore.consumePending()`
+- **Cache management:** Calls `statusCache?.markDirty()` after successful ingestion
 
-**Side Effects:**
-- Calls `statusCache?.markDirty()` after successful ingestion
-- Follows save-memory.ts pattern for error handling and logging
-
-**Integration:**
-- Imported and registered in `src/index.ts` after `registerSaveMemory`
-- Passes: `server, db.db, projectHashRef, statusCache`
-
-### 2. `commands/map-codebase.md`
-
-**Command:** `/laminark:map-codebase [optional directory path]`
-
-**Workflow:**
-1. Check if `.planning/codebase/` exists with .md files:
-   - YES → Offer to ingest: "I found codebase documentation. Ingest into Laminark?"
-   - If user agrees, call `ingest_knowledge` with absolute path to `.planning/codebase/`
-
-2. If no existing docs, check for GSD availability:
-   - GSD available → Guide user: "Run `/gsd:map-codebase` first to generate docs, then I'll ingest them."
-   - GSD not available → Suggest installing GSD or placing docs in `.laminark/codebase/` manually
-
-3. If directory argument provided:
-   - Call `ingest_knowledge` directly with that path
-
-**User Guidance:**
-- 3 example scenarios (GSD docs exist, no docs with GSD available, explicit directory)
-- Clear explanation of architecture: GSD is analysis layer, Laminark is knowledge layer
-- Notes on idempotency, immediate queryability, per-project scoping, source tagging
-
-**Format:**
-- Follows command conventions from `remember.md` and `recall.md`
-- Includes Usage, Instructions, Examples, and Notes sections
-- Clear, user-friendly language with actionable guidance
-
-## Architecture & Integration
-
+**Wiring in index.ts (line 314):**
+```typescript
+registerIngestKnowledge(server, db.db, projectHashRef, notificationStore, statusCache);
 ```
-User → /laminark:map-codebase
+
+### Task 2: /laminark:map-codebase Slash Command ✅
+**File:** `commands/map-codebase.md`
+
+Implements user-facing command that guides codebase mapping workflow:
+
+**Command Format:**
+- Path: `/laminark:map-codebase [directory]`
+- Title: "Map and ingest codebase knowledge into Laminark for instant recall"
+
+**Instruction Flow:**
+1. **Check for existing docs:**
+   - If `.planning/codebase/` exists with .md files: Offer direct ingestion via `ingest_knowledge` MCP tool
+   - User accepts → call `ingest_knowledge` with absolute path
+
+2. **Check GSD availability:**
+   - If GSD plugin available: Instruct user to run `/gsd:map-codebase` first, then return to ingest
+   - If GSD not available: Suggest installing GSD plugin or placing manual docs in `.laminark/codebase/`
+
+3. **Explicit directory support:**
+   - If directory argument provided: Call `ingest_knowledge` with that directory directly
+
+4. **Confirmation:**
+   - After successful ingestion: "Ingested X files (Y sections) into Laminark. Your codebase knowledge is now queryable with /laminark:recall."
+
+**Examples Included:**
+- Existing GSD docs ready to ingest
+- User provides explicit directory
+- No docs found, GSD available
+- Manual docs workflow
+
+**Notes Section:**
+- Explains Laminark's role as knowledge layer, GSD as analysis layer
+- Documents idempotent re-ingestion behavior
+- Clarifies instant recall via `/laminark:recall`
+- Describes per-project scoping
+- Explains manual markdown workflow
+
+## Verification
+
+✅ All ingestion tests still pass (18/18):
+```
+npx vitest run src/ingestion/
+✓ src/ingestion/__tests__/markdown-parser.test.ts (9 tests)
+✓ src/ingestion/__tests__/knowledge-ingester.test.ts (9 tests)
+```
+
+✅ Tool registration verified:
+```
+grep registerIngestKnowledge src/index.ts  # Shows import + call
+grep ingest_knowledge src/mcp/tools/ingest-knowledge.ts  # Shows tool name
+```
+
+✅ Command file created:
+```
+ls -la commands/map-codebase.md  # File exists
+grep "ingest_knowledge" commands/map-codebase.md  # References tool
+```
+
+## Wave 2 Requirements Coverage
+
+| Requirement | Status | Notes |
+|---|---|---|
+| Claude can call ingest_knowledge MCP tool | ✅ | Tool registered with McpServer |
+| Auto-detects knowledge directory | ✅ | Queries project_metadata, calls detectKnowledgeDir |
+| Returns clear stats | ✅ | Files processed, sections created, sections removed |
+| /laminark:map-codebase command | ✅ | Guides users through GSD delegation flow |
+| Tool wired into index.ts | ✅ | Import + registration call with correct parameters |
+
+## Architecture Integration
+
+**MCP Tool Layer:**
+- `ingest_knowledge` tool allows Claude to trigger ingestion programmatically
+- Follows same pattern as `save_memory` and `recall` tools
+- Proper error handling and response formatting via `verboseResponse()`
+
+**User-Facing Command:**
+- `/laminark:map-codebase` slash command for explicit user workflows
+- Integrates with GSD ecosystem (suggests delegation to GSD)
+- Supports both auto-detection and manual ingestion
+
+**Data Flow:**
+```
+User Input (.md files)
   ↓
-[Detect .planning/codebase/ in current project]
+/laminark:map-codebase command
   ↓
-[If found, offer to ingest → ingest_knowledge MCP tool]
-[If not found, suggest /gsd:map-codebase → /gsd:map-codebase → then back to step 1]
+ingest_knowledge MCP tool
   ↓
 KnowledgeIngester.ingestDirectory()
   ↓
-Parse markdown → Create reference observations
+parseMarkdownSections() (from Wave 1)
   ↓
-Return stats: "Ingested X files (Y sections)"
+ObservationRepository.createClassified()
+  ↓
+Queryable per-project memories (kind=reference, classification=discovery)
 ```
-
-## Verification Checklist
-
-- [x] `registerIngestKnowledge` exported from ingest-knowledge.ts
-- [x] MCP tool properly registered with correct schema
-- [x] Tool accepts optional directory parameter
-- [x] Auto-detection queries project_metadata correctly
-- [x] Error handling matches save-memory.ts pattern
-- [x] Integration in src/index.ts at correct location
-- [x] statusCache marked dirty after successful ingestion
-- [x] /laminark:map-codebase command file created at correct path
-- [x] Command format follows project conventions
-- [x] Command includes all 3 example scenarios
-- [x] Command explains GSD delegation and architecture
-- [x] All ingestion tests still pass (no regressions)
-
-## Test Results
-
-```
-✓ src/ingestion/__tests__/markdown-parser.test.ts (9 tests) — 3ms
-✓ src/ingestion/__tests__/knowledge-ingester.test.ts (9 tests) — 35ms
-
-Test Files: 2 passed (2)
-Tests: 18 passed (18)
-Duration: 187ms
-```
-
-No regressions. All existing tests continue to pass.
 
 ## Commits
 
-- `b88ba40` feat(22-02): ingest_knowledge MCP tool and map-codebase command
+- `04071eb` feat(22-02): implement ingest_knowledge MCP tool and map-codebase command
 
-## Requirements Met
+## Integration with Previous Phases
 
-- [x] FR-2.1: Markdown files split by ## headings (via ingester)
-- [x] FR-2.2: Each section is a kind=reference observation (via ingester)
-- [x] FR-2.3: Claude can call ingest_knowledge MCP tool (tool registered and wired)
-- [x] FR-2.4: Re-ingestion replaces stale sections (via idempotent upsert)
-- [x] FR-2.5: Removed sections cleaned up on re-ingestion (via soft-delete)
+- **Wave 1 (Ingestion Foundation):** Uses `KnowledgeIngester` and `parseMarkdownSections` from Wave 1
+- **Observation Storage:** Leverages existing `ObservationRepository` for persistence
+- **Project Scoping:** Enforces per-project knowledge via `projectHash` parameter
+- **Notification System:** Integrates with `NotificationStore` for communication
+- **Status Management:** Uses `StatusCache` to mark dirty state after ingestion
 
-## User-Facing Features
+## Completion Status
 
-1. **MCP Tool: `ingest_knowledge`**
-   - Claude can programmatically trigger knowledge ingestion
-   - Auto-detection of knowledge directories from project metadata
-   - Clear error messages for troubleshooting
-   - Immediate stats on ingestion results
+**Phase 22 is now complete (Waves 1 & 2):**
+- ✅ Wave 1: Markdown parser + Knowledge ingester foundation
+- ✅ Wave 2: MCP tool + Slash command user interface
 
-2. **Slash Command: `/laminark:map-codebase`**
-   - User-friendly guided workflow
-   - GSD integration detection and guidance
-   - Support for explicit directory paths
-   - Clear explanation of architecture and capabilities
+The knowledge ingestion pipeline is fully operational:
+1. Structured markdown from GSD (or manual) can be ingested via MCP tool
+2. Claude can programmatically trigger ingestion
+3. Users have clear command-line interface via `/laminark:map-codebase`
+4. All knowledge is queryable with `/laminark:recall`
+5. Per-project scoping ensures isolation
+6. Idempotent re-ingestion prevents duplicates
 
 ## Next Steps
 
-Phase 22 core functionality is complete. Knowledge ingestion pipeline is now:
-- ✓ Implemented and tested (22-01)
-- ✓ Integrated into MCP interface (22-02)
-- ✓ Exposed to users via slash command (22-02)
-
-Ready for Phase 23+: Recall optimization, GSD integration, and knowledge context injection.
-
+Phase 22 is complete. The next phase would involve:
+- Testing user workflows with real GSD output
+- Monitoring ingestion performance at scale
+- Gathering feedback on knowledge discovery patterns
+- Potentially adding refinements to section granularity or search weighting
