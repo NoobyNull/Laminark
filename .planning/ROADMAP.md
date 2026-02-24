@@ -61,16 +61,43 @@
 
 **Philosophy:** Laminark doesn't duplicate — it delegates, ingests, and understands. GSD maps codebases. Playwright browses. Agent SDK builds agents. Laminark knows what they all do and when to use them.
 
-### Phase 22: Knowledge Ingestion Pipeline
+### Phase 22: Knowledge Ingestion Pipeline ✅ PLANNING COMPLETE
 
 **Goal:** Structured documents become queryable per-project memories
 
-- Parse structured markdown sections into discrete reference memories (kind="reference")
-- Each section becomes separate memory with title, project tag, source doc reference
-- Idempotent ingestion: re-running replaces stale memories by matching title+project
-- Ingest from .planning/codebase/ (GSD output), .laminark/codebase/, or any user-specified directory
-- /laminark:map-codebase skill: thin wrapper that detects GSD → suggests /gsd:map-codebase (or install GSD) → ingests output after mapping completes
-- New DB columns/tags for knowledge source identification
+**Status:** Planning complete — 5 documents, 8 design decisions locked in, ready for implementation
+
+**Formats:** Markdown, JSON, CSV, Plaintext, Code (5 parsers)
+
+**Key Decisions:**
+- Chunk at format-native boundaries (preserve semantics, enable updates)
+- Store metadata as JSON blobs + document_registry table (minimal schema changes)
+- SHA256 content hash deduplication (enable document lifecycle)
+- Unified FTS5 search (no special indexing, consistent ranking)
+- Graceful degradation to plaintext on parse errors
+
+**Database:** Migration 022 adds document_registry and document_chunks tables
+
+**MCP Tool:** `ingest_document(content, filename, format_hint?, metadata?)`
+
+**Success Criteria:**
+- Query <500ms on 50k+ observations
+- 1MB document ingest <2s
+- Per-project isolation verified
+- 95%+ test coverage
+
+**Files:** 12 new source files + tests + 3 modified files
+
+**Effort:** 12-16 hours development + testing
+
+**Next:** Begin Step 1 — Database schema (Migration 022)
+
+**Planning Docs:**
+- [22-PLAN.md](.planning/phases/22-knowledge-ingestion-pipeline/22-PLAN.md) — Implementation steps
+- [22-ROADMAP.md](.planning/phases/22-knowledge-ingestion-pipeline/22-ROADMAP.md) — Timeline
+- [22-RESEARCH.md](.planning/phases/22-knowledge-ingestion-pipeline/22-RESEARCH.md) — Design decisions
+- [22-CONTEXT.md](.planning/phases/22-knowledge-ingestion-pipeline/22-CONTEXT.md) — Philosophy & constraints
+- [22-SUMMARY.md](.planning/phases/22-knowledge-ingestion-pipeline/22-SUMMARY.md) — Overview
 
 ### Phase 23: Deep Tool Capability Understanding
 
