@@ -70,7 +70,7 @@
 **Plans:** 2 plans
 
 Plans:
-- [ ] 22-01-PLAN.md — Markdown parser and KnowledgeIngester with idempotent upsert
+- [x] 22-01-PLAN.md — Markdown parser and KnowledgeIngester with idempotent upsert
 - [ ] 22-02-PLAN.md — MCP tool (ingest_knowledge) and /laminark:map-codebase command
 
 **Key Decisions:**
@@ -144,7 +144,7 @@ Plans:
 | 19. Path Detection & Storage | v2.2 | 3/3 | Complete | 2026-02-14 |
 | 20. Intelligence & MCP Tools | v2.2 | 3/3 | Complete | 2026-02-14 |
 | 21. Graph Visualization | v2.2 | 3/3 | Complete | 2026-02-14 |
-| 22. Knowledge Ingestion Pipeline | v2.3 | 0/2 | Planned | — |
+| 22. Knowledge Ingestion Pipeline | v2.3 | 1/2 | In Progress | — |
 | 23. Deep Tool Capability Understanding | v2.3 | 0/? | Pending | — |
 | 24. Hook-Driven Incremental Updates | v2.3 | 0/? | Pending | — |
 | 25. Session-Start Catch-Up | v2.3 | 0/? | Pending | — |

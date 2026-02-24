@@ -9,10 +9,10 @@ See: .planning/PROJECT.md (updated 2026-02-23)
 
 ## Current Position
 
-Phase: 22 of 26 (Bundled Codebase Mapper) — NOT STARTED
-Plan: 0 of ?
-Status: Milestone v2.3 Planning Complete
-Last activity: 2026-02-23 — Milestone scoped, requirements written, roadmap updated
+Phase: 22 of 26 (Knowledge Ingestion Pipeline) — IN PROGRESS
+Plan: 1 of 2
+Status: Plan 22-01 complete, plan 22-02 remaining
+Last activity: 2026-02-23 — Markdown parser and knowledge ingester implemented
 
 ## Performance Metrics
 
@@ -68,6 +68,8 @@ Recent decisions affecting current work:
 - [V2.3]: Standalone with GSD interop — works without GSD but uses its output when present
 - [V2.3]: Two-pronged freshness (hooks + session-start) — covers Claude-made and external changes
 - [V2.3]: Per-project knowledge scoping — each project isolated
+- [22-01]: Split on ## headings only for useful granularity; pre-classify as 'discovery'
+- [22-01]: detectKnowledgeDir is sync (existsSync); idempotent via soft-delete+recreate
 
 ### Pending Todos
 
@@ -81,5 +83,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Milestone v2.3 planning complete — ready for /gsd:plan-phase 22
+Stopped at: Completed 22-01-PLAN.md — parser and ingester done, ready for 22-02
 Resume file: None
