@@ -9,10 +9,10 @@ See: .planning/PROJECT.md (updated 2026-02-23)
 
 ## Current Position
 
-Phase: 22 of 26 (Knowledge Ingestion Pipeline) — IN PROGRESS
-Plan: 1 of 2
-Status: Plan 22-01 complete, plan 22-02 remaining
-Last activity: 2026-02-23 — Markdown parser and knowledge ingester implemented
+Phase: 22 of 26 (Knowledge Ingestion Pipeline) — COMPLETE
+Plan: 2 of 2
+Status: Phase 22 complete, ready for phase 23
+Last activity: 2026-02-23 — MCP tool wiring and slash command complete
 
 ## Performance Metrics
 
@@ -70,6 +70,8 @@ Recent decisions affecting current work:
 - [V2.3]: Per-project knowledge scoping — each project isolated
 - [22-01]: Split on ## headings only for useful granularity; pre-classify as 'discovery'
 - [22-01]: detectKnowledgeDir is sync (existsSync); idempotent via soft-delete+recreate
+- [22-02]: Auto-detect knowledge dir from project_metadata table rather than requiring explicit path
+- [22-02]: Delegate codebase analysis to GSD; Laminark handles storage and recall only
 
 ### Pending Todos
 
@@ -83,5 +85,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 22-01-PLAN.md — parser and ingester done, ready for 22-02
+Stopped at: Completed 22-02-PLAN.md — Phase 22 complete, ready for phase 23
 Resume file: None
