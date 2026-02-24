@@ -311,7 +311,7 @@ const statusCache = new StatusCache(
 
 const server = createServer();
 registerSaveMemory(server, db.db, projectHashRef, notificationStore, worker, embeddingStore, statusCache);
-registerIngestKnowledge(server, db.db, projectHashRef, statusCache);
+registerIngestKnowledge(server, db.db, projectHashRef, notificationStore, statusCache);
 registerRecall(server, db.db, projectHashRef, worker, embeddingStore, notificationStore, statusCache);
 registerTopicContext(server, db.db, projectHashRef, notificationStore);
 registerQueryGraph(server, db.db, projectHashRef, notificationStore);

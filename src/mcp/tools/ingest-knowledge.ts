@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { debug } from '../../shared/debug.js';
 import type { ProjectHashRef } from '../../shared/types.js';
+import type { NotificationStore } from '../../storage/notifications.js';
 import { KnowledgeIngester } from '../../ingestion/knowledge-ingester.js';
 import type { StatusCache } from '../status-cache.js';
 import { verboseResponse } from '../../config/tool-verbosity-config.js';
@@ -20,6 +21,7 @@ export function registerIngestKnowledge(
   server: McpServer,
   db: BetterSqlite3.Database,
   projectHashRef: ProjectHashRef,
+  notificationStore: NotificationStore | null = null,
   statusCache: StatusCache | null = null,
 ): void {
   server.registerTool(
@@ -62,7 +64,7 @@ export function registerIngestKnowledge(
             };
           }
 
-          resolvedDir = KnowledgeIngester.detectKnowledgeDir(row.project_path);
+          resolvedDir = await KnowledgeIngester.detectKnowledgeDir(row.project_path);
           if (!resolvedDir) {
             return {
               content: [
@@ -92,11 +94,21 @@ export function registerIngestKnowledge(
           `Ingested ${stats.filesProcessed} file(s) from ${resolvedDir}: ${stats.sectionsCreated} sections created, ${stats.sectionsRemoved} stale sections removed.`,
         );
 
+        // Prepend any pending notifications to the response
+        let finalResponse = responseText;
+        if (notificationStore) {
+          const pending = notificationStore.consumePending(projectHash);
+          if (pending.length > 0) {
+            const banner = pending.map(n => `[Laminark] ${n.message}`).join('\n');
+            finalResponse = banner + '\n\n' + finalResponse;
+          }
+        }
+
         return {
           content: [
             {
               type: 'text' as const,
-              text: responseText,
+              text: finalResponse,
             },
           ],
         };

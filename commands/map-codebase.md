@@ -4,55 +4,50 @@ Map and ingest codebase knowledge into Laminark for instant recall.
 
 ## Usage
 
-/laminark:map-codebase [optional directory path]
+/laminark:map-codebase [directory]
 
 ## Instructions
 
 When the user invokes this command:
 
-1. First, check if `.planning/codebase/` exists in the current project and contains .md files:
-   - If YES (GSD output is already available):
-     - Offer to ingest these existing docs: "I found codebase documentation in `.planning/codebase/`. Would you like me to ingest these into Laminark for instant recall?"
-     - If user agrees, call `ingest_knowledge` MCP tool with the directory parameter set to the absolute path of `.planning/codebase/` (e.g., `/path/to/project/.planning/codebase/`)
-     - After successful ingestion, confirm with stats: "Ingested X files (Y sections) into Laminark. You can now query this knowledge with /laminark:recall."
+1. Check if `.planning/codebase/` exists in the current project with .md files:
+   - If YES: Offer to ingest these existing GSD docs directly. If the user agrees, call the `ingest_knowledge` MCP tool with the directory parameter set to the absolute path of `.planning/codebase/`.
 
-2. If no existing docs are found, check if GSD plugin is available:
-   - Look for GSD as an available slash command or plugin (GSD plugin would provide `/gsd:` commands)
-   - If GSD is available: Tell the user "GSD can analyze your codebase and produce structured documentation. Run `/gsd:map-codebase` first to generate these docs, then I'll ingest them into Laminark for instant recall."
-   - If GSD is not available: Suggest either installing the GSD plugin, or manually placing markdown documentation in `.laminark/codebase/` directory
+2. If no existing docs found, check if GSD plugin is available:
+   - Look for GSD commands (check if /gsd:map-codebase is available)
+   - If GSD available: Tell the user to run `/gsd:map-codebase` first to generate codebase documentation, then return to ingest. Explain: "GSD will analyze your codebase and produce structured documentation in .planning/codebase/. Then I'll ingest it into Laminark for instant recall."
+   - If GSD not available: Suggest installing the GSD plugin for codebase mapping, or manually placing markdown files in `.laminark/codebase/` and then calling this command with that directory path.
 
-3. If a directory argument is provided explicitly:
-   - Call `ingest_knowledge` directly with that directory path (e.g., `/laminark:map-codebase /home/user/docs/`)
-   - After ingestion, show stats and confirm readiness for queries
+3. If a directory argument is provided, call `ingest_knowledge` with that directory path directly.
+
+4. After successful ingestion, confirm with the returned stats: "Ingested X files (Y sections) into Laminark. Your codebase knowledge is now queryable with /laminark:recall."
 
 ## Examples
 
-**Scenario 1: GSD docs already exist**
-
+### Example 1: Existing GSD docs ready to ingest
 User: /laminark:map-codebase
-Context: `.planning/codebase/` exists with several .md files
-Response: "I found codebase documentation in `.planning/codebase/` (STACK.md, ARCHITECTURE.md, etc.). Ingest these into Laminark now?"
-User: Yes
-Action: Call `ingest_knowledge` with directory="{projectPath}/.planning/codebase/"
-Result: "Ingested 3 files (27 sections) into Laminark. You can now query this knowledge with /laminark:recall."
+Analysis: Detects .planning/codebase/ exists
+Response: "I found existing GSD documentation in .planning/codebase/. Ready to ingest 7 markdown files into Laminark?"
+User: yes
+Action: Call ingest_knowledge with directory=/absolute/path/.planning/codebase/
+Result: "Ingested 7 files (42 sections) into Laminark. Your codebase knowledge is now queryable."
 
-**Scenario 2: No docs yet, GSD available**
+### Example 2: User provides explicit directory
+User: /laminark:map-codebase /my/docs/codebase
+Action: Call ingest_knowledge with directory=/my/docs/codebase/
+Result: "Ingested 5 files (28 sections) into Laminark."
 
+### Example 3: No docs found, GSD available
 User: /laminark:map-codebase
-Context: No `.planning/codebase/` exists, but `/gsd:map-codebase` is available
-Response: "No codebase documentation found. Run `/gsd:map-codebase` to analyze your codebase first, then I'll ingest it here for instant recall. GSD will produce structured markdown docs for architecture, dependencies, tech stack, etc."
-
-**Scenario 3: Explicit directory provided**
-
-User: /laminark:map-codebase /home/user/my-docs/
-Action: Call `ingest_knowledge` with directory="/home/user/my-docs/"
-Result: "Ingested 2 files (15 sections) into Laminark. You can now query this knowledge with /laminark:recall."
+Analysis: No .planning/codebase/ or .laminark/codebase/ found
+Analysis: /gsd:map-codebase is available
+Response: "No codebase documentation found. I can help you map your codebase using GSD. Run /gsd:map-codebase to analyze your project, then come back here to ingest the results."
 
 ## Notes
 
-- **Architecture**: Laminark is the knowledge layer (memory + recall), while GSD is the analysis layer (codebase mapping + documentation generation). Run GSD to produce docs, then use /laminark:map-codebase to ingest them.
-- **Idempotent**: Re-running this command on the same directory is safe. Stale sections are automatically cleaned up, and new ones are created from fresh docs.
-- **Immediately queryable**: After ingestion, all sections are classified as "discovery" and immediately visible to search and recall operations.
-- **Per-project scoping**: All ingested observations are automatically scoped to your current project. Different projects maintain separate knowledge stores.
-- **Source tagging**: Ingested sections are tagged with source="ingest:{filename}" for easy filtering and identification in queries.
+- **Delegation to GSD:** Laminark is a knowledge layer, not a codebase analysis tool. GSD handles mapping; Laminark handles remembering and recalling that knowledge.
+- **Idempotent re-runs:** Running ingest_knowledge multiple times on the same directory is safe. Previously ingested sections are replaced, avoiding duplicates.
+- **Instant recall:** After ingestion, query your codebase knowledge with `/laminark:recall {your question}`.
+- **Per-project scoping:** All ingested knowledge is automatically scoped to the current project. Switching projects gives you access to that project's ingested knowledge.
+- **Manual docs:** If you prefer not to use GSD, you can create markdown files manually in `.laminark/codebase/` with `## ` section headings. Each section becomes a queryable memory.
 
