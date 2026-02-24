@@ -131,7 +131,7 @@ export function handlePreToolUse(
       const snippet = result.snippet
         ? result.snippet.replace(/<\/?mark>/g, '')
         : truncate(result.observation.content, 120);
-      const age = formatAge(result.observation.created_at);
+      const age = formatAge(result.observation.createdAt);
       lines.push(`- ${truncate(snippet, 120)} (${result.observation.source}, ${age})`);
     }
   } catch {
