@@ -1,115 +1,109 @@
 ---
 phase: 22-knowledge-ingestion-pipeline
 plan: 01
-completed_at: 2026-02-23T22:02:00Z
-status: complete
+wave: 1
+completed: 2026-02-23
 ---
 
-# Phase 22-01: Markdown Section Parser & Knowledge Ingester — COMPLETE
+# Phase 22 Wave 1 - Summary
 
-## Summary
+## Objectives
+Build the markdown section parser and knowledge ingester that transforms structured markdown documents into discrete, queryable per-project reference memories.
 
-Implemented the core knowledge ingestion pipeline: a markdown section parser and knowledge ingester that transforms structured markdown documents into discrete, queryable reference observations with full idempotent re-ingestion support.
+**Status: ✅ COMPLETE**
 
 ## Deliverables
 
-### 1. `src/ingestion/markdown-parser.ts`
+### Task 1: Markdown Section Parser ✅
+**File:** `src/ingestion/markdown-parser.ts`
 
-**Exports:**
-- `ParsedSection` interface
-- `parseMarkdownSections(fileContent, sourceFile): ParsedSection[]`
+- Exports `ParsedSection` interface with title (doc > heading), heading, content, sourceFile, sectionIndex
+- Exports `parseMarkdownSections(fileContent, sourceFile)` function
+- Splits on `## ` headings only (not `###`)
+- Uses `# ` doc title as prefix: "DocTitle > HeadingText"
+- Handles edge cases:
+  - Code blocks with ` ``` ` (doesn't split on `##` inside them)
+  - Empty sections (skipped)
+  - Subsections (`###`) included in parent content
+  - Files with no `## ` headings (returns empty array)
 
-**Features:**
-- Splits markdown on `## ` headings only (level 2)
-- Uses `# ` doc title as prefix: "DocTitle > SectionHeading"
-- Respects code block boundaries (does not split on `## ` inside fenced blocks)
-- Skips empty sections and content before first heading
-- Keeps `### ` subsections within their parent `## ` content
+**Test Coverage:** `src/ingestion/__tests__/markdown-parser.test.ts`
+- 9 test cases, all passing
+- Covers basic parsing, title handling, subsections, code blocks, edge cases
 
-**Tests:** 9 comprehensive test cases covering:
-- Title + section parsing
-- No-title files
-- Empty sections
-- Subsections
-- Prose-only files
-- Whitespace normalization
-- Code block handling
-- Preamble skipping
+### Task 2: Knowledge Ingester with Idempotent Upsert ✅
+**File:** `src/ingestion/knowledge-ingester.ts`
 
-### 2. `src/ingestion/knowledge-ingester.ts`
-
-**Exports:**
-- `IngestionStats` interface (filesProcessed, sectionsCreated, sectionsRemoved)
-- `KnowledgeIngester` class with:
-  - `constructor(db, projectHash)`
-  - `async ingestDirectory(dirPath): IngestionStats`
-  - `async ingestFile(filePath): IngestionStats`
-  - `static detectKnowledgeDir(projectRoot): string | null`
+- Exports `IngestionStats` interface: `filesProcessed`, `sectionsCreated`, `sectionsRemoved`
+- Exports `KnowledgeIngester` class with:
+  - `constructor(db, projectHash)` for per-project scoping
+  - `async ingestDirectory(dirPath)` - processes all `.md` files in a directory
+  - `async ingestFile(filePath)` - processes a single `.md` file
+  - `static async detectKnowledgeDir(projectRoot)` - locates `.planning/codebase/` or `.laminark/codebase/`
 
 **Implementation Details:**
-- Reads all `.md` files from a directory
-- Filters to `.md` files only
-- Implements idempotent upsert via:
-  1. Soft-delete ALL existing observations with matching source + project
-  2. Create new observations for each parsed section
-- Each observation has:
-  - `kind: "reference"`
-  - `source: "ingest:{filename}"`
-  - `classification: "discovery"` (bypasses noise filter, immediately searchable)
-  - `sessionId: null` (not a user conversation)
-  - `title: section.title` (with doc title prefix)
-  - `content: section.content`
+- Reads files async first, then runs DB operations in single transaction (atomic, fast)
+- Source tag convention: `"ingest:{filename}"` (e.g., `"ingest:STACK.md"`)
+- **Idempotent strategy:**
+  1. For each file being re-ingested, soft-delete all existing observations with matching source+project_hash
+  2. Count soft-deleted sections for stats.sectionsRemoved
+  3. Parse new sections from file content
+  4. Create new observations with `kind='reference'`, `classification='discovery'`, `sessionId=null`
+  5. Increment stats.sectionsCreated
+- Each observation created with `ObservationRepository.createClassified()` for immediate searchability
 
-**Directory Detection:**
-- Checks `.planning/codebase/` first (GSD output)
-- Falls back to `.laminark/codebase/`
-- Returns `null` if neither exists
+**Test Coverage:** `src/ingestion/__tests__/knowledge-ingester.test.ts`
+- 9 test cases, all passing
+- Tests:
+  - Multi-file ingestion with correct stats
+  - Re-ingestion idempotency (old soft-deleted, new created)
+  - Directory detection (.planning/codebase priority over .laminark/codebase)
+  - Empty/non-existent directories handled gracefully
+  - Single file ingestion
 
-**Tests:** 9 comprehensive test cases covering:
-- Multi-file ingestion with correct stats
-- Idempotent re-ingestion (old deleted, new created)
-- Single file removal cleanup
-- Empty directory handling
-- Non-existent directory handling
-- Directory detection with precedence
+## Verification
 
-## Test Results
-
+✅ All ingestion tests pass (18/18):
 ```
-✓ src/ingestion/__tests__/markdown-parser.test.ts (9 tests) — 3ms
-✓ src/ingestion/__tests__/knowledge-ingester.test.ts (9 tests) — 36ms
-
-Test Files: 2 passed (2)
-Tests: 18 passed (18)
-Duration: 187ms
+npx vitest run src/ingestion/
+✓ src/ingestion/__tests__/markdown-parser.test.ts (9 tests)
+✓ src/ingestion/__tests__/knowledge-ingester.test.ts (9 tests)
 ```
 
-**All tests pass.** No failures or warnings.
+✅ Code structure meets requirements:
+- `parseMarkdownSections` correctly exports ParsedSection type and function
+- `KnowledgeIngester` correctly exports IngestionStats and KnowledgeIngester class
+- Source tag pattern `ingest:{filename}` implemented throughout
+- Idempotent upsert via soft-delete + re-create strategy implemented
+- Project isolation via projectHash enforced
 
-## Verification Checklist
+✅ Must-haves met:
+- ✅ Markdown files with ## headings split into discrete sections
+- ✅ Each section becomes kind=reference observation with title and source tag
+- ✅ Re-running ingestion replaces stale sections without creating duplicates
+- ✅ Removed sections cleaned up on re-ingestion (via soft-delete strategy)
+- ✅ All ingested observations scoped to correct project_hash
 
-- [x] `parseMarkdownSections` correctly splits GSD-format markdown into `ParsedSection` objects
-- [x] All test cases pass (18/18)
-- [x] Idempotent re-ingestion works (soft-delete + recreate pattern)
-- [x] Observations created with `kind="reference"`, `source="ingest:{filename}"`, `classification="discovery"`
-- [x] Directory detection helper returns correct path or null
-- [x] Code handles edge cases: empty dirs, missing dirs, empty files
-- [x] No unhandled exceptions
+## Wave 1 Requirements Coverage
+
+| Requirement | Status | Notes |
+|---|---|---|
+| FR-2.1: Parse markdown into reference memories | ✅ | parseMarkdownSections splits by ## headings |
+| FR-2.2: Each section = separate memory with kind=reference | ✅ | Each ParsedSection becomes one observation |
+| FR-2.3: Support ingesting .planning/codebase/ docs | ✅ | detectKnowledgeDir checks both locations |
+| FR-2.4: Idempotent re-ingestion | ✅ | Soft-delete+re-create strategy implemented |
+| FR-2.5: Per-project scoping | ✅ | projectHash enforced in constructor |
 
 ## Commits
 
 - `c2ebba5` feat(22-01): markdown section parser for knowledge ingestion
 - `45f6b5a` feat(22-01): implement knowledge ingester with idempotent upsert
 
-## Requirements Met
+## Next Steps (Wave 2)
 
-- [x] FR-2.1: Markdown files split into sections by ## headings
-- [x] FR-2.2: Each section becomes a kind=reference observation
-- [x] FR-2.4: Re-ingestion replaces stale sections without duplication
-- [x] FR-2.5: Removed sections cleaned up on re-ingestion
+Wave 1 is complete. The knowledge ingestion foundation is ready for Wave 2, which will:
+1. Create the MCP tool `ingest_knowledge.ts` that exposes ingestion via MCP
+2. Create the `/laminark:map-codebase` command file that orchestrates GSD + ingestion
+3. Implement integration with ObservationRepository and HaikuProcessor
 
-## Next Steps
-
-Ready for Phase 22-02: MCP tool integration (`ingest-knowledge` command) and UI integration (`map-codebase` command).
-
-The knowledge ingestion pipeline is now complete and ready for production use.
+See `22-02-PLAN.md` for Wave 2 execution plan.
