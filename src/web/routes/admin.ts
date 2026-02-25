@@ -462,3 +462,144 @@ adminRoutes.put('/config/tool-verbosity', async (c) => {
   saveToolVerbosityConfig({ level });
   return c.json(loadToolVerbosityConfig());
 });
+
+// =========================================================================
+// Project Deletion (GUI-only)
+// =========================================================================
+
+interface ProjectRow {
+  project_hash: string;
+  project_path: string;
+  display_name: string | null;
+  last_seen_at: string;
+}
+
+/**
+ * DELETE /api/admin/projects/:hash?confirm=true
+ *
+ * Permanently deletes all data for the given project.
+ * Requires `?confirm=true` query param as a safety guard.
+ * Cannot delete the currently active (most-recently-seen) project.
+ */
+adminRoutes.delete('/projects/:hash', (c) => {
+  const db = getDb(c);
+  const projectHash = c.req.param('hash');
+  const confirm = c.req.query('confirm');
+
+  if (confirm !== 'true') {
+    return c.json({ error: 'Safety guard: append ?confirm=true to proceed with deletion' }, 400);
+  }
+
+  // Determine the active project (most recently seen)
+  const activeProject = db.prepare(
+    'SELECT project_hash FROM project_metadata ORDER BY last_seen_at DESC LIMIT 1',
+  ).get() as { project_hash: string } | undefined;
+
+  if (activeProject && projectHash === activeProject.project_hash) {
+    return c.json({ error: 'Cannot delete the currently active project. Switch to a different project first.' }, 400);
+  }
+
+  // Validate the project exists
+  const project = db.prepare(
+    'SELECT project_hash, project_path FROM project_metadata WHERE project_hash = ?',
+  ).get(projectHash) as ProjectRow | undefined;
+
+  if (!project) {
+    return c.json({ error: `No project found with hash '${projectHash}'` }, 404);
+  }
+
+  // Safe helpers that ignore missing tables
+  const run = (sql: string, params: unknown[]) => {
+    try { db.prepare(sql).run(...params); } catch { /* table may not exist */ }
+  };
+  const exec = (sql: string) => {
+    try { db.exec(sql); } catch { /* trigger/table may not exist */ }
+  };
+
+  let obsCount = 0;
+  try {
+    const row = db.prepare('SELECT COUNT(*) as cnt FROM observations WHERE project_hash = ?').get(projectHash) as { cnt: number };
+    obsCount = row.cnt;
+  } catch { /* table may not exist */ }
+
+  db.transaction(() => {
+    // 1. Drop FTS triggers to avoid issues during bulk delete
+    exec('DROP TRIGGER IF EXISTS observations_ai');
+    exec('DROP TRIGGER IF EXISTS observations_au');
+    exec('DROP TRIGGER IF EXISTS observations_ad');
+
+    // 2. Embeddings (no FK cascade from observations)
+    run('DELETE FROM observation_embeddings WHERE observation_id IN (SELECT id FROM observations WHERE project_hash = ?)', [projectHash]);
+
+    // 3. Staleness flags
+    run('DELETE FROM staleness_flags WHERE observation_id IN (SELECT id FROM observations WHERE project_hash = ?)', [projectHash]);
+
+    // 4. Observations
+    run('DELETE FROM observations WHERE project_hash = ?', [projectHash]);
+
+    // 5. Rebuild FTS
+    exec("INSERT INTO observations_fts(observations_fts) VALUES('rebuild')");
+
+    // 6. Recreate FTS sync triggers
+    exec(`
+      CREATE TRIGGER observations_ai AFTER INSERT ON observations BEGIN
+        INSERT INTO observations_fts(rowid, title, content)
+          VALUES (new.rowid, new.title, new.content);
+      END
+    `);
+    exec(`
+      CREATE TRIGGER observations_au AFTER UPDATE ON observations BEGIN
+        INSERT INTO observations_fts(observations_fts, rowid, title, content)
+          VALUES('delete', old.rowid, old.title, old.content);
+        INSERT INTO observations_fts(rowid, title, content)
+          VALUES (new.rowid, new.title, new.content);
+      END
+    `);
+    exec(`
+      CREATE TRIGGER observations_ad AFTER DELETE ON observations BEGIN
+        INSERT INTO observations_fts(observations_fts, rowid, title, content)
+          VALUES('delete', old.rowid, old.title, old.content);
+      END
+    `);
+
+    // 7. Graph (edges have FK cascade from nodes, but delete both explicitly)
+    run('DELETE FROM graph_edges WHERE project_hash = ?', [projectHash]);
+    run('DELETE FROM graph_nodes WHERE project_hash = ?', [projectHash]);
+
+    // 8. Sessions and legacy project_id tables
+    run('DELETE FROM sessions WHERE project_hash = ?', [projectHash]);
+    run('DELETE FROM shift_decisions WHERE project_id = ?', [projectHash]);
+    run('DELETE FROM threshold_history WHERE project_id = ?', [projectHash]);
+    run('DELETE FROM context_stashes WHERE project_id = ?', [projectHash]);
+    run('DELETE FROM pending_notifications WHERE project_id = ?', [projectHash]);
+
+    // 9. Research buffer
+    run('DELETE FROM research_buffer WHERE project_hash = ?', [projectHash]);
+
+    // 10. Tool registry (project-scoped entries only)
+    run('DELETE FROM tool_registry WHERE project_hash = ?', [projectHash]);
+    run('DELETE FROM tool_usage_events WHERE project_hash = ?', [projectHash]);
+
+    // 11. Debug paths (path_waypoints cascade via FK)
+    run('DELETE FROM debug_paths WHERE project_hash = ?', [projectHash]);
+
+    // 12. Thought branches (branch_observations cascade via FK)
+    run('DELETE FROM thought_branches WHERE project_hash = ?', [projectHash]);
+
+    // 13. Routing state
+    run('DELETE FROM routing_patterns WHERE project_hash = ?', [projectHash]);
+    run('DELETE FROM routing_state WHERE project_hash = ?', [projectHash]);
+
+    // 14. Project metadata last
+    run('DELETE FROM project_metadata WHERE project_hash = ?', [projectHash]);
+  })();
+
+  return c.json({
+    ok: true,
+    deleted: {
+      projectPath: project.project_path,
+      projectHash,
+      observationsRemoved: obsCount,
+    },
+  });
+});
