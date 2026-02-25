@@ -85,6 +85,7 @@ export function registerReportTools(
             projectHash: scope === 'global' ? null : projectHash,
             description: tool.description ?? null,
             serverName,
+            triggerHints: null,
           });
           registered++;
         }

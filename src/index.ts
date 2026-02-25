@@ -333,7 +333,7 @@ registerDebugPathTools(server, pathRepo, pathTracker, notificationStore, project
 
 // Branch tracking (thought branch auto-detection)
 let branchRepo: BranchRepository | null = null;
-let branchTracker: BranchTracker | null = null;
+let branchTracker: BranchTracker | undefined;
 try {
   branchRepo = new BranchRepository(db.db, projectHashRef.current);
   branchTracker = new BranchTracker(branchRepo, db.db, projectHashRef.current);

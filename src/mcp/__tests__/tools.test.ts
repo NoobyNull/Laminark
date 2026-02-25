@@ -353,7 +353,7 @@ describe('SC-5: tool discoverability', () => {
 
   it('hooks.json exists and is valid', () => {
     // Read hooks.json from project root
-    const hooksPath = join(__dirname, '..', '..', '..', 'hooks', 'hooks.json');
+    const hooksPath = join(__dirname, '..', '..', '..', 'plugin', 'hooks', 'hooks.json');
     const raw = readFileSync(hooksPath, 'utf8');
     const hooks = JSON.parse(raw);
 

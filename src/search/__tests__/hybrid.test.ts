@@ -243,18 +243,20 @@ describe('SC-2: Hybrid search combines keyword and semantic scores', () => {
   });
 
   it("Results from vector-only have matchType 'vector'", async () => {
+    // Use a 32-char hex ID so resolveId() short-circuits without prefix search
+    const vecId = 'aabbccdd11223344aabbccdd11223344';
     const keywordResults: SearchResult[] = [];
     const vectorResults: EmbeddingSearchResult[] = [
-      { observationId: 'vec-only', distance: 0.1 },
+      { observationId: vecId, distance: 0.1 },
     ];
 
     const mockDb = makeMockDb();
     (mockDb.prepare as ReturnType<typeof vi.fn>).mockReturnValue({
       get: vi.fn().mockImplementation((...args: unknown[]) => {
-        if (args[0] === 'vec-only') {
+        if (args[0] === vecId) {
           return {
             rowid: 1,
-            id: 'vec-only',
+            id: vecId,
             project_hash: 'test-project',
             content: 'vector only content',
             title: null,
@@ -285,7 +287,7 @@ describe('SC-2: Hybrid search combines keyword and semantic scores', () => {
 
     const vectorOnly = result.filter((r) => r.matchType === 'vector');
     expect(vectorOnly.length).toBe(1);
-    expect(vectorOnly[0].observation.id).toBe('vec-only');
+    expect(vectorOnly[0].observation.id).toBe(vecId);
   });
 
   it('When worker is null, hybridSearch falls back to keyword-only', async () => {

@@ -21,7 +21,7 @@ import type { LaminarkDatabase } from '../../storage/database.js';
  * Uses LAMINARK_DATA_DIR env var to redirect storage to temp directory.
  */
 
-const HANDLER_PATH = resolve('dist/hooks/handler.js');
+const HANDLER_PATH = resolve('plugin/dist/hooks/handler.js');
 const PROJECT_DIR = resolve('/tmp/laminark-test-project');
 
 describe('hook handler end-to-end integration', () => {

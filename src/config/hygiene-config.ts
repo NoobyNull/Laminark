@@ -124,7 +124,7 @@ export function loadHygieneConfig(): HygieneConfig {
     const content = readFileSync(configPath, 'utf-8');
     const raw = JSON.parse(content) as Record<string, unknown>;
     cachedConfig = validate(raw);
-    debug('config', 'Loaded hygiene config', cachedConfig);
+    debug('config', 'Loaded hygiene config', { ...cachedConfig });
   } catch {
     cachedConfig = { ...DEFAULTS, signalWeights: { ...DEFAULTS.signalWeights }, tierThresholds: { ...DEFAULTS.tierThresholds } };
   }
