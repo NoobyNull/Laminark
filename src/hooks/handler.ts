@@ -325,4 +325,5 @@ async function main(): Promise<void> {
 // Wrap in .catch() -- hooks must NEVER fail. Always exit 0.
 main().catch((err: Error) => {
   debug('hook', 'Hook handler error', { error: err.message });
+  process.exit(0);
 });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-t8LZeB-u.mjs";
-import { A as hybridSearch, C as getNodesByType, D as upsertNode, E as traverseFrom, F as openDatabase, I as MIGRATIONS, L as runMigrations, M as SessionRepository, N as ObservationRepository, O as SaveGuard, R as debug, S as getNodeByNameAndType, T as insertEdge, _ as detectStaleness, a as ResearchBufferRepository, b as countEdgesForNode, c as inferScope, d as executePurge, f as findAnalysis, g as saveHygieneConfig, h as resetHygieneConfig, i as NotificationStore, j as SearchEngine, k as jaccardSimilarity$1, l as inferToolType, m as loadHygieneConfig, n as PathRepository, o as BranchRepository, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository, u as analyzeObservations, v as flagStaleObservation, w as initGraphSchema, x as getEdgesForNode, y as initStalenessSchema, z as debugTimed } from "./tool-registry-e710BvXq.mjs";
+import { A as hybridSearch, C as getNodesByType, D as upsertNode, E as traverseFrom, F as openDatabase, I as MIGRATIONS, L as runMigrations, M as SessionRepository, N as ObservationRepository, O as SaveGuard, R as debug, S as getNodeByNameAndType, T as insertEdge, _ as detectStaleness, a as ResearchBufferRepository, b as countEdgesForNode, c as inferScope, d as executePurge, f as findAnalysis, g as saveHygieneConfig, h as resetHygieneConfig, i as NotificationStore, j as SearchEngine, k as jaccardSimilarity$1, l as inferToolType, m as loadHygieneConfig, n as PathRepository, o as BranchRepository, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository, u as analyzeObservations, v as flagStaleObservation, w as initGraphSchema, x as getEdgesForNode, y as initStalenessSchema, z as debugTimed } from "./tool-registry-D8un_AcG.mjs";
 import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -2022,7 +2022,8 @@ function registerReportTools(server, toolRegistry, projectHashRef) {
 					source: "config:session-report",
 					projectHash: scope === "global" ? null : projectHash,
 					description: tool.description ?? null,
-					serverName
+					serverName,
+					triggerHints: null
 				});
 				registered++;
 			}
@@ -6988,6 +6989,88 @@ adminRoutes.put("/config/tool-verbosity", async (c) => {
 	saveToolVerbosityConfig({ level });
 	return c.json(loadToolVerbosityConfig());
 });
+/**
+* DELETE /api/admin/projects/:hash?confirm=true
+*
+* Permanently deletes all data for the given project.
+* Requires `?confirm=true` query param as a safety guard.
+* Cannot delete the currently active (most-recently-seen) project.
+*/
+adminRoutes.delete("/projects/:hash", (c) => {
+	const db = getDb(c);
+	const projectHash = c.req.param("hash");
+	if (c.req.query("confirm") !== "true") return c.json({ error: "Safety guard: append ?confirm=true to proceed with deletion" }, 400);
+	const activeProject = db.prepare("SELECT project_hash FROM project_metadata ORDER BY last_seen_at DESC LIMIT 1").get();
+	if (activeProject && projectHash === activeProject.project_hash) return c.json({ error: "Cannot delete the currently active project. Switch to a different project first." }, 400);
+	const project = db.prepare("SELECT project_hash, project_path FROM project_metadata WHERE project_hash = ?").get(projectHash);
+	if (!project) return c.json({ error: `No project found with hash '${projectHash}'` }, 404);
+	const run = (sql, params) => {
+		try {
+			db.prepare(sql).run(...params);
+		} catch {}
+	};
+	const exec = (sql) => {
+		try {
+			db.exec(sql);
+		} catch {}
+	};
+	let obsCount = 0;
+	try {
+		obsCount = db.prepare("SELECT COUNT(*) as cnt FROM observations WHERE project_hash = ?").get(projectHash).cnt;
+	} catch {}
+	db.transaction(() => {
+		exec("DROP TRIGGER IF EXISTS observations_ai");
+		exec("DROP TRIGGER IF EXISTS observations_au");
+		exec("DROP TRIGGER IF EXISTS observations_ad");
+		run("DELETE FROM observation_embeddings WHERE observation_id IN (SELECT id FROM observations WHERE project_hash = ?)", [projectHash]);
+		run("DELETE FROM staleness_flags WHERE observation_id IN (SELECT id FROM observations WHERE project_hash = ?)", [projectHash]);
+		run("DELETE FROM observations WHERE project_hash = ?", [projectHash]);
+		exec("INSERT INTO observations_fts(observations_fts) VALUES('rebuild')");
+		exec(`
+      CREATE TRIGGER observations_ai AFTER INSERT ON observations BEGIN
+        INSERT INTO observations_fts(rowid, title, content)
+          VALUES (new.rowid, new.title, new.content);
+      END
+    `);
+		exec(`
+      CREATE TRIGGER observations_au AFTER UPDATE ON observations BEGIN
+        INSERT INTO observations_fts(observations_fts, rowid, title, content)
+          VALUES('delete', old.rowid, old.title, old.content);
+        INSERT INTO observations_fts(rowid, title, content)
+          VALUES (new.rowid, new.title, new.content);
+      END
+    `);
+		exec(`
+      CREATE TRIGGER observations_ad AFTER DELETE ON observations BEGIN
+        INSERT INTO observations_fts(observations_fts, rowid, title, content)
+          VALUES('delete', old.rowid, old.title, old.content);
+      END
+    `);
+		run("DELETE FROM graph_edges WHERE project_hash = ?", [projectHash]);
+		run("DELETE FROM graph_nodes WHERE project_hash = ?", [projectHash]);
+		run("DELETE FROM sessions WHERE project_hash = ?", [projectHash]);
+		run("DELETE FROM shift_decisions WHERE project_id = ?", [projectHash]);
+		run("DELETE FROM threshold_history WHERE project_id = ?", [projectHash]);
+		run("DELETE FROM context_stashes WHERE project_id = ?", [projectHash]);
+		run("DELETE FROM pending_notifications WHERE project_id = ?", [projectHash]);
+		run("DELETE FROM research_buffer WHERE project_hash = ?", [projectHash]);
+		run("DELETE FROM tool_registry WHERE project_hash = ?", [projectHash]);
+		run("DELETE FROM tool_usage_events WHERE project_hash = ?", [projectHash]);
+		run("DELETE FROM debug_paths WHERE project_hash = ?", [projectHash]);
+		run("DELETE FROM thought_branches WHERE project_hash = ?", [projectHash]);
+		run("DELETE FROM routing_patterns WHERE project_hash = ?", [projectHash]);
+		run("DELETE FROM routing_state WHERE project_hash = ?", [projectHash]);
+		run("DELETE FROM project_metadata WHERE project_hash = ?", [projectHash]);
+	})();
+	return c.json({
+		ok: true,
+		deleted: {
+			projectPath: project.project_path,
+			projectHash,
+			observationsRemoved: obsCount
+		}
+	});
+});
 
 //#endregion
 //#region src/web/server.ts
@@ -7267,7 +7350,7 @@ const pathRepo = new PathRepository(db.db, projectHashRef.current);
 const pathTracker = new PathTracker(pathRepo);
 registerDebugPathTools(server, pathRepo, pathTracker, notificationStore, projectHashRef);
 let branchRepo = null;
-let branchTracker = null;
+let branchTracker;
 try {
 	branchRepo = new BranchRepository(db.db, projectHashRef.current);
 	branchTracker = new BranchTracker(branchRepo, db.db, projectHashRef.current);

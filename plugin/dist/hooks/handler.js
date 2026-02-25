@@ -1,5 +1,5 @@
 import { i as getProjectHash, n as getDatabaseConfig } from "../config-t8LZeB-u.mjs";
-import { E as traverseFrom, F as openDatabase, M as SessionRepository, N as ObservationRepository, O as SaveGuard, P as rowToObservation, R as debug, S as getNodeByNameAndType, a as ResearchBufferRepository, c as inferScope, i as NotificationStore, j as SearchEngine, k as jaccardSimilarity, l as inferToolType, n as PathRepository, o as BranchRepository, p as runAutoCleanup, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository } from "../tool-registry-e710BvXq.mjs";
+import { E as traverseFrom, F as openDatabase, M as SessionRepository, N as ObservationRepository, O as SaveGuard, P as rowToObservation, R as debug, S as getNodeByNameAndType, a as ResearchBufferRepository, c as inferScope, i as NotificationStore, j as SearchEngine, k as jaccardSimilarity, l as inferToolType, n as PathRepository, o as BranchRepository, p as runAutoCleanup, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository } from "../tool-registry-D8un_AcG.mjs";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
@@ -1584,7 +1584,7 @@ function handlePreToolUse(input, db, projectHash, pathRepo) {
 		const results = new SearchEngine(db, projectHash).searchKeyword(query, { limit: 3 });
 		for (const result of results) {
 			const snippet = result.snippet ? result.snippet.replace(/<\/?mark>/g, "") : truncate(result.observation.content, 120);
-			const age = formatAge(result.observation.created_at);
+			const age = formatAge(result.observation.createdAt);
 			lines.push(`- ${truncate(snippet, 120)} (${result.observation.source}, ${age})`);
 		}
 	} catch {
@@ -2406,6 +2406,7 @@ async function main() {
 }
 main().catch((err) => {
 	debug("hook", "Hook handler error", { error: err.message });
+	process.exit(0);
 });
 
 //#endregion
