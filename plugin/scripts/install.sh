@@ -1,9 +1,8 @@
 #!/bin/bash
 # Install Laminark as a Claude Code plugin
 #
-# Installs the npm package globally, then copies the plugin directory
-# into the Claude Code plugin cache so hooks, MCP servers, and skills
-# are all managed by the plugin system automatically.
+# Installs the npm package globally, registers it as a marketplace,
+# then installs the plugin through the official Claude Code plugin system.
 #
 # Usage: curl -fsSL https://raw.githubusercontent.com/NoobyNull/Laminark/master/plugin/scripts/install.sh | bash
 #   or:  ./plugin/scripts/install.sh
@@ -51,79 +50,44 @@ echo "Installing laminark globally via npm..."
 npm install -g laminark
 echo "✓ npm package installed"
 
-# Step 2: Locate the installed plugin directory
+# Step 2: Locate the installed package
 NPM_GLOBAL_ROOT=$(npm root -g)
-PLUGIN_SRC="$NPM_GLOBAL_ROOT/laminark/plugin"
+LAMINARK_ROOT="$NPM_GLOBAL_ROOT/laminark"
 
-if [ ! -d "$PLUGIN_SRC" ]; then
-  echo "Error: Plugin directory not found at $PLUGIN_SRC"
+if [ ! -d "$LAMINARK_ROOT/plugin" ]; then
+  echo "Error: Plugin directory not found at $LAMINARK_ROOT/plugin"
   echo "npm install may have failed."
   exit 1
 fi
 
-# Step 3: Copy plugin into Claude Code plugin cache
+NEW_VERSION=$(node -e "console.log(require('$LAMINARK_ROOT/package.json').version)")
+echo "  Version: $NEW_VERSION"
+
+# Step 3: Remove legacy installations
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
-NEW_VERSION=$(grep '"version"' "$NPM_GLOBAL_ROOT/laminark/package.json" | head -1 | sed -E 's/.*"version": "([^"]+)".*/\1/')
-CACHE_DIR="$CLAUDE_HOME/plugins/cache/laminark/laminark/$NEW_VERSION"
-
-echo ""
-echo "Installing plugin into Claude Code cache..."
-mkdir -p "$CACHE_DIR"
-rsync -a --delete \
-  --exclude '*.db' \
-  --exclude '*.db-wal' \
-  --exclude '*.db-shm' \
-  --exclude '.repair-log' \
-  --exclude '.npm-tmp' \
-  "$PLUGIN_SRC/" "$CACHE_DIR/"
-echo "✓ Plugin installed to $CACHE_DIR"
-
-# Step 4: Register in installed_plugins.json
-INSTALLED_FILE="$CLAUDE_HOME/plugins/installed_plugins.json"
-mkdir -p "$CLAUDE_HOME/plugins"
-
-node -e '
-const fs = require("fs");
-const path = process.argv[1];
-const version = process.argv[2];
-
-let data = { version: 2, plugins: {} };
-if (fs.existsSync(path)) {
-  try { data = JSON.parse(fs.readFileSync(path, "utf8")); } catch {}
-}
-
-data.plugins.laminark = {
-  marketplace: "laminark",
-  version: version,
-  enabled: true
-};
-
-fs.writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
-' "$INSTALLED_FILE" "$NEW_VERSION"
-echo "✓ Plugin registered"
-
-# Step 5: Enable plugin in user settings
 SETTINGS_FILE="$CLAUDE_HOME/settings.json"
 
-node -e '
+# Remove legacy manual hooks and MCP registrations from settings
+if [ -f "$SETTINGS_FILE" ]; then
+  node -e '
 const fs = require("fs");
 const settingsPath = process.argv[1];
 
 let settings = {};
-if (fs.existsSync(settingsPath)) {
-  try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch {}
-}
+try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch {}
 
-// Enable the plugin
-if (!settings.enabledPlugins) settings.enabledPlugins = {};
-settings.enabledPlugins["laminark@laminark"] = true;
+let changed = false;
 
-// Remove any legacy manual hooks from previous install method
+// Remove legacy manual hooks
 if (settings.hooks) {
   for (const [event, entries] of Object.entries(settings.hooks)) {
-    settings.hooks[event] = entries.filter(entry =>
+    const filtered = entries.filter(entry =>
       !(entry.hooks && entry.hooks.some(h => h.command && h.command.includes("laminark")))
     );
+    if (filtered.length !== entries.length) {
+      settings.hooks[event] = filtered;
+      changed = true;
+    }
     if (settings.hooks[event].length === 0) {
       delete settings.hooks[event];
     }
@@ -133,25 +97,46 @@ if (settings.hooks) {
   }
 }
 
-// Remove any legacy MCP registration (now handled by plugin .mcp.json)
+// Remove legacy MCP registration (now handled by plugin .mcp.json)
 if (settings.mcpServers && settings.mcpServers.laminark) {
   delete settings.mcpServers.laminark;
   if (Object.keys(settings.mcpServers).length === 0) {
     delete settings.mcpServers;
   }
+  changed = true;
 }
 
-fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+if (changed) {
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+  console.log("✓ Removed legacy hooks/MCP from settings");
+}
 ' "$SETTINGS_FILE"
-echo "✓ Plugin enabled in settings"
+fi
 
-# Step 6: Remove legacy MCP server registration if present
+# Remove legacy MCP server registration
 if claude mcp list 2>/dev/null | grep -q "^laminark:"; then
-  echo ""
-  echo "Removing legacy MCP server registration (now handled by plugin system)..."
+  echo "Removing legacy MCP server registration..."
   claude mcp remove laminark -s user 2>/dev/null || true
   echo "✓ Legacy MCP registration removed"
 fi
+
+# Step 4: Register the npm package as a marketplace source
+echo ""
+echo "Registering laminark marketplace..."
+
+# Remove existing marketplace registration to force re-add
+claude plugin marketplace remove laminark 2>/dev/null || true
+claude plugin marketplace add "$LAMINARK_ROOT"
+echo "✓ Marketplace registered"
+
+# Step 5: Install the plugin via Claude Code's plugin system
+echo ""
+echo "Installing plugin..."
+
+# Uninstall first to avoid conflicts
+claude plugin uninstall laminark@laminark 2>/dev/null || true
+claude plugin install laminark@laminark
+echo "✓ Plugin installed"
 
 # Done
 echo ""
@@ -164,7 +149,7 @@ echo "  1. Start a new Claude Code session"
 echo "  2. Verify with: /plugin (should show laminark)"
 echo "  3. Check tools with: /mcp (should show laminark tools)"
 
-# Step 7: Recommend GSD (Get Shit Done) workflow plugin
+# Step 6: Recommend GSD (Get Shit Done) workflow plugin
 echo ""
 GSD_INSTALLED=false
 if [ -d "${CLAUDE_HOME}/commands/gsd" ] || [ -d "${CLAUDE_HOME}/plugins/gsd" ] || [ -d "${CLAUDE_HOME}/get-shit-done" ]; then

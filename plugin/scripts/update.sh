@@ -1,6 +1,6 @@
 #!/bin/bash
 # Update Laminark to the latest version
-# Updates the npm package and syncs to the plugin cache
+# Updates the npm package and uses the plugin system to refresh the cache
 
 set -e
 
@@ -36,48 +36,20 @@ if [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
 else
   echo "✓ npm updated: v$CURRENT_VERSION → v$NEW_VERSION"
 
-  # Sync updated files to plugin cache
-  NPM_GLOBAL_ROOT=$(npm root -g)
-  PLUGIN_SRC="$NPM_GLOBAL_ROOT/laminark/plugin"
-  CACHE_DIR="$CLAUDE_HOME/plugins/cache/laminark/laminark/$NEW_VERSION"
-
-  if [ -d "$PLUGIN_SRC" ]; then
+  # Update via plugin system if marketplace is registered
+  if command -v claude &> /dev/null; then
     echo ""
-    echo "Syncing to plugin cache..."
+    echo "Updating plugin cache..."
 
-    # Remove old version directories (keep data)
-    for OLD_DIR in "$CLAUDE_HOME/plugins/cache/laminark/laminark"/*/; do
-      [ -d "$OLD_DIR" ] || continue
-      OLD_VERSION=$(basename "$OLD_DIR")
-      if [ "$OLD_VERSION" != "$NEW_VERSION" ] && [ ! -L "${OLD_DIR%/}" ]; then
-        rm -rf "$OLD_DIR"
-        echo "  Removed old cache: v$OLD_VERSION"
-      fi
-    done
+    # Update the marketplace to pick up new version
+    claude plugin marketplace update laminark 2>/dev/null || true
 
-    mkdir -p "$CACHE_DIR"
-    rsync -a --delete \
-      --exclude '*.db' \
-      --exclude '*.db-wal' \
-      --exclude '*.db-shm' \
-      --exclude '.repair-log' \
-      --exclude '.npm-tmp' \
-      "$PLUGIN_SRC/" "$CACHE_DIR/"
-
-    # Update installed_plugins.json
-    INSTALLED_FILE="$CLAUDE_HOME/plugins/installed_plugins.json"
-    if [ -f "$INSTALLED_FILE" ]; then
-      node -e '
-const fs = require("fs");
-const path = process.argv[1];
-const version = process.argv[2];
-let data = JSON.parse(fs.readFileSync(path, "utf8"));
-if (data.plugins.laminark) {
-  data.plugins.laminark.version = version;
-}
-fs.writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
-' "$INSTALLED_FILE" "$NEW_VERSION"
-    fi
+    # Update the plugin via the official system
+    claude plugin update laminark@laminark 2>/dev/null || {
+      # Fallback: uninstall and reinstall
+      claude plugin uninstall laminark@laminark 2>/dev/null || true
+      claude plugin install laminark@laminark 2>/dev/null || true
+    }
 
     echo "✓ Plugin cache updated to v$NEW_VERSION"
   fi
