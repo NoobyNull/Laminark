@@ -2,7 +2,7 @@
 # Laminark Doctor — diagnose and fix plugin health issues
 #
 # Checks:
-#   1. Global vs local plugin conflict (disables local if global is active)
+#   1. Global plugin enabled check
 #   2. All runtime dependencies installed and loadable
 #   3. Native addons built correctly
 #   4. Dist files present and non-empty
@@ -34,24 +34,21 @@ ok()   { echo "  ✓ $1"; }
 warn() { echo "  ✗ $1"; ((ISSUES++)); }
 info() { echo "  → $1"; }
 
-# --- 1. Global vs Local Plugin Conflict ---
+# --- 1. Global Plugin Check ---
 
 echo ""
-echo "=== Plugin Conflict Check ==="
+echo "=== Plugin Check ==="
 
 CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 LOCAL_SETTINGS="$PROJECT_ROOT/.claude/settings.local.json"
 
-global_enabled=false
 if [ -f "$CLAUDE_SETTINGS" ]; then
-  # Check if laminark is enabled globally (any marketplace key containing "laminark")
   if node -e "
     const s = require('$CLAUDE_SETTINGS');
     const ep = s.enabledPlugins || {};
     const active = Object.entries(ep).some(([k,v]) => k.includes('laminark') && v === true);
     process.exit(active ? 0 : 1);
   " 2>/dev/null; then
-    global_enabled=true
     ok "Global Laminark plugin is enabled"
   else
     info "Global Laminark plugin is not enabled"
@@ -60,55 +57,31 @@ else
   info "No global Claude settings found"
 fi
 
-# If global is enabled and we're in the dev directory, ensure local plugin is disabled
-if $global_enabled; then
-  local_disabled=false
-  if [ -f "$LOCAL_SETTINGS" ]; then
-    if node -e "
-      const s = require('$LOCAL_SETTINGS');
-      const ep = s.enabledPlugins || {};
-      const disabled = Object.entries(ep).some(([k,v]) => k.includes('laminark') && v === false);
-      process.exit(disabled ? 0 : 1);
-    " 2>/dev/null; then
-      local_disabled=true
-    fi
-  fi
-
-  if $local_disabled; then
-    ok "Local plugin correctly disabled (avoids conflict with global)"
-  else
-    warn "Global plugin enabled but local plugin NOT disabled — causes double-loading"
+# Check if local settings accidentally disable the plugin
+if [ -f "$LOCAL_SETTINGS" ]; then
+  if node -e "
+    const s = require('$LOCAL_SETTINGS');
+    const ep = s.enabledPlugins || {};
+    const disabled = Object.entries(ep).some(([k,v]) => k.includes('laminark') && v === false);
+    process.exit(disabled ? 0 : 1);
+  " 2>/dev/null; then
+    warn "Local settings disable Laminark plugin (enabledPlugins set to false)"
     if $FIX; then
-      # Read existing settings or create new
-      if [ -f "$LOCAL_SETTINGS" ]; then
-        node -e "
-          const fs = require('fs');
-          const s = JSON.parse(fs.readFileSync('$LOCAL_SETTINGS', 'utf-8'));
-          s.enabledPlugins = s.enabledPlugins || {};
-          // Disable any laminark plugin keys that exist globally
-          const gs = JSON.parse(fs.readFileSync('$CLAUDE_SETTINGS', 'utf-8'));
-          for (const key of Object.keys(gs.enabledPlugins || {})) {
-            if (key.includes('laminark')) s.enabledPlugins[key] = false;
+      node -e "
+        const fs = require('fs');
+        const s = JSON.parse(fs.readFileSync('$LOCAL_SETTINGS', 'utf-8'));
+        if (s.enabledPlugins) {
+          for (const key of Object.keys(s.enabledPlugins)) {
+            if (key.includes('laminark')) delete s.enabledPlugins[key];
           }
-          fs.writeFileSync('$LOCAL_SETTINGS', JSON.stringify(s, null, 2) + '\n');
-        "
-      else
-        mkdir -p "$PROJECT_ROOT/.claude"
-        node -e "
-          const fs = require('fs');
-          const gs = JSON.parse(fs.readFileSync('$CLAUDE_SETTINGS', 'utf-8'));
-          const disabled = {};
-          for (const key of Object.keys(gs.enabledPlugins || {})) {
-            if (key.includes('laminark')) disabled[key] = false;
-          }
-          const s = { enabledPlugins: disabled };
-          fs.writeFileSync('$LOCAL_SETTINGS', JSON.stringify(s, null, 2) + '\n');
-        "
-      fi
-      info "Fixed: disabled local plugin in .claude/settings.local.json"
+          if (Object.keys(s.enabledPlugins).length === 0) delete s.enabledPlugins;
+        }
+        fs.writeFileSync('$LOCAL_SETTINGS', JSON.stringify(s, null, 2) + '\n');
+      "
+      info "Fixed: removed plugin override from local settings"
       ((FIXED++))
     else
-      info "Run with --fix to disable local plugin automatically"
+      info "Run with --fix to remove the override"
     fi
   fi
 fi
