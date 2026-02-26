@@ -1,29 +1,38 @@
 #!/bin/bash
 # Local development installation for Laminark
-# Uses npm link + MCP server registration + hooks pointing at repo dist/
 #
-# Usage: ./plugin/scripts/local-install.sh [path-to-laminark]
+# Creates a symlink from the repo's plugin/ directory into the Claude Code
+# plugin cache, so changes take effect without copying files.
+#
+# Usage: ./plugin/scripts/local-install.sh [path-to-laminark-repo]
 #   Default path: current directory (.)
 
 set -e
 
 # Parse path argument (default to current directory)
-PLUGIN_PATH="${1:-.}"
+REPO_PATH="${1:-.}"
 
 # Resolve to absolute path
-if [[ "$PLUGIN_PATH" != /* ]]; then
-  PLUGIN_PATH="$(cd "$PLUGIN_PATH" && pwd)"
+if [[ "$REPO_PATH" != /* ]]; then
+  REPO_PATH="$(cd "$REPO_PATH" && pwd)"
 fi
 
-echo "Laminark Local Installer"
-echo "========================"
+PLUGIN_SRC="$REPO_PATH/plugin"
+
+echo "Laminark Local Installer (Dev Mode)"
+echo "===================================="
 echo ""
-echo "Installing from: $PLUGIN_PATH"
+echo "Repo: $REPO_PATH"
 
 # Validate prerequisites
-if [ ! -d "$PLUGIN_PATH/plugin/dist" ]; then
-  echo "Error: plugin/dist/ directory not found in $PLUGIN_PATH"
+if [ ! -d "$PLUGIN_SRC/dist" ]; then
+  echo "Error: plugin/dist/ directory not found"
   echo "Please run 'npm install && npm run build' first"
+  exit 1
+fi
+
+if [ ! -f "$PLUGIN_SRC/.claude-plugin/plugin.json" ]; then
+  echo "Error: plugin/.claude-plugin/plugin.json not found"
   exit 1
 fi
 
@@ -34,105 +43,121 @@ if ! command -v claude &> /dev/null; then
 fi
 
 # Get version from package.json
-if [ -f "$PLUGIN_PATH/package.json" ]; then
-  NEW_VERSION=$(grep '"version"' "$PLUGIN_PATH/package.json" | head -1 | sed -E 's/.*"version": "([^"]+)".*/\1/')
-  echo "Version: v$NEW_VERSION"
-fi
+NEW_VERSION=$(grep '"version"' "$REPO_PATH/package.json" | head -1 | sed -E 's/.*"version": "([^"]+)".*/\1/')
+echo "Version: v$NEW_VERSION"
 
-# Step 1: npm link from repo root
+# Step 1: npm link from repo root (optional — only for CLI bin entries)
 echo ""
 echo "Linking package globally..."
-cd "$PLUGIN_PATH"
-npm link
-echo "✓ npm link complete"
+cd "$REPO_PATH"
+if npm link 2>/dev/null; then
+  echo "✓ npm link complete"
+else
+  echo "⚠ npm link failed (permission issue) — skipping"
+  echo "  This is fine for dev mode. The plugin system doesn't need global bin entries."
+fi
 
-# Step 2: Register MCP server
-echo ""
-echo "Registering MCP server with Claude Code..."
-claude mcp add-json laminark '{"command":"laminark-server"}' -s user
-echo "✓ MCP server registered"
+# Step 2: Create symlink in plugin cache
+CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
+CACHE_DIR="$CLAUDE_HOME/plugins/cache/laminark/laminark/$NEW_VERSION"
 
-# Step 3: Configure hooks using repo's dist/hooks/handler.js
 echo ""
-echo "Configuring hooks (dev mode - pointing at repo)..."
-SETTINGS_FILE="${CLAUDE_HOME:-$HOME/.claude}/settings.json"
-HANDLER_PATH="$PLUGIN_PATH/plugin/dist/hooks/handler.js"
+echo "Creating plugin symlink in cache..."
+
+# Remove existing cache entry (could be a real dir from previous install)
+if [ -e "$CACHE_DIR" ]; then
+  rm -rf "$CACHE_DIR"
+fi
+
+mkdir -p "$(dirname "$CACHE_DIR")"
+ln -sf "$PLUGIN_SRC" "$CACHE_DIR"
+echo "✓ Symlinked $CACHE_DIR -> $PLUGIN_SRC"
+
+# Step 3: Register in installed_plugins.json
+INSTALLED_FILE="$CLAUDE_HOME/plugins/installed_plugins.json"
+mkdir -p "$CLAUDE_HOME/plugins"
+
+node -e '
+const fs = require("fs");
+const path = process.argv[1];
+const version = process.argv[2];
+
+let data = { version: 2, plugins: {} };
+if (fs.existsSync(path)) {
+  try { data = JSON.parse(fs.readFileSync(path, "utf8")); } catch {}
+}
+
+data.plugins.laminark = {
+  marketplace: "laminark",
+  version: version,
+  enabled: true
+};
+
+fs.writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
+' "$INSTALLED_FILE" "$NEW_VERSION"
+echo "✓ Plugin registered"
+
+# Step 4: Enable plugin and clean up legacy config
+SETTINGS_FILE="$CLAUDE_HOME/settings.json"
 
 node -e '
 const fs = require("fs");
 const settingsPath = process.argv[1];
-const handlerPath = process.argv[2];
-const hookCmd = `node "${handlerPath}"`;
 
 let settings = {};
 if (fs.existsSync(settingsPath)) {
-  settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch {}
 }
 
-if (!settings.hooks) settings.hooks = {};
+// Enable the plugin
+if (!settings.enabledPlugins) settings.enabledPlugins = {};
+settings.enabledPlugins["laminark@laminark"] = true;
 
-const hookEvents = {
-  SessionStart: { type: "command", command: hookCmd, statusMessage: "Loading Laminark memory context...", timeout: 10 },
-  PreToolUse:   { type: "command", command: hookCmd, timeout: 2 },
-  PostToolUse:  { type: "command", command: hookCmd, async: true, timeout: 30 },
-  PostToolUseFailure: { type: "command", command: hookCmd, async: true, timeout: 30 },
-  Stop:         { type: "command", command: hookCmd, async: true, timeout: 15 },
-  SessionEnd:   { type: "command", command: hookCmd, async: true, timeout: 15 }
-};
+// Remove any legacy manual hooks
+if (settings.hooks) {
+  for (const [event, entries] of Object.entries(settings.hooks)) {
+    settings.hooks[event] = entries.filter(entry =>
+      !(entry.hooks && entry.hooks.some(h => h.command && h.command.includes("laminark")))
+    );
+    if (settings.hooks[event].length === 0) {
+      delete settings.hooks[event];
+    }
+  }
+  if (Object.keys(settings.hooks).length === 0) {
+    delete settings.hooks;
+  }
+}
 
-for (const [event, hookConfig] of Object.entries(hookEvents)) {
-  if (!settings.hooks[event]) settings.hooks[event] = [];
-
-  // Remove any existing laminark hooks for this event
-  settings.hooks[event] = settings.hooks[event].filter(entry =>
-    !(entry.hooks && entry.hooks.some(h => h.command && h.command.includes("laminark")))
-  );
-
-  // Add the dev hook
-  settings.hooks[event].push({
-    hooks: [hookConfig]
-  });
+// Remove legacy MCP registration
+if (settings.mcpServers && settings.mcpServers.laminark) {
+  delete settings.mcpServers.laminark;
+  if (Object.keys(settings.mcpServers).length === 0) {
+    delete settings.mcpServers;
+  }
 }
 
 fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
-' "$SETTINGS_FILE" "$HANDLER_PATH"
+' "$SETTINGS_FILE"
+echo "✓ Plugin enabled in settings"
 
-echo "✓ Hooks configured (dev: $HANDLER_PATH)"
+# Remove legacy MCP registration if present
+if claude mcp list 2>/dev/null | grep -q "^laminark:"; then
+  claude mcp remove laminark -s user 2>/dev/null || true
+  echo "✓ Legacy MCP registration removed"
+fi
 
 # Done
 echo ""
-echo "✓ Laminark v$NEW_VERSION installed locally!"
+echo "✓ Laminark v$NEW_VERSION installed locally (dev mode)!"
+echo ""
+echo "Dev workflow:"
+echo "  npm run build    # Rebuild after code changes"
+echo "  (symlink means changes are live — no sync needed)"
+echo "  API changes still need a Claude Code session restart."
 echo ""
 echo "Next steps:"
 echo "  1. Start a new Claude Code session"
-echo "  2. Verify with: /mcp (should show laminark tools)"
-echo ""
-echo "To switch to production install: npm install -g laminark && ./plugin/scripts/install.sh"
-
-# Step 4: Recommend GSD (Get Shit Done) workflow plugin
-echo ""
-GSD_INSTALLED=false
-if [ -d "${CLAUDE_HOME:-$HOME/.claude}/commands/gsd" ] || [ -d "${CLAUDE_HOME:-$HOME/.claude}/plugins/gsd" ]; then
-  GSD_INSTALLED=true
-fi
-
-if [ "$GSD_INSTALLED" = false ]; then
-  echo "Recommended: Install GSD (Get Shit Done) by @gsd-framework"
-  echo "  GSD is an independent workflow plugin for Claude Code that pairs"
-  echo "  well with Laminark — it handles project planning, phased execution,"
-  echo "  and atomic commits while Laminark provides persistent memory."
-  echo "  (GSD does not endorse or recommend Laminark — this is our suggestion.)"
-  echo ""
-  echo "  Install: claude plugin add gsd"
-  echo "  More info: https://github.com/gsd-framework/gsd"
-  echo ""
-  if [ -t 0 ]; then
-    read -rp "Install GSD now? [y/N] " INSTALL_GSD
-    if [[ "$INSTALL_GSD" =~ ^[Yy]$ ]]; then
-      echo ""
-      claude plugin add gsd 2>/dev/null && echo "✓ GSD installed" || echo "  GSD install skipped (install manually with: claude plugin add gsd)"
-    fi
-  fi
-fi
+echo "  2. Verify with: /plugin (should show laminark)"
+echo "  3. Check tools with: /mcp (should show laminark tools)"
 
 exit 0

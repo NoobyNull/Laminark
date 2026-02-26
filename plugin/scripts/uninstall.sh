@@ -1,5 +1,5 @@
 #!/bin/bash
-# Uninstall Laminark: remove MCP server, hooks, and npm package
+# Uninstall Laminark: remove plugin from cache, settings, and npm
 
 set -e
 
@@ -7,24 +7,20 @@ echo "Laminark Uninstaller"
 echo "===================="
 echo ""
 
-# Check if claude CLI is available
-if ! command -v claude &> /dev/null; then
-  echo "Warning: claude CLI not found, skipping MCP/hook cleanup"
-  SKIP_CLAUDE=true
-fi
+CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
 
 # Check what's installed
 NPM_VERSION=$(npm list -g laminark --depth=0 2>/dev/null | grep laminark@ | sed 's/.*@//' || echo "")
+CACHE_EXISTS=false
+if [ -d "$CLAUDE_HOME/plugins/cache/laminark" ]; then
+  CACHE_EXISTS=true
+fi
+
 if [ -n "$NPM_VERSION" ]; then
   echo "npm package: v$NPM_VERSION"
 fi
-
-# Check MCP registration
-if [ "$SKIP_CLAUDE" != "true" ]; then
-  if claude mcp list 2>/dev/null | grep -q "laminark"; then
-    echo "MCP server: registered"
-    MCP_REGISTERED=true
-  fi
+if [ "$CACHE_EXISTS" = true ]; then
+  echo "Plugin cache: present"
 fi
 
 echo ""
@@ -37,57 +33,86 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
   exit 0
 fi
 
-# Step 1: Remove MCP server
-if [ "$MCP_REGISTERED" = "true" ]; then
+# Step 1: Remove plugin from cache
+if [ "$CACHE_EXISTS" = true ]; then
   echo ""
-  echo "Removing MCP server..."
-  claude mcp remove laminark -s user 2>/dev/null || true
-  echo "✓ MCP server removed"
+  echo "Removing plugin from cache..."
+  rm -rf "$CLAUDE_HOME/plugins/cache/laminark"
+  echo "✓ Plugin cache removed"
 fi
 
-# Step 2: Remove hooks from settings.json
-echo ""
-echo "Removing hooks from settings..."
-SETTINGS_FILE="${CLAUDE_HOME:-$HOME/.claude}/settings.json"
+# Step 2: Remove from installed_plugins.json
+INSTALLED_FILE="$CLAUDE_HOME/plugins/installed_plugins.json"
+if [ -f "$INSTALLED_FILE" ]; then
+  node -e '
+const fs = require("fs");
+const path = process.argv[1];
+let data = JSON.parse(fs.readFileSync(path, "utf8"));
+delete data.plugins.laminark;
+fs.writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
+' "$INSTALLED_FILE" 2>/dev/null || true
+  echo "✓ Plugin registration removed"
+fi
 
+# Step 3: Remove from settings
+SETTINGS_FILE="$CLAUDE_HOME/settings.json"
 if [ -f "$SETTINGS_FILE" ]; then
+  echo ""
+  echo "Cleaning up settings..."
   node -e '
 const fs = require("fs");
 const settingsPath = process.argv[1];
-
 const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
 
-if (settings.hooks) {
-  for (const [event, entries] of Object.entries(settings.hooks)) {
-    settings.hooks[event] = entries.filter(entry =>
-      !(entry.hooks && entry.hooks.some(h => h.command && h.command.includes("laminark")))
-    );
-    // Remove empty arrays
-    if (settings.hooks[event].length === 0) {
-      delete settings.hooks[event];
-    }
-  }
-  // Remove empty hooks object
-  if (Object.keys(settings.hooks).length === 0) {
-    delete settings.hooks;
-  }
-}
-
-// Remove laminark from enabledPlugins if present
+// Remove enabledPlugins entry
 if (settings.enabledPlugins) {
   for (const key of Object.keys(settings.enabledPlugins)) {
     if (key.includes("laminark")) {
       delete settings.enabledPlugins[key];
     }
   }
+  if (Object.keys(settings.enabledPlugins).length === 0) {
+    delete settings.enabledPlugins;
+  }
+}
+
+// Remove any legacy manual hooks
+if (settings.hooks) {
+  for (const [event, entries] of Object.entries(settings.hooks)) {
+    settings.hooks[event] = entries.filter(entry =>
+      !(entry.hooks && entry.hooks.some(h => h.command && h.command.includes("laminark")))
+    );
+    if (settings.hooks[event].length === 0) {
+      delete settings.hooks[event];
+    }
+  }
+  if (Object.keys(settings.hooks).length === 0) {
+    delete settings.hooks;
+  }
+}
+
+// Remove legacy MCP registration
+if (settings.mcpServers && settings.mcpServers.laminark) {
+  delete settings.mcpServers.laminark;
+  if (Object.keys(settings.mcpServers).length === 0) {
+    delete settings.mcpServers;
+  }
 }
 
 fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
 ' "$SETTINGS_FILE"
-  echo "✓ Hooks removed"
+  echo "✓ Settings cleaned up"
 fi
 
-# Step 3: Uninstall npm package
+# Step 4: Remove legacy MCP registration if present
+if command -v claude &> /dev/null; then
+  if claude mcp list 2>/dev/null | grep -q "^laminark:"; then
+    claude mcp remove laminark -s user 2>/dev/null || true
+    echo "✓ Legacy MCP registration removed"
+  fi
+fi
+
+# Step 5: Uninstall npm package
 if [ -n "$NPM_VERSION" ]; then
   echo ""
   echo "Uninstalling npm package..."
@@ -95,7 +120,7 @@ if [ -n "$NPM_VERSION" ]; then
   echo "✓ npm package removed"
 fi
 
-# Step 4: Optional data cleanup
+# Step 6: Optional data cleanup
 echo ""
 echo "Data cleanup options:"
 echo "  1. Keep all data (can reinstall later without losing memories)"
@@ -106,19 +131,21 @@ echo ""
 
 case $CLEANUP_OPTION in
   2)
-    DATA_DIR="$HOME/.laminark"
-    if [ -d "$DATA_DIR" ]; then
-      echo ""
-      echo "WARNING: This will delete all your memories and observations!"
-      read -p "Delete $DATA_DIR? (y/N): " -n 1 -r
-      echo ""
-      if [[ $REPLY =~ ^[Yy]$ ]]; then
-        rm -rf "$DATA_DIR"
-        echo "✓ Data directory removed: $DATA_DIR"
-      else
-        echo "  Kept data directory: $DATA_DIR"
+    # Check both possible data locations
+    for DATA_DIR in "$HOME/.laminark" "$CLAUDE_HOME/plugins/cache/laminark"; do
+      if [ -d "$DATA_DIR" ]; then
+        echo ""
+        echo "WARNING: This will delete all your memories and observations!"
+        read -p "Delete $DATA_DIR? (y/N): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+          rm -rf "$DATA_DIR"
+          echo "✓ Data directory removed: $DATA_DIR"
+        else
+          echo "  Kept data directory: $DATA_DIR"
+        fi
       fi
-    fi
+    done
     ;;
   *)
     echo "Keeping all data."
@@ -128,6 +155,6 @@ esac
 echo ""
 echo "✓ Uninstall complete!"
 echo ""
-echo "To reinstall: npm install -g laminark && ./plugin/scripts/install.sh"
+echo "To reinstall: curl -fsSL https://raw.githubusercontent.com/NoobyNull/Laminark/master/plugin/scripts/install.sh | bash"
 
 exit 0

@@ -11,3 +11,5 @@ coverage/
 .orphaned_at
 .playwright-mcp/
 *.png
+plugin/.repair-log
+plugin/package-lock.json

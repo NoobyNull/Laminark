@@ -1,7 +1,7 @@
 {
   "name": "laminark",
   "description": "Persistent adaptive memory for Claude Code. Automatic observation capture, semantic search, topic detection, knowledge graph, and web visualization.",
-  "version": "0.1.0",
+  "version": "2.22.0",
   "author": {
     "name": "NoobyNull"
   },
@@ -9,5 +9,7 @@
   "repository": "https://github.com/NoobyNull/Laminark",
   "license": "ISC",
   "keywords": ["memory", "mcp", "sqlite", "knowledge-graph", "semantic-search"],
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json"
 }

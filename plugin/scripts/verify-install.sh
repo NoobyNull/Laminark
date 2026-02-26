@@ -1,6 +1,6 @@
 #!/bin/bash
 # Verify Laminark installation
-# Checks: npm global package, MCP server, hooks in settings.json
+# Checks: npm package, plugin cache, settings, dependencies
 
 set -e
 
@@ -8,13 +8,14 @@ echo "Checking Laminark installation..."
 echo ""
 
 ERRORS=0
+WARNINGS=0
+CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
 
 # Check 1: npm global package
 NPM_VERSION=$(npm list -g laminark --depth=0 2>/dev/null | grep laminark@ | sed 's/.*@//' || echo "")
 if [ -n "$NPM_VERSION" ]; then
   echo "✓ npm package: v$NPM_VERSION"
 else
-  # Check for npm link (dev install)
   if command -v laminark-server &> /dev/null; then
     echo "✓ laminark-server on PATH (linked)"
   else
@@ -23,65 +24,116 @@ else
   fi
 fi
 
-# Check 2: laminark-server binary
-if command -v laminark-server &> /dev/null; then
-  echo "✓ laminark-server binary available"
+# Check 2: Plugin cache
+CACHE_BASE="$CLAUDE_HOME/plugins/cache/laminark/laminark"
+if [ -d "$CACHE_BASE" ]; then
+  for CACHE_DIR in "$CACHE_BASE"/*/; do
+    [ -d "$CACHE_DIR" ] || continue
+    VERSION=$(basename "$CACHE_DIR")
+    if [ -L "${CACHE_DIR%/}" ]; then
+      echo "✓ Plugin cache: v$VERSION (symlink/dev)"
+    else
+      echo "✓ Plugin cache: v$VERSION"
+    fi
+  done
 else
-  echo "✗ laminark-server not found on PATH"
+  echo "✗ Plugin cache not found at $CACHE_BASE"
   ERRORS=$((ERRORS + 1))
 fi
 
-# Check 3: laminark-hook binary
-if command -v laminark-hook &> /dev/null; then
-  echo "✓ laminark-hook binary available"
+# Check 3: installed_plugins.json
+INSTALLED_FILE="$CLAUDE_HOME/plugins/installed_plugins.json"
+if [ -f "$INSTALLED_FILE" ] && grep -q '"laminark"' "$INSTALLED_FILE"; then
+  echo "✓ Registered in installed_plugins.json"
 else
-  echo "⚠ laminark-hook not on PATH (hooks may use direct node path)"
+  echo "✗ Not registered in installed_plugins.json"
+  ERRORS=$((ERRORS + 1))
 fi
 
-# Check 4: Claude CLI
-if ! command -v claude &> /dev/null; then
-  echo "✗ claude CLI not found"
-  ERRORS=$((ERRORS + 1))
+# Check 4: Plugin enabled in settings
+SETTINGS_FILE="$CLAUDE_HOME/settings.json"
+if [ -f "$SETTINGS_FILE" ] && grep -q '"laminark@laminark"' "$SETTINGS_FILE"; then
+  echo "✓ Plugin enabled in settings"
 else
-  # Check 5: MCP server registration
-  if claude mcp list 2>/dev/null | grep -q "laminark"; then
-    echo "✓ MCP server registered"
+  echo "✗ Plugin not enabled in settings"
+  ERRORS=$((ERRORS + 1))
+fi
+
+# Check 5: Plugin manifest
+for CACHE_DIR in "$CACHE_BASE"/*/; do
+  [ -d "$CACHE_DIR" ] || continue
+  MANIFEST="$CACHE_DIR/.claude-plugin/plugin.json"
+  if [ -f "$MANIFEST" ]; then
+    echo "✓ Plugin manifest present"
+    # Check manifest declares hooks and mcpServers
+    if grep -q '"hooks"' "$MANIFEST" && grep -q '"mcpServers"' "$MANIFEST"; then
+      echo "✓ Manifest declares hooks and MCP servers"
+    else
+      echo "⚠ Manifest missing hooks or mcpServers declaration"
+      WARNINGS=$((WARNINGS + 1))
+    fi
   else
-    echo "✗ MCP server not registered"
-    echo "  Run: claude mcp add-json laminark '{\"command\":\"laminark-server\"}' -s user"
+    echo "✗ Plugin manifest missing"
     ERRORS=$((ERRORS + 1))
   fi
-fi
+  break
+done
 
-# Check 6: Hooks in settings.json
-SETTINGS_FILE="${CLAUDE_HOME:-$HOME/.claude}/settings.json"
+# Check 6: No legacy configuration
+LEGACY=false
 if [ -f "$SETTINGS_FILE" ]; then
-  if grep -q "laminark" "$SETTINGS_FILE"; then
-    echo "✓ Hooks configured in settings.json"
+  if grep -q '"hooks"' "$SETTINGS_FILE" && grep -q "laminark" "$SETTINGS_FILE"; then
+    # More precise check: look for laminark in hooks section
+    if node -e '
+const fs = require("fs");
+const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+if (s.hooks) {
+  for (const entries of Object.values(s.hooks)) {
+    for (const e of entries) {
+      if (e.hooks && e.hooks.some(h => h.command && h.command.includes("laminark"))) {
+        process.exit(1);
+      }
+    }
+  }
+}
+' "$SETTINGS_FILE" 2>/dev/null; then
+      echo "✓ No legacy hooks in settings"
+    else
+      echo "⚠ Legacy hooks found in settings.json (should be managed by plugin system)"
+      WARNINGS=$((WARNINGS + 1))
+    fi
   else
-    echo "✗ No laminark hooks in settings.json"
-    ERRORS=$((ERRORS + 1))
+    echo "✓ No legacy hooks in settings"
   fi
-else
-  echo "✗ Settings file not found: $SETTINGS_FILE"
-  ERRORS=$((ERRORS + 1))
+fi
+
+if command -v claude &> /dev/null; then
+  if claude mcp list 2>/dev/null | grep -q "^laminark:"; then
+    echo "⚠ Legacy MCP server registration found (should be managed by plugin system)"
+    WARNINGS=$((WARNINGS + 1))
+  else
+    echo "✓ No legacy MCP registration"
+  fi
 fi
 
 # Check 7: Data directory
-DATA_DIR="$HOME/.laminark"
+DATA_DIR="$CLAUDE_HOME/plugins/cache/laminark/data"
 if [ -d "$DATA_DIR" ]; then
-  echo "✓ Data directory exists: $DATA_DIR"
+  echo "✓ Data directory exists"
+elif [ -d "$HOME/.laminark" ]; then
+  echo "✓ Data directory exists (legacy location)"
 else
   echo "⚠ Data directory not yet created (will be created on first use)"
+  WARNINGS=$((WARNINGS + 1))
 fi
 
 echo ""
-if [ $ERRORS -eq 0 ]; then
+if [ $ERRORS -eq 0 ] && [ $WARNINGS -eq 0 ]; then
   echo "Installation verified successfully!"
-  echo ""
-  echo "Start a new Claude Code session to use Laminark."
+elif [ $ERRORS -eq 0 ]; then
+  echo "Installation OK with $WARNINGS warning(s)."
 else
-  echo "Found $ERRORS issue(s). Run ./plugin/scripts/install.sh to fix."
+  echo "Found $ERRORS error(s) and $WARNINGS warning(s). Run ./plugin/scripts/install.sh to fix."
 fi
 
 exit $ERRORS
