@@ -1,7 +1,7 @@
 {
   "name": "laminark",
   "description": "Persistent adaptive memory for Claude Code. Automatic observation capture, semantic search, topic detection, knowledge graph, and web visualization.",
-  "version": "2.22.1",
+  "version": "2.22.2",
   "author": {
     "name": "NoobyNull"
   },
