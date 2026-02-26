@@ -47,8 +47,8 @@ echo "  Version: $LATEST_VERSION"
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-npm pack laminark@"$LATEST_VERSION" --pack-destination "$WORK_DIR" --silent 2>/dev/null
-TARBALL=$(ls "$WORK_DIR"/laminark-*.tgz 2>/dev/null | head -1)
+npm pack laminark@"$LATEST_VERSION" --pack-destination "$WORK_DIR" 2>/dev/null
+TARBALL=$(find "$WORK_DIR" -name "laminark-*.tgz" -maxdepth 1 2>/dev/null | head -1)
 if [ -z "$TARBALL" ]; then
   echo "Error: failed to download package"
   exit 1
