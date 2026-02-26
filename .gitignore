@@ -13,3 +13,4 @@ coverage/
 *.png
 plugin/.repair-log
 plugin/package-lock.json
+RESTART-CHECKS.md
