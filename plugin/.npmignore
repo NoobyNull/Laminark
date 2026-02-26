@@ -1,0 +1,6 @@
+node_modules
+.deps-ok
+.repair-log
+.npm-tmp
+.orphaned_at
+laminark.db

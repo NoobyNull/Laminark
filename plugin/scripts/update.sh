@@ -1,63 +1,154 @@
 #!/bin/bash
 # Update Laminark to the latest version
-# Updates the npm package and uses the plugin system to refresh the cache
+#
+# Downloads the latest npm package and directly updates the plugin cache.
+# Works from inside a Claude Code session (no `claude plugin` commands needed).
+#
+# Usage: bash /path/to/update.sh
+#   or via ensure-deps.sh auto-update check
 
 set -e
 
-echo "Laminark Updater"
-echo "================"
-echo ""
-
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
+CACHE_BASE="$CLAUDE_HOME/plugins/cache/laminark/laminark"
+MARKETPLACE_BASE="$CLAUDE_HOME/plugins/marketplaces/laminark"
 
-# Check if npm is available
+log() { echo "  $1"; }
+
+# Check prerequisites
+if ! command -v node &> /dev/null; then
+  echo "Error: node not found"
+  exit 1
+fi
 if ! command -v npm &> /dev/null; then
   echo "Error: npm not found"
   exit 1
 fi
 
-# Check if installed
-CURRENT_VERSION=$(npm list -g laminark --depth=0 2>/dev/null | grep laminark@ | sed 's/.*@//' || echo "")
+echo "Laminark Updater"
+echo "================"
+echo ""
+
+# Detect current installed version from cache
+CURRENT_VERSION=""
+if [ -d "$CACHE_BASE" ]; then
+  CURRENT_VERSION=$(ls -1 "$CACHE_BASE" 2>/dev/null | sort -V | tail -1)
+fi
+
 if [ -z "$CURRENT_VERSION" ]; then
-  echo "Laminark is not installed globally."
-  echo "Run: ./plugin/scripts/install.sh"
+  echo "No cached installation found. Run the installer first."
   exit 1
 fi
 
-echo "Currently installed: v$CURRENT_VERSION"
+echo "Installed: v$CURRENT_VERSION"
+
+# Check latest version on npm
+LATEST_VERSION=$(npm view laminark version 2>/dev/null || echo "")
+if [ -z "$LATEST_VERSION" ]; then
+  echo "Could not check npm for latest version (offline?)"
+  exit 1
+fi
+
+echo "Latest:    v$LATEST_VERSION"
 echo ""
-echo "Updating npm package..."
-npm update -g laminark
 
-NEW_VERSION=$(npm list -g laminark --depth=0 2>/dev/null | grep laminark@ | sed 's/.*@//' || echo "unknown")
+if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
+  echo "Already on the latest version."
+  exit 0
+fi
 
-if [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
-  echo "✓ Already at latest version: v$NEW_VERSION"
-else
-  echo "✓ npm updated: v$CURRENT_VERSION → v$NEW_VERSION"
+# Download and extract the latest package to a temp dir
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$WORK_DIR"' EXIT
 
-  # Update via plugin system if marketplace is registered
-  if command -v claude &> /dev/null; then
-    echo ""
-    echo "Updating plugin cache..."
+echo "Downloading v$LATEST_VERSION..."
+npm pack laminark@"$LATEST_VERSION" --pack-destination "$WORK_DIR" --silent 2>/dev/null
+TARBALL=$(ls "$WORK_DIR"/laminark-*.tgz 2>/dev/null | head -1)
+if [ -z "$TARBALL" ]; then
+  echo "Error: failed to download package"
+  exit 1
+fi
 
-    # Update the marketplace to pick up new version
-    claude plugin marketplace update laminark 2>/dev/null || true
+tar xzf "$TARBALL" -C "$WORK_DIR"
+EXTRACTED="$WORK_DIR/package/plugin"
 
-    # Update the plugin via the official system
-    claude plugin update laminark@laminark 2>/dev/null || {
-      # Fallback: uninstall and reinstall
-      claude plugin uninstall laminark@laminark 2>/dev/null || true
-      claude plugin install laminark@laminark 2>/dev/null || true
-    }
+if [ ! -d "$EXTRACTED" ]; then
+  echo "Error: plugin directory not found in package"
+  exit 1
+fi
 
-    echo "✓ Plugin cache updated to v$NEW_VERSION"
+# Install dependencies in the extracted plugin dir
+log "Installing dependencies..."
+NPM_TMP="$WORK_DIR/npm-tmp"
+mkdir -p "$NPM_TMP"
+TMPDIR="$NPM_TMP" npm install --prefix "$EXTRACTED" --omit=dev --ignore-scripts --silent --cache "$NPM_TMP/cache" 2>/dev/null
+npm rebuild --prefix "$EXTRACTED" better-sqlite3 --silent 2>/dev/null
+rm -rf "$NPM_TMP"
+
+# Verify the handler loads before replacing the cache
+if ! (cd "$EXTRACTED" && node -e "import('./dist/hooks/handler.js')" 2>/dev/null); then
+  echo "Error: handler verification failed after dependency install"
+  echo "The downloaded package may be broken. Aborting."
+  exit 1
+fi
+
+log "Handler verified."
+
+# Create the new cache directory
+NEW_CACHE="$CACHE_BASE/$LATEST_VERSION"
+mkdir -p "$NEW_CACHE"
+
+# Preserve data that lives in the cache (db, repair log)
+# The actual DB lives at cache/laminark/data/data.db — not version-specific
+OLD_CACHE="$CACHE_BASE/$CURRENT_VERSION"
+
+# Copy the new plugin files (everything except node_modules, which we copy separately)
+log "Updating cache..."
+rsync -a --delete \
+  --exclude node_modules \
+  --exclude .deps-ok \
+  --exclude .repair-log \
+  --exclude .orphaned_at \
+  --exclude laminark.db \
+  "$EXTRACTED/" "$NEW_CACHE/"
+
+# Copy node_modules (with working deps)
+rsync -a --delete "$EXTRACTED/node_modules/" "$NEW_CACHE/node_modules/"
+
+# Write sentinel — deps are already verified
+echo "$LATEST_VERSION" > "$NEW_CACHE/.deps-ok"
+
+# Update the marketplace source if it exists
+if [ -d "$MARKETPLACE_BASE/plugin" ]; then
+  rsync -a --delete \
+    --exclude node_modules \
+    "$EXTRACTED/" "$MARKETPLACE_BASE/plugin/"
+  # Update marketplace.json version
+  if [ -f "$MARKETPLACE_BASE/.claude-plugin/marketplace.json" ]; then
+    node -e '
+const fs = require("fs");
+const p = process.argv[1];
+const v = process.argv[2];
+try {
+  const m = JSON.parse(fs.readFileSync(p, "utf8"));
+  if (m.plugins) m.plugins.forEach(p => p.version = v);
+  fs.writeFileSync(p, JSON.stringify(m, null, 2) + "\n");
+} catch {}
+' "$MARKETPLACE_BASE/.claude-plugin/marketplace.json" "$LATEST_VERSION"
   fi
 fi
 
-# CLAUDE.md instructions are auto-updated on next MCP server start
-# (handled by ensure-deps.sh — no manual step needed)
+# Clean up old version cache (if different)
+if [ "$CURRENT_VERSION" != "$LATEST_VERSION" ] && [ -d "$OLD_CACHE" ]; then
+  rm -rf "$OLD_CACHE"
+  log "Removed old cache (v$CURRENT_VERSION)"
+fi
 
+# Remove orphan marker if present
+rm -f "$NEW_CACHE/.orphaned_at"
+
+echo ""
+echo "Updated: v$CURRENT_VERSION → v$LATEST_VERSION"
 echo ""
 echo "Restart your Claude Code session for changes to take effect."
 
