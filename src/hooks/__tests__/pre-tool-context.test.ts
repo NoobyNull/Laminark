@@ -111,12 +111,14 @@ describe('handlePreToolUse', () => {
       name: '/src/hooks/handler.ts',
       metadata: {},
       observation_ids: [],
+      project_hash: projectHash,
     });
     const decisionNode = upsertNode(laminarkDb.db, {
       type: 'Decision',
       name: 'Use synchronous hooks for context injection',
       metadata: {},
       observation_ids: [],
+      project_hash: projectHash,
     });
     insertEdge(laminarkDb.db, {
       source_id: fileNode.id,
@@ -124,6 +126,7 @@ describe('handlePreToolUse', () => {
       type: 'related_to',
       weight: 0.8,
       metadata: {},
+      project_hash: projectHash,
     });
 
     const result = handlePreToolUse(

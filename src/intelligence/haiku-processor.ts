@@ -270,8 +270,8 @@ export class HaikuProcessor {
 
           const affectedNodeIds = new Set<string>();
           for (const rel of relationships) {
-            const sourceNode = getNodeByNameAndType(this.db, rel.source, entityPairs.find((e) => e.name === rel.source)?.type ?? 'File');
-            const targetNode = getNodeByNameAndType(this.db, rel.target, entityPairs.find((e) => e.name === rel.target)?.type ?? 'File');
+            const sourceNode = getNodeByNameAndType(this.db, rel.source, entityPairs.find((e) => e.name === rel.source)?.type ?? 'File', projectHash);
+            const targetNode = getNodeByNameAndType(this.db, rel.target, entityPairs.find((e) => e.name === rel.target)?.type ?? 'File', projectHash);
 
             if (!sourceNode || !targetNode) continue;
 

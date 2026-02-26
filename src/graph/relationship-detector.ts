@@ -233,11 +233,13 @@ export function detectAndPersist(
         db,
         candidate.sourceEntity.name,
         candidate.sourceEntity.type,
+        opts?.projectHash ?? null,
       );
       const targetNode = getNodeByNameAndType(
         db,
         candidate.targetEntity.name,
         candidate.targetEntity.type,
+        opts?.projectHash ?? null,
       );
 
       // Both nodes must exist in the graph
@@ -250,7 +252,7 @@ export function detectAndPersist(
           type: candidate.relationshipType,
           weight: candidate.confidence,
           metadata: { evidence: candidate.evidence },
-          project_hash: opts?.projectHash,
+          project_hash: opts?.projectHash ?? null,
         });
         persisted.push(edge);
         affectedNodeIds.add(sourceNode.id);

@@ -1,8 +1,10 @@
 import { i as getProjectHash, n as getDatabaseConfig } from "../config-t8LZeB-u.mjs";
-import { E as traverseFrom, F as openDatabase, M as SessionRepository, N as ObservationRepository, O as SaveGuard, P as rowToObservation, R as debug, S as getNodeByNameAndType, a as ResearchBufferRepository, c as inferScope, i as NotificationStore, j as SearchEngine, k as jaccardSimilarity, l as inferToolType, n as PathRepository, o as BranchRepository, p as runAutoCleanup, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository } from "../tool-registry-D8un_AcG.mjs";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { basename, join } from "node:path";
+import { E as traverseFrom, F as openDatabase, M as SessionRepository, N as ObservationRepository, O as SaveGuard, P as rowToObservation, R as debug, S as getNodeByNameAndType, a as ResearchBufferRepository, c as inferScope, i as NotificationStore, j as SearchEngine, k as jaccardSimilarity, l as inferToolType, n as PathRepository, o as BranchRepository, p as runAutoCleanup, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository } from "../tool-registry-Bi1Zdqkm.mjs";
+import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 
 //#region src/hooks/self-referential.ts
 /**
@@ -1594,11 +1596,12 @@ function handlePreToolUse(input, db, projectHash, pathRepo) {
 		if (toolName === "Write" || toolName === "Edit" || toolName === "Read") {
 			const filePath = toolInput.file_path;
 			if (filePath) {
-				const node = getNodeByNameAndType(db, filePath, "File");
+				const node = getNodeByNameAndType(db, filePath, "File", projectHash);
 				if (node) {
 					const connected = traverseFrom(db, node.id, {
 						depth: 1,
-						direction: "both"
+						direction: "both",
+						projectHash
 					});
 					if (connected.length > 0) {
 						const names = connected.slice(0, 5).map((r) => `${r.node.name} (${r.node.type})`).join(", ");
@@ -2175,6 +2178,38 @@ var ConversationRouter = class {
 
 //#endregion
 //#region src/hooks/handler.ts
+/** Resolve the plugin root directory (two levels up from dist/hooks/handler.js) */
+function getPluginRoot() {
+	return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+}
+/** Check if a .needs-repair marker exists and is fresh (< 30s old) */
+function isRepairInProgress() {
+	const marker = resolve(getPluginRoot(), ".needs-repair");
+	if (!existsSync(marker)) return false;
+	try {
+		if (Date.now() - statSync(marker).mtimeMs > 3e4) {
+			unlinkSync(marker);
+			return false;
+		}
+		return true;
+	} catch {
+		return false;
+	}
+}
+/** Spawn repair.sh detached (fire-and-forget) and write .needs-repair marker */
+function triggerRepair() {
+	const pluginRoot = getPluginRoot();
+	const repairScript = resolve(pluginRoot, "scripts", "repair.sh");
+	if (!existsSync(repairScript)) return;
+	try {
+		writeFileSync(resolve(pluginRoot, ".needs-repair"), String(Date.now()));
+	} catch {}
+	spawn("bash", [repairScript], {
+		detached: true,
+		stdio: "ignore",
+		cwd: pluginRoot
+	}).unref();
+}
 /**
 * Hook handler entry point.
 *
@@ -2341,6 +2376,10 @@ function processPostToolUseFiltered(input, obsRepo, researchBuffer, toolRegistry
 	} catch {}
 }
 async function main() {
+	if (isRepairInProgress()) {
+		debug("hook", "Repair in progress, skipping hook");
+		return;
+	}
 	const raw = await readStdin();
 	const input = JSON.parse(raw);
 	const eventName = input.hook_event_name;
@@ -2406,6 +2445,11 @@ async function main() {
 }
 main().catch((err) => {
 	debug("hook", "Hook handler error", { error: err.message });
+	const msg = err.message ?? "";
+	if ((err.code ?? "") === "ERR_MODULE_NOT_FOUND" || msg.includes("better-sqlite3") || msg.includes("better_sqlite3")) {
+		debug("hook", "Dependency error detected, triggering auto-repair");
+		triggerRepair();
+	}
 	process.exit(0);
 });
 

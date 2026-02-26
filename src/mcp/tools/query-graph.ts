@@ -287,12 +287,12 @@ export function registerQueryGraph(
 
         // 1. Try exact name match (optionally filtered by type)
         if (entityType) {
-          const exact = getNodeByNameAndType(db, args.query, entityType);
+          const exact = getNodeByNameAndType(db, args.query, entityType, projectHash);
           if (exact) rootNodes.push(exact);
         } else {
           // Try exact match across all types
           for (const t of ENTITY_TYPES) {
-            const exact = getNodeByNameAndType(db, args.query, t);
+            const exact = getNodeByNameAndType(db, args.query, t, projectHash);
             if (exact) {
               rootNodes.push(exact);
               break; // Take first exact match
@@ -304,15 +304,15 @@ export function registerQueryGraph(
         if (rootNodes.length === 0) {
           const likePattern = `%${args.query}%`;
           let sql: string;
-          const params: unknown[] = [likePattern];
+          const params: unknown[] = [likePattern, projectHash];
 
           if (entityType) {
             sql =
-              'SELECT * FROM graph_nodes WHERE name LIKE ? COLLATE NOCASE AND type = ? LIMIT ?';
+              'SELECT * FROM graph_nodes WHERE name LIKE ? COLLATE NOCASE AND project_hash = ? AND type = ? LIMIT ?';
             params.push(entityType, args.limit);
           } else {
             sql =
-              'SELECT * FROM graph_nodes WHERE name LIKE ? COLLATE NOCASE LIMIT ?';
+              'SELECT * FROM graph_nodes WHERE name LIKE ? COLLATE NOCASE AND project_hash = ? LIMIT ?';
             params.push(args.limit);
           }
 
@@ -348,6 +348,7 @@ export function registerQueryGraph(
             depth: args.depth,
             edgeTypes: relationshipTypes,
             direction: 'both',
+            projectHash,
           });
           traversalsByNode.set(node.id, results);
         }

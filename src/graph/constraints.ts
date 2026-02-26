@@ -72,14 +72,14 @@ export function enforceMaxDegree(
   maxDegree: number = MAX_NODE_DEGREE,
 ): { pruned: number; remaining: number } {
   const enforce = db.transaction(() => {
-    const currentCount = countEdgesForNode(db, nodeId);
+    const currentCount = countEdgesForNode(db, nodeId, null);
 
     if (currentCount <= maxDegree) {
       return { pruned: 0, remaining: currentCount };
     }
 
     // Get all edges, sorted by weight ascending (lowest first)
-    const edges = getEdgesForNode(db, nodeId);
+    const edges = getEdgesForNode(db, nodeId, { projectHash: null });
     edges.sort((a, b) => a.weight - b.weight);
 
     const toPrune = currentCount - maxDegree;
@@ -153,7 +153,7 @@ export function mergeEntities(
     ).run(JSON.stringify(mergedObsIds), JSON.stringify(mergedMeta), keepId);
 
     // Step 2: Get all edges connected to the merge node
-    const mergeEdges = getEdgesForNode(db, mergeId);
+    const mergeEdges = getEdgesForNode(db, mergeId, { projectHash: null });
 
     // Step 3: Reroute edges from mergeId to keepId
     for (const edge of mergeEdges) {
@@ -250,12 +250,12 @@ export function findDuplicateEntities(
   // Get all nodes, optionally filtered by type
   let nodes: GraphNode[];
   if (opts?.type) {
-    nodes = getNodesByType(db, opts.type);
+    nodes = getNodesByType(db, opts.type, null);
   } else {
     const allTypes = ENTITY_TYPES;
     nodes = [];
     for (const type of allTypes) {
-      nodes.push(...getNodesByType(db, type));
+      nodes.push(...getNodesByType(db, type, null));
     }
   }
 

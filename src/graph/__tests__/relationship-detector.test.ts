@@ -273,7 +273,7 @@ describe('detectAndPersist', () => {
     ]);
 
     // After enforcement, hub should have at most 50 edges
-    const edgeCount = countEdgesForNode(db, hub.id);
+    const edgeCount = countEdgesForNode(db, hub.id, null);
     expect(edgeCount).toBeLessThanOrEqual(50);
   });
 });
@@ -366,16 +366,16 @@ describe('constraints', () => {
         });
       }
 
-      expect(countEdgesForNode(db, node.id)).toBe(55);
+      expect(countEdgesForNode(db, node.id, null)).toBe(55);
 
       const result = enforceMaxDegree(db, node.id);
 
       expect(result.pruned).toBe(5);
       expect(result.remaining).toBe(50);
-      expect(countEdgesForNode(db, node.id)).toBe(50);
+      expect(countEdgesForNode(db, node.id, null)).toBe(50);
 
       // Verify the lowest-weight edges were removed (satellites 0-4)
-      const edges = getEdgesForNode(db, node.id);
+      const edges = getEdgesForNode(db, node.id, { projectHash: null });
       const weights = edges.map((e) => e.weight);
       // All remaining weights should be >= 0.06 (satellite-5)
       for (const w of weights) {
@@ -484,7 +484,7 @@ describe('constraints', () => {
       mergeEntities(db, keepNode.id, mergeNode.id);
 
       // Merged node should be deleted
-      const mergedLookup = getNodeByNameAndType(db, 'react', 'Reference');
+      const mergedLookup = getNodeByNameAndType(db, 'react', 'Reference', null);
       // 'react' might still exist as 'React' since keepNode was 'React'
       // The mergeNode 'react' should be gone
       const allRefs = db
@@ -493,13 +493,13 @@ describe('constraints', () => {
       expect(allRefs).toHaveLength(1);
 
       // Keep node should have merged observation_ids
-      const updated = getNodeByNameAndType(db, 'React', 'Reference');
+      const updated = getNodeByNameAndType(db, 'React', 'Reference', null);
       expect(updated).not.toBeNull();
       expect(updated!.observation_ids).toContain('obs-1');
       expect(updated!.observation_ids).toContain('obs-2');
 
       // Edges should point to keep node
-      const edges = getEdgesForNode(db, keepNode.id);
+      const edges = getEdgesForNode(db, keepNode.id, { projectHash: null });
       expect(edges.length).toBeGreaterThanOrEqual(1);
     });
 
@@ -542,7 +542,7 @@ describe('constraints', () => {
       mergeEntities(db, keepNode.id, mergeNode.id);
 
       // Should have one edge with the higher weight
-      const edges = getEdgesForNode(db, keepNode.id);
+      const edges = getEdgesForNode(db, keepNode.id, { projectHash: null });
       const referencesEdge = edges.find(
         (e) => e.source_id === file.id && e.type === 'references',
       );

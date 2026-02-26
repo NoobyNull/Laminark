@@ -111,20 +111,30 @@ interface SignalLookups {
   edgeCounts: Map<string, number>;
 }
 
-function buildSignalLookups(db: BetterSqlite3.Database): SignalLookups {
+function buildSignalLookups(db: BetterSqlite3.Database, projectHash: string | null): SignalLookups {
   const linkedObsIds = new Set<string>();
   const islandObsIds = new Set<string>();
 
-  const allNodes = db.prepare(
-    'SELECT id, type, name, observation_ids FROM graph_nodes',
-  ).all() as GraphNodeRow[];
+  const allNodes = projectHash
+    ? db.prepare(
+        'SELECT id, type, name, observation_ids FROM graph_nodes WHERE project_hash = ?',
+      ).all(projectHash) as GraphNodeRow[]
+    : db.prepare(
+        'SELECT id, type, name, observation_ids FROM graph_nodes',
+      ).all() as GraphNodeRow[];
 
   const edgeCounts = new Map<string, number>();
-  const edgeRows = db.prepare(
-    `SELECT source_id AS nid, COUNT(*) AS cnt FROM graph_edges GROUP BY source_id
-     UNION ALL
-     SELECT target_id AS nid, COUNT(*) AS cnt FROM graph_edges GROUP BY target_id`,
-  ).all() as { nid: string; cnt: number }[];
+  const edgeRows = projectHash
+    ? db.prepare(
+        `SELECT source_id AS nid, COUNT(*) AS cnt FROM graph_edges WHERE project_hash = ? GROUP BY source_id
+         UNION ALL
+         SELECT target_id AS nid, COUNT(*) AS cnt FROM graph_edges WHERE project_hash = ? GROUP BY target_id`,
+      ).all(projectHash, projectHash) as { nid: string; cnt: number }[]
+    : db.prepare(
+        `SELECT source_id AS nid, COUNT(*) AS cnt FROM graph_edges GROUP BY source_id
+         UNION ALL
+         SELECT target_id AS nid, COUNT(*) AS cnt FROM graph_edges GROUP BY target_id`,
+      ).all() as { nid: string; cnt: number }[];
   for (const row of edgeRows) {
     edgeCounts.set(row.nid, (edgeCounts.get(row.nid) ?? 0) + row.cnt);
   }
@@ -237,7 +247,7 @@ export function analyzeObservations(
   const observations = db.prepare(obsSql).all(...obsParams) as ObsRow[];
 
   // 2. Build lookup sets for signal detection
-  const lookups = buildSignalLookups(db);
+  const lookups = buildSignalLookups(db, projectHash);
 
   // 3. Score each observation
   const allCandidates: HygieneCandidate[] = [];
@@ -346,7 +356,7 @@ export function findAnalysis(
     ORDER BY created_at DESC
   `).all(projectHash) as ObsRow[];
 
-  const lookups = buildSignalLookups(db);
+  const lookups = buildSignalLookups(db, projectHash);
 
   const bySignal = {
     orphaned: 0,

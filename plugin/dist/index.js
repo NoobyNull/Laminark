@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { a as isDebugEnabled, i as getProjectHash, n as getDatabaseConfig, r as getDbPath, t as getConfigDir } from "./config-t8LZeB-u.mjs";
-import { A as hybridSearch, C as getNodesByType, D as upsertNode, E as traverseFrom, F as openDatabase, I as MIGRATIONS, L as runMigrations, M as SessionRepository, N as ObservationRepository, O as SaveGuard, R as debug, S as getNodeByNameAndType, T as insertEdge, _ as detectStaleness, a as ResearchBufferRepository, b as countEdgesForNode, c as inferScope, d as executePurge, f as findAnalysis, g as saveHygieneConfig, h as resetHygieneConfig, i as NotificationStore, j as SearchEngine, k as jaccardSimilarity$1, l as inferToolType, m as loadHygieneConfig, n as PathRepository, o as BranchRepository, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository, u as analyzeObservations, v as flagStaleObservation, w as initGraphSchema, x as getEdgesForNode, y as initStalenessSchema, z as debugTimed } from "./tool-registry-D8un_AcG.mjs";
+import { A as hybridSearch, C as getNodesByType, D as upsertNode, E as traverseFrom, F as openDatabase, I as MIGRATIONS, L as runMigrations, M as SessionRepository, N as ObservationRepository, O as SaveGuard, R as debug, S as getNodeByNameAndType, T as insertEdge, _ as detectStaleness, a as ResearchBufferRepository, b as countEdgesForNode, c as inferScope, d as executePurge, f as findAnalysis, g as saveHygieneConfig, h as resetHygieneConfig, i as NotificationStore, j as SearchEngine, k as jaccardSimilarity$1, l as inferToolType, m as loadHygieneConfig, n as PathRepository, o as BranchRepository, r as initPathSchema, s as extractServerName, t as ToolRegistryRepository, u as analyzeObservations, v as flagStaleObservation, w as initGraphSchema, x as getEdgesForNode, y as initStalenessSchema, z as debugTimed } from "./tool-registry-Bi1Zdqkm.mjs";
 import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -1401,10 +1401,10 @@ function registerQueryGraph(server, db, projectHashRef, notificationStore = null
 			const relationshipTypes = args.relationship_types;
 			const rootNodes = [];
 			if (entityType) {
-				const exact = getNodeByNameAndType(db, args.query, entityType);
+				const exact = getNodeByNameAndType(db, args.query, entityType, projectHash);
 				if (exact) rootNodes.push(exact);
 			} else for (const t of ENTITY_TYPES) {
-				const exact = getNodeByNameAndType(db, args.query, t);
+				const exact = getNodeByNameAndType(db, args.query, t, projectHash);
 				if (exact) {
 					rootNodes.push(exact);
 					break;
@@ -1413,12 +1413,12 @@ function registerQueryGraph(server, db, projectHashRef, notificationStore = null
 			if (rootNodes.length === 0) {
 				const likePattern = `%${args.query}%`;
 				let sql;
-				const params = [likePattern];
+				const params = [likePattern, projectHash];
 				if (entityType) {
-					sql = "SELECT * FROM graph_nodes WHERE name LIKE ? COLLATE NOCASE AND type = ? LIMIT ?";
+					sql = "SELECT * FROM graph_nodes WHERE name LIKE ? COLLATE NOCASE AND project_hash = ? AND type = ? LIMIT ?";
 					params.push(entityType, args.limit);
 				} else {
-					sql = "SELECT * FROM graph_nodes WHERE name LIKE ? COLLATE NOCASE LIMIT ?";
+					sql = "SELECT * FROM graph_nodes WHERE name LIKE ? COLLATE NOCASE AND project_hash = ? LIMIT ?";
 					params.push(args.limit);
 				}
 				const rows = db.prepare(sql).all(...params);
@@ -1441,7 +1441,8 @@ function registerQueryGraph(server, db, projectHashRef, notificationStore = null
 				const results = traverseFrom(db, node.id, {
 					depth: args.depth,
 					edgeTypes: relationshipTypes,
-					direction: "both"
+					direction: "both",
+					projectHash
 				});
 				traversalsByNode.set(node.id, results);
 			}
@@ -1493,23 +1494,24 @@ function registerQueryGraph(server, db, projectHashRef, notificationStore = null
 * Collects comprehensive graph statistics directly from the database.
 * Does not depend on constraints module (which may not be built yet).
 */
-function collectGraphStats(db) {
-	const totalNodes = db.prepare("SELECT COUNT(*) as cnt FROM graph_nodes").get().cnt;
-	const totalEdges = db.prepare("SELECT COUNT(*) as cnt FROM graph_edges").get().cnt;
-	const entityCounts = db.prepare("SELECT type, COUNT(*) as cnt FROM graph_nodes GROUP BY type").all();
+function collectGraphStats(db, projectHash) {
+	const totalNodes = db.prepare("SELECT COUNT(*) as cnt FROM graph_nodes WHERE project_hash = ?").get(projectHash).cnt;
+	const totalEdges = db.prepare("SELECT COUNT(*) as cnt FROM graph_edges WHERE project_hash = ?").get(projectHash).cnt;
+	const entityCounts = db.prepare("SELECT type, COUNT(*) as cnt FROM graph_nodes WHERE project_hash = ? GROUP BY type").all(projectHash);
 	const byEntityType = {};
 	for (const t of ENTITY_TYPES) byEntityType[t] = 0;
 	for (const row of entityCounts) byEntityType[row.type] = row.cnt;
-	const relCounts = db.prepare("SELECT type, COUNT(*) as cnt FROM graph_edges GROUP BY type").all();
+	const relCounts = db.prepare("SELECT type, COUNT(*) as cnt FROM graph_edges WHERE project_hash = ? GROUP BY type").all(projectHash);
 	const byRelType = {};
 	for (const t of RELATIONSHIP_TYPES) byRelType[t] = 0;
 	for (const row of relCounts) byRelType[row.type] = row.cnt;
 	const avgDegree = totalNodes > 0 ? totalEdges * 2 / totalNodes : 0;
 	const degreeRows = db.prepare(`SELECT n.id as node_id, n.name as node_name, n.type as node_type,
-              (SELECT COUNT(*) FROM graph_edges WHERE source_id = n.id OR target_id = n.id) as degree
+              (SELECT COUNT(*) FROM graph_edges WHERE (source_id = n.id OR target_id = n.id) AND project_hash = ?) as degree
        FROM graph_nodes n
+       WHERE n.project_hash = ?
        ORDER BY degree DESC
-       LIMIT 10`).all();
+       LIMIT 10`).all(projectHash, projectHash);
 	let maxDegreeEntry = null;
 	const hotspots = [];
 	const hotspotThreshold = Math.floor(MAX_NODE_DEGREE * .8);
@@ -1526,8 +1528,8 @@ function collectGraphStats(db) {
 		});
 	}
 	const dupCount = db.prepare(`SELECT COUNT(*) as cnt FROM (
-            SELECT name FROM graph_nodes GROUP BY name HAVING COUNT(DISTINCT type) > 1
-          )`).get().cnt;
+            SELECT name FROM graph_nodes WHERE project_hash = ? GROUP BY name HAVING COUNT(DISTINCT type) > 1
+          )`).get(projectHash).cnt;
 	let stalenessCount = 0;
 	try {
 		initStalenessSchema(db);
@@ -1613,7 +1615,7 @@ function registerGraphStats(server, db, projectHashRef, notificationStore = null
 		const projectHash = projectHashRef.current;
 		try {
 			debug("mcp", "graph_stats: request");
-			const stats = collectGraphStats(db);
+			const stats = collectGraphStats(db, projectHash);
 			const formatted = formatStats(stats);
 			debug("mcp", "graph_stats: returning", {
 				nodes: stats.total_nodes,

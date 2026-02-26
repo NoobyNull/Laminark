@@ -143,9 +143,9 @@ export function handlePreToolUse(
     if (toolName === 'Write' || toolName === 'Edit' || toolName === 'Read') {
       const filePath = toolInput.file_path as string | undefined;
       if (filePath) {
-        const node = getNodeByNameAndType(db, filePath, 'File');
+        const node = getNodeByNameAndType(db, filePath, 'File', projectHash);
         if (node) {
-          const connected = traverseFrom(db, node.id, { depth: 1, direction: 'both' });
+          const connected = traverseFrom(db, node.id, { depth: 1, direction: 'both', projectHash });
           if (connected.length > 0) {
             const names = connected
               .slice(0, 5)

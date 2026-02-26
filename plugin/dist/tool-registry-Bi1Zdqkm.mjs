@@ -1611,7 +1611,7 @@ var SaveGuard = class {
 *   - Nodes: type, name
 *   - Edges: source_id, target_id, type, unique(source_id, target_id, type)
 */
-const up = `
+const up$1 = `
   CREATE TABLE IF NOT EXISTS graph_nodes (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL CHECK(type IN ('Project','File','Decision','Problem','Solution','Reference')),
@@ -1643,6 +1643,18 @@ const up = `
 `;
 
 //#endregion
+//#region src/graph/migrations/002-project-hash-index.ts
+/**
+* Migration 002: Add indexes on project_hash for graph tables.
+*
+* Supports project-scoped queries that filter by project_hash.
+*/
+const up = `
+  CREATE INDEX IF NOT EXISTS idx_graph_nodes_project ON graph_nodes(project_hash);
+  CREATE INDEX IF NOT EXISTS idx_graph_edges_project ON graph_edges(project_hash);
+`;
+
+//#endregion
 //#region src/graph/schema.ts
 function rowToNode(row) {
 	return {
@@ -1671,6 +1683,7 @@ function rowToEdge(row) {
 * Uses CREATE TABLE IF NOT EXISTS so it is safe to call multiple times.
 */
 function initGraphSchema(db) {
+	db.exec(up$1);
 	db.exec(up);
 }
 /**
@@ -1689,11 +1702,12 @@ function initGraphSchema(db) {
 * @param opts - traversal options (depth, edgeTypes, direction)
 * @returns Array of { node, edge, depth } for each reachable node
 */
-function traverseFrom(db, nodeId, opts = {}) {
+function traverseFrom(db, nodeId, opts) {
 	const maxDepth = opts.depth ?? 2;
 	const direction = opts.direction ?? "outgoing";
 	let edgeTypeFilter = "";
 	if (opts.edgeTypes && opts.edgeTypes.length > 0) edgeTypeFilter = `AND e.type IN (${opts.edgeTypes.map(() => "?").join(", ")})`;
+	const projectFilter = opts.projectHash ? "AND e.project_hash = ?" : "";
 	let recursiveStep;
 	if (direction === "outgoing") recursiveStep = `
       SELECT e.target_id, t.depth + 1, e.id
@@ -1701,6 +1715,7 @@ function traverseFrom(db, nodeId, opts = {}) {
       JOIN traverse t ON e.source_id = t.node_id
       WHERE t.depth < ?
       ${edgeTypeFilter}
+      ${projectFilter}
     `;
 	else if (direction === "incoming") recursiveStep = `
       SELECT e.source_id, t.depth + 1, e.id
@@ -1708,6 +1723,7 @@ function traverseFrom(db, nodeId, opts = {}) {
       JOIN traverse t ON e.target_id = t.node_id
       WHERE t.depth < ?
       ${edgeTypeFilter}
+      ${projectFilter}
     `;
 	else recursiveStep = `
       SELECT e.target_id, t.depth + 1, e.id
@@ -1715,12 +1731,14 @@ function traverseFrom(db, nodeId, opts = {}) {
       JOIN traverse t ON e.source_id = t.node_id
       WHERE t.depth < ?
       ${edgeTypeFilter}
+      ${projectFilter}
       UNION ALL
       SELECT e.source_id, t.depth + 1, e.id
       FROM graph_edges e
       JOIN traverse t ON e.target_id = t.node_id
       WHERE t.depth < ?
       ${edgeTypeFilter}
+      ${projectFilter}
     `;
 	const sql = `
     WITH RECURSIVE traverse(node_id, depth, edge_id) AS (
@@ -1741,16 +1759,16 @@ function traverseFrom(db, nodeId, opts = {}) {
     LEFT JOIN graph_edges e ON e.id = t.edge_id
     WHERE t.depth > 0
   `;
+	const pushBranchParams = (params) => {
+		params.push(maxDepth);
+		if (opts.edgeTypes) params.push(...opts.edgeTypes);
+		if (opts.projectHash) params.push(opts.projectHash);
+	};
 	const queryParams = [nodeId];
 	if (direction === "both") {
-		queryParams.push(maxDepth);
-		if (opts.edgeTypes) queryParams.push(...opts.edgeTypes);
-		queryParams.push(maxDepth);
-		if (opts.edgeTypes) queryParams.push(...opts.edgeTypes);
-	} else {
-		queryParams.push(maxDepth);
-		if (opts.edgeTypes) queryParams.push(...opts.edgeTypes);
-	}
+		pushBranchParams(queryParams);
+		pushBranchParams(queryParams);
+	} else pushBranchParams(queryParams);
 	return db.prepare(sql).all(...queryParams).map((row) => ({
 		node: {
 			id: row.n_id,
@@ -1776,14 +1794,19 @@ function traverseFrom(db, nodeId, opts = {}) {
 /**
 * Returns all nodes of a given entity type.
 */
-function getNodesByType(db, type) {
+function getNodesByType(db, type, projectHash) {
+	if (projectHash) return db.prepare("SELECT * FROM graph_nodes WHERE type = ? AND project_hash = ?").all(type, projectHash).map(rowToNode);
 	return db.prepare("SELECT * FROM graph_nodes WHERE type = ?").all(type).map(rowToNode);
 }
 /**
 * Looks up a node by name and type (composite natural key).
 * Returns null if no matching node exists.
 */
-function getNodeByNameAndType(db, name, type) {
+function getNodeByNameAndType(db, name, type, projectHash) {
+	if (projectHash) {
+		const row = db.prepare("SELECT * FROM graph_nodes WHERE name = ? AND type = ? AND project_hash = ?").get(name, type, projectHash);
+		return row ? rowToNode(row) : null;
+	}
 	const row = db.prepare("SELECT * FROM graph_nodes WHERE name = ? AND type = ?").get(name, type);
 	return row ? rowToNode(row) : null;
 }
@@ -1793,18 +1816,23 @@ function getNodeByNameAndType(db, name, type) {
 * @param direction - 'outgoing' (source), 'incoming' (target), or 'both' (default: 'both')
 */
 function getEdgesForNode(db, nodeId, opts) {
-	const direction = opts?.direction ?? "both";
+	const direction = opts.direction ?? "both";
+	const pFilter = opts.projectHash ? " AND project_hash = ?" : "";
 	let sql;
 	let params;
 	if (direction === "outgoing") {
-		sql = "SELECT * FROM graph_edges WHERE source_id = ?";
-		params = [nodeId];
+		sql = `SELECT * FROM graph_edges WHERE source_id = ?${pFilter}`;
+		params = opts.projectHash ? [nodeId, opts.projectHash] : [nodeId];
 	} else if (direction === "incoming") {
-		sql = "SELECT * FROM graph_edges WHERE target_id = ?";
-		params = [nodeId];
+		sql = `SELECT * FROM graph_edges WHERE target_id = ?${pFilter}`;
+		params = opts.projectHash ? [nodeId, opts.projectHash] : [nodeId];
 	} else {
-		sql = "SELECT * FROM graph_edges WHERE source_id = ? OR target_id = ?";
-		params = [nodeId, nodeId];
+		sql = `SELECT * FROM graph_edges WHERE (source_id = ? OR target_id = ?)${pFilter}`;
+		params = opts.projectHash ? [
+			nodeId,
+			nodeId,
+			opts.projectHash
+		] : [nodeId, nodeId];
 	}
 	return db.prepare(sql).all(...params).map(rowToEdge);
 }
@@ -1812,7 +1840,8 @@ function getEdgesForNode(db, nodeId, opts) {
 * Returns the total number of edges connected to a node (both directions).
 * Used for degree enforcement (MAX_NODE_DEGREE constraint).
 */
-function countEdgesForNode(db, nodeId) {
+function countEdgesForNode(db, nodeId, projectHash) {
+	if (projectHash) return db.prepare("SELECT COUNT(*) as cnt FROM graph_edges WHERE (source_id = ? OR target_id = ?) AND project_hash = ?").get(nodeId, nodeId, projectHash).cnt;
 	return db.prepare("SELECT COUNT(*) as cnt FROM graph_edges WHERE source_id = ? OR target_id = ?").get(nodeId, nodeId).cnt;
 }
 /**
@@ -1824,7 +1853,7 @@ function countEdgesForNode(db, nodeId) {
 * @returns The upserted GraphNode
 */
 function upsertNode(db, node) {
-	const existing = getNodeByNameAndType(db, node.name, node.type);
+	const existing = getNodeByNameAndType(db, node.name, node.type, node.project_hash);
 	if (existing) {
 		const mergedObsIds = [...new Set([...existing.observation_ids, ...node.observation_ids])];
 		const mergedMetadata = {
@@ -1838,7 +1867,7 @@ function upsertNode(db, node) {
 	}
 	const id = node.id ?? randomBytes(16).toString("hex");
 	db.prepare(`INSERT INTO graph_nodes (id, type, name, metadata, observation_ids, project_hash)
-     VALUES (?, ?, ?, ?, ?, ?)`).run(id, node.type, node.name, JSON.stringify(node.metadata), JSON.stringify(node.observation_ids), node.project_hash ?? null);
+     VALUES (?, ?, ?, ?, ?, ?)`).run(id, node.type, node.name, JSON.stringify(node.metadata), JSON.stringify(node.observation_ids), node.project_hash);
 	return rowToNode(db.prepare("SELECT * FROM graph_nodes WHERE id = ?").get(id));
 }
 /**
@@ -1853,7 +1882,7 @@ function insertEdge(db, edge) {
      VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (source_id, target_id, type) DO UPDATE SET
        weight = MAX(graph_edges.weight, excluded.weight),
-       metadata = excluded.metadata`).run(id, edge.source_id, edge.target_id, edge.type, edge.weight, JSON.stringify(edge.metadata), edge.project_hash ?? null);
+       metadata = excluded.metadata`).run(id, edge.source_id, edge.target_id, edge.type, edge.weight, JSON.stringify(edge.metadata), edge.project_hash);
 	return rowToEdge(db.prepare("SELECT * FROM graph_edges WHERE source_id = ? AND target_id = ? AND type = ?").get(edge.source_id, edge.target_id, edge.type));
 }
 
@@ -2138,14 +2167,16 @@ function resetHygieneConfig() {
 
 //#endregion
 //#region src/graph/hygiene-analyzer.ts
-function buildSignalLookups(db) {
+function buildSignalLookups(db, projectHash) {
 	const linkedObsIds = /* @__PURE__ */ new Set();
 	const islandObsIds = /* @__PURE__ */ new Set();
-	const allNodes = db.prepare("SELECT id, type, name, observation_ids FROM graph_nodes").all();
+	const allNodes = projectHash ? db.prepare("SELECT id, type, name, observation_ids FROM graph_nodes WHERE project_hash = ?").all(projectHash) : db.prepare("SELECT id, type, name, observation_ids FROM graph_nodes").all();
 	const edgeCounts = /* @__PURE__ */ new Map();
-	const edgeRows = db.prepare(`SELECT source_id AS nid, COUNT(*) AS cnt FROM graph_edges GROUP BY source_id
-     UNION ALL
-     SELECT target_id AS nid, COUNT(*) AS cnt FROM graph_edges GROUP BY target_id`).all();
+	const edgeRows = projectHash ? db.prepare(`SELECT source_id AS nid, COUNT(*) AS cnt FROM graph_edges WHERE project_hash = ? GROUP BY source_id
+         UNION ALL
+         SELECT target_id AS nid, COUNT(*) AS cnt FROM graph_edges WHERE project_hash = ? GROUP BY target_id`).all(projectHash, projectHash) : db.prepare(`SELECT source_id AS nid, COUNT(*) AS cnt FROM graph_edges GROUP BY source_id
+         UNION ALL
+         SELECT target_id AS nid, COUNT(*) AS cnt FROM graph_edges GROUP BY target_id`).all();
 	for (const row of edgeRows) edgeCounts.set(row.nid, (edgeCounts.get(row.nid) ?? 0) + row.cnt);
 	for (const node of allNodes) {
 		let obsIds;
@@ -2217,7 +2248,7 @@ function analyzeObservations(db, projectHash, opts) {
 	}
 	obsSql += " ORDER BY created_at DESC";
 	const observations = db.prepare(obsSql).all(...obsParams);
-	const lookups = buildSignalLookups(db);
+	const lookups = buildSignalLookups(db, projectHash);
 	const allCandidates = [];
 	for (const obs of observations) {
 		const { signals, confidence, tier } = scoreObservation(obs, lookups, config);
@@ -2292,7 +2323,7 @@ function findAnalysis(db, projectHash, config) {
     WHERE project_hash = ? AND deleted_at IS NULL
     ORDER BY created_at DESC
   `).all(projectHash);
-	const lookups = buildSignalLookups(db);
+	const lookups = buildSignalLookups(db, projectHash);
 	const bySignal = {
 		orphaned: 0,
 		islandNode: 0,
@@ -3571,4 +3602,4 @@ var ToolRegistryRepository = class {
 
 //#endregion
 export { hybridSearch as A, getNodesByType as C, upsertNode as D, traverseFrom as E, openDatabase as F, MIGRATIONS as I, runMigrations as L, SessionRepository as M, ObservationRepository as N, SaveGuard as O, rowToObservation as P, debug as R, getNodeByNameAndType as S, insertEdge as T, detectStaleness as _, ResearchBufferRepository as a, countEdgesForNode as b, inferScope as c, executePurge as d, findAnalysis as f, saveHygieneConfig as g, resetHygieneConfig as h, NotificationStore as i, SearchEngine as j, jaccardSimilarity as k, inferToolType as l, loadHygieneConfig as m, PathRepository as n, BranchRepository as o, runAutoCleanup as p, initPathSchema as r, extractServerName as s, ToolRegistryRepository as t, analyzeObservations as u, flagStaleObservation as v, initGraphSchema as w, getEdgesForNode as x, initStalenessSchema as y, debugTimed as z };
-//# sourceMappingURL=tool-registry-D8un_AcG.mjs.map
+//# sourceMappingURL=tool-registry-Bi1Zdqkm.mjs.map

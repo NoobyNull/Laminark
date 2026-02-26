@@ -19,6 +19,7 @@ import type {
   GraphEdge,
 } from './types.js';
 import { up as graphTablesDDL } from './migrations/001-graph-tables.js';
+import { up as projectHashIndexDDL } from './migrations/002-project-hash-index.js';
 
 // =============================================================================
 // Raw Row Types (snake_case, matches SQL columns)
@@ -113,6 +114,7 @@ export interface TraversalResult {
  */
 export function initGraphSchema(db: BetterSqlite3.Database): void {
   db.exec(graphTablesDDL);
+  db.exec(projectHashIndexDDL);
 }
 
 // =============================================================================
@@ -142,20 +144,22 @@ export function traverseFrom(
     depth?: number;
     edgeTypes?: RelationshipType[];
     direction?: 'outgoing' | 'incoming' | 'both';
-  } = {},
+    projectHash: string | null;
+  },
 ): TraversalResult[] {
   const maxDepth = opts.depth ?? 2;
   const direction = opts.direction ?? 'outgoing';
 
   // Build edge type filter clause
   let edgeTypeFilter = '';
-  const params: unknown[] = [nodeId, maxDepth];
 
   if (opts.edgeTypes && opts.edgeTypes.length > 0) {
     const placeholders = opts.edgeTypes.map(() => '?').join(', ');
     edgeTypeFilter = `AND e.type IN (${placeholders})`;
-    // These params are used inside the recursive part
   }
+
+  // Project isolation: filter edges by project_hash to prevent cross-project traversal
+  const projectFilter = opts.projectHash ? 'AND e.project_hash = ?' : '';
 
   // Build the recursive step based on direction
   let recursiveStep: string;
@@ -167,6 +171,7 @@ export function traverseFrom(
       JOIN traverse t ON e.source_id = t.node_id
       WHERE t.depth < ?
       ${edgeTypeFilter}
+      ${projectFilter}
     `;
   } else if (direction === 'incoming') {
     recursiveStep = `
@@ -175,6 +180,7 @@ export function traverseFrom(
       JOIN traverse t ON e.target_id = t.node_id
       WHERE t.depth < ?
       ${edgeTypeFilter}
+      ${projectFilter}
     `;
   } else {
     // both directions
@@ -184,12 +190,14 @@ export function traverseFrom(
       JOIN traverse t ON e.source_id = t.node_id
       WHERE t.depth < ?
       ${edgeTypeFilter}
+      ${projectFilter}
       UNION ALL
       SELECT e.source_id, t.depth + 1, e.id
       FROM graph_edges e
       JOIN traverse t ON e.target_id = t.node_id
       WHERE t.depth < ?
       ${edgeTypeFilter}
+      ${projectFilter}
     `;
   }
 
@@ -213,18 +221,21 @@ export function traverseFrom(
     WHERE t.depth > 0
   `;
 
+  // Helper to push params for one recursive branch
+  const pushBranchParams = (params: unknown[]) => {
+    params.push(maxDepth);
+    if (opts.edgeTypes) params.push(...opts.edgeTypes);
+    if (opts.projectHash) params.push(opts.projectHash);
+  };
+
   // Build parameter list depending on direction
   const queryParams: unknown[] = [nodeId]; // initial SELECT ?
 
   if (direction === 'both') {
-    // Two recursive branches, each needs maxDepth + optional edgeTypes
-    queryParams.push(maxDepth);
-    if (opts.edgeTypes) queryParams.push(...opts.edgeTypes);
-    queryParams.push(maxDepth);
-    if (opts.edgeTypes) queryParams.push(...opts.edgeTypes);
+    pushBranchParams(queryParams);
+    pushBranchParams(queryParams);
   } else {
-    queryParams.push(maxDepth);
-    if (opts.edgeTypes) queryParams.push(...opts.edgeTypes);
+    pushBranchParams(queryParams);
   }
 
   const rows = db.prepare(sql).all(...queryParams) as TraversalRow[];
@@ -264,7 +275,14 @@ export function traverseFrom(
 export function getNodesByType(
   db: BetterSqlite3.Database,
   type: EntityType,
+  projectHash: string | null,
 ): GraphNode[] {
+  if (projectHash) {
+    const rows = db
+      .prepare('SELECT * FROM graph_nodes WHERE type = ? AND project_hash = ?')
+      .all(type, projectHash) as NodeRow[];
+    return rows.map(rowToNode);
+  }
   const rows = db
     .prepare('SELECT * FROM graph_nodes WHERE type = ?')
     .all(type) as NodeRow[];
@@ -279,7 +297,14 @@ export function getNodeByNameAndType(
   db: BetterSqlite3.Database,
   name: string,
   type: EntityType,
+  projectHash: string | null,
 ): GraphNode | null {
+  if (projectHash) {
+    const row = db
+      .prepare('SELECT * FROM graph_nodes WHERE name = ? AND type = ? AND project_hash = ?')
+      .get(name, type, projectHash) as NodeRow | undefined;
+    return row ? rowToNode(row) : null;
+  }
   const row = db
     .prepare('SELECT * FROM graph_nodes WHERE name = ? AND type = ?')
     .get(name, type) as NodeRow | undefined;
@@ -298,22 +323,23 @@ export function getNodeByNameAndType(
 export function getEdgesForNode(
   db: BetterSqlite3.Database,
   nodeId: string,
-  opts?: { direction?: 'outgoing' | 'incoming' | 'both' },
+  opts: { direction?: 'outgoing' | 'incoming' | 'both'; projectHash: string | null },
 ): GraphEdge[] {
-  const direction = opts?.direction ?? 'both';
+  const direction = opts.direction ?? 'both';
+  const pFilter = opts.projectHash ? ' AND project_hash = ?' : '';
 
   let sql: string;
   let params: unknown[];
 
   if (direction === 'outgoing') {
-    sql = 'SELECT * FROM graph_edges WHERE source_id = ?';
-    params = [nodeId];
+    sql = `SELECT * FROM graph_edges WHERE source_id = ?${pFilter}`;
+    params = opts.projectHash ? [nodeId, opts.projectHash] : [nodeId];
   } else if (direction === 'incoming') {
-    sql = 'SELECT * FROM graph_edges WHERE target_id = ?';
-    params = [nodeId];
+    sql = `SELECT * FROM graph_edges WHERE target_id = ?${pFilter}`;
+    params = opts.projectHash ? [nodeId, opts.projectHash] : [nodeId];
   } else {
-    sql = 'SELECT * FROM graph_edges WHERE source_id = ? OR target_id = ?';
-    params = [nodeId, nodeId];
+    sql = `SELECT * FROM graph_edges WHERE (source_id = ? OR target_id = ?)${pFilter}`;
+    params = opts.projectHash ? [nodeId, nodeId, opts.projectHash] : [nodeId, nodeId];
   }
 
   const rows = db.prepare(sql).all(...params) as EdgeRow[];
@@ -327,7 +353,16 @@ export function getEdgesForNode(
 export function countEdgesForNode(
   db: BetterSqlite3.Database,
   nodeId: string,
+  projectHash: string | null,
 ): number {
+  if (projectHash) {
+    const result = db
+      .prepare(
+        'SELECT COUNT(*) as cnt FROM graph_edges WHERE (source_id = ? OR target_id = ?) AND project_hash = ?',
+      )
+      .get(nodeId, nodeId, projectHash) as { cnt: number };
+    return result.cnt;
+  }
   const result = db
     .prepare(
       'SELECT COUNT(*) as cnt FROM graph_edges WHERE source_id = ? OR target_id = ?',
@@ -350,9 +385,9 @@ export function countEdgesForNode(
  */
 export function upsertNode(
   db: BetterSqlite3.Database,
-  node: Omit<GraphNode, 'id' | 'created_at' | 'updated_at'> & { id?: string; project_hash?: string },
+  node: Omit<GraphNode, 'id' | 'created_at' | 'updated_at'> & { id?: string; project_hash: string | null },
 ): GraphNode {
-  const existing = getNodeByNameAndType(db, node.name, node.type);
+  const existing = getNodeByNameAndType(db, node.name, node.type, node.project_hash);
 
   if (existing) {
     // Merge observation_ids (deduplicated)
@@ -390,7 +425,7 @@ export function upsertNode(
     node.name,
     JSON.stringify(node.metadata),
     JSON.stringify(node.observation_ids),
-    node.project_hash ?? null,
+    node.project_hash,
   );
 
   const inserted = db
@@ -407,7 +442,7 @@ export function upsertNode(
  */
 export function insertEdge(
   db: BetterSqlite3.Database,
-  edge: Omit<GraphEdge, 'id' | 'created_at'> & { id?: string; project_hash?: string },
+  edge: Omit<GraphEdge, 'id' | 'created_at'> & { id?: string; project_hash: string | null },
 ): GraphEdge {
   const id = edge.id ?? randomBytes(16).toString('hex');
 
@@ -424,7 +459,7 @@ export function insertEdge(
     edge.type,
     edge.weight,
     JSON.stringify(edge.metadata),
-    edge.project_hash ?? null,
+    edge.project_hash,
   );
 
   // Retrieve the actual row (may be the existing row if conflict occurred)

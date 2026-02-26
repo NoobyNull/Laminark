@@ -64,19 +64,19 @@ interface DegreeRow {
  * Collects comprehensive graph statistics directly from the database.
  * Does not depend on constraints module (which may not be built yet).
  */
-function collectGraphStats(db: BetterSqlite3.Database): GraphStatsOutput {
-  // Total counts
+function collectGraphStats(db: BetterSqlite3.Database, projectHash: string): GraphStatsOutput {
+  // Total counts (project-scoped)
   const totalNodes =
-    (db.prepare('SELECT COUNT(*) as cnt FROM graph_nodes').get() as { cnt: number })
+    (db.prepare('SELECT COUNT(*) as cnt FROM graph_nodes WHERE project_hash = ?').get(projectHash) as { cnt: number })
       .cnt;
   const totalEdges =
-    (db.prepare('SELECT COUNT(*) as cnt FROM graph_edges').get() as { cnt: number })
+    (db.prepare('SELECT COUNT(*) as cnt FROM graph_edges WHERE project_hash = ?').get(projectHash) as { cnt: number })
       .cnt;
 
   // By entity type
   const entityCounts = db
-    .prepare('SELECT type, COUNT(*) as cnt FROM graph_nodes GROUP BY type')
-    .all() as CountRow[];
+    .prepare('SELECT type, COUNT(*) as cnt FROM graph_nodes WHERE project_hash = ? GROUP BY type')
+    .all(projectHash) as CountRow[];
   const byEntityType: Record<string, number> = {};
   for (const t of ENTITY_TYPES) {
     byEntityType[t] = 0;
@@ -87,8 +87,8 @@ function collectGraphStats(db: BetterSqlite3.Database): GraphStatsOutput {
 
   // By relationship type
   const relCounts = db
-    .prepare('SELECT type, COUNT(*) as cnt FROM graph_edges GROUP BY type')
-    .all() as CountRow[];
+    .prepare('SELECT type, COUNT(*) as cnt FROM graph_edges WHERE project_hash = ? GROUP BY type')
+    .all(projectHash) as CountRow[];
   const byRelType: Record<string, number> = {};
   for (const t of RELATIONSHIP_TYPES) {
     byRelType[t] = 0;
@@ -101,16 +101,17 @@ function collectGraphStats(db: BetterSqlite3.Database): GraphStatsOutput {
   const avgDegree =
     totalNodes > 0 ? (totalEdges * 2) / totalNodes : 0;
 
-  // Max degree node -- count edges in both directions per node
+  // Max degree node -- count edges in both directions per node (project-scoped)
   const degreeRows = db
     .prepare(
       `SELECT n.id as node_id, n.name as node_name, n.type as node_type,
-              (SELECT COUNT(*) FROM graph_edges WHERE source_id = n.id OR target_id = n.id) as degree
+              (SELECT COUNT(*) FROM graph_edges WHERE (source_id = n.id OR target_id = n.id) AND project_hash = ?) as degree
        FROM graph_nodes n
+       WHERE n.project_hash = ?
        ORDER BY degree DESC
        LIMIT 10`,
     )
-    .all() as DegreeRow[];
+    .all(projectHash, projectHash) as DegreeRow[];
 
   let maxDegreeEntry: { node_name: string; node_type: EntityType; degree: number } | null =
     null;
@@ -134,16 +135,16 @@ function collectGraphStats(db: BetterSqlite3.Database): GraphStatsOutput {
     }
   }
 
-  // Duplicate candidates: nodes with same name but different type
+  // Duplicate candidates: nodes with same name but different type (project-scoped)
   const dupCount =
     (
       db
         .prepare(
           `SELECT COUNT(*) as cnt FROM (
-            SELECT name FROM graph_nodes GROUP BY name HAVING COUNT(DISTINCT type) > 1
+            SELECT name FROM graph_nodes WHERE project_hash = ? GROUP BY name HAVING COUNT(DISTINCT type) > 1
           )`,
         )
-        .get() as { cnt: number }
+        .get(projectHash) as { cnt: number }
     ).cnt;
 
   // Staleness flags count
@@ -293,7 +294,7 @@ export function registerGraphStats(
       try {
         debug('mcp', 'graph_stats: request');
 
-        const stats = collectGraphStats(db);
+        const stats = collectGraphStats(db, projectHash);
         const formatted = formatStats(stats);
 
         debug('mcp', 'graph_stats: returning', {

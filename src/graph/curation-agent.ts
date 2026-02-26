@@ -162,7 +162,7 @@ export async function runCuration(
 
     for (const row of nodeRows) {
       try {
-        const degree = countEdgesForNode(db, row.id);
+        const degree = countEdgesForNode(db, row.id, null);
         if (degree > threshold) {
           enforceMaxDegree(db, row.id);
         }
