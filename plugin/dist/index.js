@@ -4232,12 +4232,12 @@ function findFuzzyDuplicates(nodes, config) {
 */
 function enforceMaxDegree(db, nodeId, maxDegree = MAX_NODE_DEGREE) {
 	return db.transaction(() => {
-		const currentCount = countEdgesForNode(db, nodeId);
+		const currentCount = countEdgesForNode(db, nodeId, null);
 		if (currentCount <= maxDegree) return {
 			pruned: 0,
 			remaining: currentCount
 		};
-		const edges = getEdgesForNode(db, nodeId);
+		const edges = getEdgesForNode(db, nodeId, { projectHash: null });
 		edges.sort((a, b) => a.weight - b.weight);
 		const toPrune = currentCount - maxDegree;
 		const edgesToDelete = edges.slice(0, toPrune);
@@ -4280,7 +4280,7 @@ function mergeEntities(db, keepId, mergeId) {
 			...keepMeta
 		};
 		db.prepare(`UPDATE graph_nodes SET observation_ids = ?, metadata = ?, updated_at = datetime('now') WHERE id = ?`).run(JSON.stringify(mergedObsIds), JSON.stringify(mergedMeta), keepId);
-		const mergeEdges = getEdgesForNode(db, mergeId);
+		const mergeEdges = getEdgesForNode(db, mergeId, { projectHash: null });
 		for (const edge of mergeEdges) {
 			let newSourceId = edge.source_id;
 			let newTargetId = edge.target_id;
@@ -4328,11 +4328,11 @@ const ABBREVIATION_MAP = {
 */
 function findDuplicateEntities(db, opts) {
 	let nodes;
-	if (opts?.type) nodes = getNodesByType(db, opts.type);
+	if (opts?.type) nodes = getNodesByType(db, opts.type, null);
 	else {
 		const allTypes = ENTITY_TYPES;
 		nodes = [];
-		for (const type of allTypes) nodes.push(...getNodesByType(db, type));
+		for (const type of allTypes) nodes.push(...getNodesByType(db, type, null));
 	}
 	const duplicates = [];
 	const seen = /* @__PURE__ */ new Set();
@@ -4569,7 +4569,7 @@ async function runCuration(db, graphConfig) {
 		const threshold = Math.floor(MAX_NODE_DEGREE * .9);
 		const nodeRows = db.prepare("SELECT id FROM graph_nodes").all();
 		for (const row of nodeRows) try {
-			if (countEdgesForNode(db, row.id) > threshold) enforceMaxDegree(db, row.id);
+			if (countEdgesForNode(db, row.id, null) > threshold) enforceMaxDegree(db, row.id);
 		} catch (err) {
 			errors.push(`Constraint (node ${row.id}): ${err instanceof Error ? err.message : String(err)}`);
 		}
@@ -5321,8 +5321,8 @@ var HaikuProcessor = class {
 				const relationships = await inferRelationshipsWithHaiku(obs.content, entityPairs);
 				const affectedNodeIds = /* @__PURE__ */ new Set();
 				for (const rel of relationships) {
-					const sourceNode = getNodeByNameAndType(this.db, rel.source, entityPairs.find((e) => e.name === rel.source)?.type ?? "File");
-					const targetNode = getNodeByNameAndType(this.db, rel.target, entityPairs.find((e) => e.name === rel.target)?.type ?? "File");
+					const sourceNode = getNodeByNameAndType(this.db, rel.source, entityPairs.find((e) => e.name === rel.source)?.type ?? "File", projectHash);
+					const targetNode = getNodeByNameAndType(this.db, rel.target, entityPairs.find((e) => e.name === rel.target)?.type ?? "File", projectHash);
 					if (!sourceNode || !targetNode) continue;
 					try {
 						insertEdge(this.db, {

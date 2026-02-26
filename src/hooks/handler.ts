@@ -1,3 +1,7 @@
+import { spawn } from 'node:child_process';
+import { existsSync, statSync, writeFileSync, unlinkSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { openDatabase } from '../storage/database.js';
 import { getDatabaseConfig, getProjectHash } from '../shared/config.js';
 import { ObservationRepository } from '../storage/observations.js';
@@ -17,6 +21,51 @@ import { PathRepository } from '../paths/path-repository.js';
 import { initPathSchema } from '../paths/schema.js';
 import { BranchRepository } from '../branches/branch-repository.js';
 import { debug } from '../shared/debug.js';
+
+/** Resolve the plugin root directory (two levels up from dist/hooks/handler.js) */
+function getPluginRoot(): string {
+  const thisFile = fileURLToPath(import.meta.url);
+  return resolve(dirname(thisFile), '..', '..');
+}
+
+/** Check if a .needs-repair marker exists and is fresh (< 30s old) */
+function isRepairInProgress(): boolean {
+  const marker = resolve(getPluginRoot(), '.needs-repair');
+  if (!existsSync(marker)) return false;
+  try {
+    const age = Date.now() - statSync(marker).mtimeMs;
+    if (age > 30_000) {
+      // Stale marker — repair finished or failed, clean up
+      unlinkSync(marker);
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Spawn repair.sh detached (fire-and-forget) and write .needs-repair marker */
+function triggerRepair(): void {
+  const pluginRoot = getPluginRoot();
+  const repairScript = resolve(pluginRoot, 'scripts', 'repair.sh');
+  if (!existsSync(repairScript)) return;
+
+  // Write marker so subsequent hooks know repair is running
+  try {
+    writeFileSync(resolve(pluginRoot, '.needs-repair'), String(Date.now()));
+  } catch {
+    // Best effort
+  }
+
+  // Spawn detached — don't hold up hook exit
+  const child = spawn('bash', [repairScript], {
+    detached: true,
+    stdio: 'ignore',
+    cwd: pluginRoot,
+  });
+  child.unref();
+}
 
 /**
  * Hook handler entry point.
@@ -242,6 +291,12 @@ export function processPostToolUseFiltered(
 }
 
 async function main(): Promise<void> {
+  // If a repair is in progress, skip processing to avoid cascading errors
+  if (isRepairInProgress()) {
+    debug('hook', 'Repair in progress, skipping hook');
+    return;
+  }
+
   const raw = await readStdin();
   const input = JSON.parse(raw) as Record<string, unknown>;
 
@@ -325,5 +380,14 @@ async function main(): Promise<void> {
 // Wrap in .catch() -- hooks must NEVER fail. Always exit 0.
 main().catch((err: Error) => {
   debug('hook', 'Hook handler error', { error: err.message });
+
+  // Auto-trigger repair for dependency errors (missing native modules, broken imports)
+  const msg = err.message ?? '';
+  const code = (err as NodeJS.ErrnoException).code ?? '';
+  if (code === 'ERR_MODULE_NOT_FOUND' || msg.includes('better-sqlite3') || msg.includes('better_sqlite3')) {
+    debug('hook', 'Dependency error detected, triggering auto-repair');
+    triggerRepair();
+  }
+
   process.exit(0);
 });
