@@ -146,6 +146,9 @@ if claude mcp list 2>/dev/null | grep -q "^laminark:"; then
   echo "✓ Legacy MCP registration removed"
 fi
 
+# Step 5: CLAUDE.md instructions are auto-provisioned on first MCP server start
+# (handled by ensure-deps.sh — no manual step needed)
+
 # Done
 echo ""
 echo "✓ Laminark v$NEW_VERSION installed locally (dev mode)!"

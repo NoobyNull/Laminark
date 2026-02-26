@@ -55,6 +55,9 @@ else
   fi
 fi
 
+# CLAUDE.md instructions are auto-updated on next MCP server start
+# (handled by ensure-deps.sh — no manual step needed)
+
 echo ""
 echo "Restart your Claude Code session for changes to take effect."
 

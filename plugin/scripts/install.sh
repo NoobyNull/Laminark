@@ -138,6 +138,9 @@ claude plugin uninstall laminark@laminark 2>/dev/null || true
 claude plugin install laminark@laminark
 echo "✓ Plugin installed"
 
+# Step 6: CLAUDE.md instructions are auto-provisioned on first MCP server start
+# (handled by ensure-deps.sh — no manual step needed)
+
 # Done
 echo ""
 echo "✓ Laminark v$NEW_VERSION installed successfully!"
@@ -149,7 +152,7 @@ echo "  1. Start a new Claude Code session"
 echo "  2. Verify with: /plugin (should show laminark)"
 echo "  3. Check tools with: /mcp (should show laminark tools)"
 
-# Step 6: Recommend GSD (Get Shit Done) workflow plugin
+# Step 7: Recommend GSD (Get Shit Done) workflow plugin
 echo ""
 GSD_INSTALLED=false
 if [ -d "${CLAUDE_HOME}/commands/gsd" ] || [ -d "${CLAUDE_HOME}/plugins/gsd" ] || [ -d "${CLAUDE_HOME}/get-shit-done" ]; then
