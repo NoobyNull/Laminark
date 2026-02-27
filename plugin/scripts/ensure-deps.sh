@@ -33,8 +33,10 @@ if [ -f "$DEPS_OK_SENTINEL" ]; then
   SENTINEL_VERSION=$(cat "$DEPS_OK_SENTINEL" 2>/dev/null)
 fi
 
-if [ "$SENTINEL_VERSION" = "$CURRENT_VERSION" ]; then
-  # Already verified for this version — skip
+NATIVE_BINDING="$PLUGIN_ROOT/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+
+if [ "$SENTINEL_VERSION" = "$CURRENT_VERSION" ] && [ -f "$NATIVE_BINDING" ]; then
+  # Already verified for this version and native module exists — skip
   :
 elif ! verify_handler; then
   log_repair "Handler import failed (v$CURRENT_VERSION), installing dependencies"

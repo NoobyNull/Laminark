@@ -147,6 +147,45 @@ fi
 # Remove orphan marker if present
 rm -f "$NEW_CACHE/.orphaned_at"
 
+# Update version in installed_plugins.json
+INSTALLED_FILE="$CLAUDE_HOME/plugins/installed_plugins.json"
+if [ -f "$INSTALLED_FILE" ]; then
+  node -e '
+const fs = require("fs");
+const path = process.argv[1];
+const version = process.argv[2];
+
+let data = { version: 2, plugins: {} };
+try { data = JSON.parse(fs.readFileSync(path, "utf8")); } catch {}
+
+if (!data.plugins.laminark) {
+  data.plugins.laminark = { marketplace: "laminark", enabled: true };
+}
+data.plugins.laminark.version = version;
+
+fs.writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
+' "$INSTALLED_FILE" "$LATEST_VERSION"
+  log "Plugin registry updated."
+fi
+
+# Ensure plugin is enabled in settings.json
+SETTINGS_FILE="$CLAUDE_HOME/settings.json"
+if [ -f "$SETTINGS_FILE" ]; then
+  node -e '
+const fs = require("fs");
+const settingsPath = process.argv[1];
+
+let settings = {};
+try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch {}
+
+if (!settings.enabledPlugins) settings.enabledPlugins = {};
+if (!settings.enabledPlugins["laminark@laminark"]) {
+  settings.enabledPlugins["laminark@laminark"] = true;
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+}
+' "$SETTINGS_FILE"
+fi
+
 echo ""
 echo "Updated: v$CURRENT_VERSION → v$LATEST_VERSION"
 echo ""

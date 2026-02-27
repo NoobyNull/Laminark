@@ -187,15 +187,64 @@ done
 
 echo "  Marketplace registered."
 
-# Step 6: Register with Claude Code's plugin system (if CLI available and not nested)
+# Step 6: Register with Claude Code's plugin system
+echo ""
+echo "Registering plugin..."
+
+REGISTERED=false
+
+# Try the CLI first (only works outside a Claude Code session)
 if command -v claude &> /dev/null && [ -z "$CLAUDECODE" ]; then
-  echo ""
-  echo "Registering with Claude Code..."
   claude plugin marketplace remove laminark 2>/dev/null || true
   claude plugin marketplace add "$MARKETPLACE_BASE" 2>/dev/null || true
   claude plugin uninstall laminark@laminark 2>/dev/null || true
-  claude plugin install laminark@laminark 2>/dev/null || true
-  echo "  Registered."
+  if claude plugin install laminark@laminark 2>/dev/null; then
+    REGISTERED=true
+    echo "  Registered via CLI."
+  fi
+fi
+
+# Fallback: write registration files directly (CLI may fail silently)
+if [ "$REGISTERED" = false ]; then
+  INSTALLED_FILE="$CLAUDE_HOME/plugins/installed_plugins.json"
+  mkdir -p "$CLAUDE_HOME/plugins"
+
+  node -e '
+const fs = require("fs");
+const path = process.argv[1];
+const version = process.argv[2];
+
+let data = { version: 2, plugins: {} };
+if (fs.existsSync(path)) {
+  try { data = JSON.parse(fs.readFileSync(path, "utf8")); } catch {}
+}
+
+data.plugins.laminark = {
+  marketplace: "laminark",
+  version: version,
+  enabled: true
+};
+
+fs.writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
+' "$INSTALLED_FILE" "$LATEST_VERSION"
+
+  # Enable in settings.json
+  node -e '
+const fs = require("fs");
+const settingsPath = process.argv[1];
+
+let settings = {};
+if (fs.existsSync(settingsPath)) {
+  try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch {}
+}
+
+if (!settings.enabledPlugins) settings.enabledPlugins = {};
+settings.enabledPlugins["laminark@laminark"] = true;
+
+fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+' "$SETTINGS_FILE"
+
+  echo "  Registered via direct file write."
 fi
 
 # Clean up old version caches
