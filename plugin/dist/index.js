@@ -6629,10 +6629,10 @@ function safeParseJson(json) {
 *
 * @module web/routes/admin
 */
-const __dirname = dirname(fileURLToPath$1(import.meta.url));
+const __dirname$1 = dirname(fileURLToPath$1(import.meta.url));
 const LAMINARK_VERSION = (() => {
 	try {
-		return JSON.parse(readFileSync(join(__dirname, "..", "..", "package.json"), "utf-8")).version || "unknown";
+		return JSON.parse(readFileSync(join(__dirname$1, "..", "..", "package.json"), "utf-8")).version || "unknown";
 	} catch {
 		return "unknown";
 	}
@@ -7176,6 +7176,67 @@ function startWebServer(app, port = 37820) {
 }
 
 //#endregion
+//#region src/mcp/version-check.ts
+/**
+* Update-available notification for Laminark.
+*
+* Checks the npm registry for a newer version and queues a notification
+* if one is found. All errors are silently caught — this is fire-and-forget.
+*
+* @module mcp/version-check
+*/
+const __dirname = dirname(fileURLToPath$1(import.meta.url));
+/** Read the installed version from plugin.json (canonical source for plugin version). */
+function getInstalledVersion() {
+	try {
+		return JSON.parse(readFileSync(join(__dirname, "..", ".claude-plugin", "plugin.json"), "utf-8")).version || "unknown";
+	} catch {
+		return "unknown";
+	}
+}
+/** Simple semver comparison: returns true if `a` is strictly less than `b`. */
+function isOlder(a, b) {
+	const pa = a.split(".").map(Number);
+	const pb = b.split(".").map(Number);
+	for (let i = 0; i < 3; i++) {
+		const av = pa[i] || 0;
+		const bv = pb[i] || 0;
+		if (av < bv) return true;
+		if (av > bv) return false;
+	}
+	return false;
+}
+/**
+* Fire-and-forget update check. Queries the npm registry and queues a
+* notification via the store if a newer version is available.
+*/
+async function checkForUpdate(store, projectHash) {
+	try {
+		const installed = getInstalledVersion();
+		if (installed === "unknown") {
+			debug("mcp", "Version check skipped: could not read installed version");
+			return;
+		}
+		const res = await fetch("https://registry.npmjs.org/laminark/latest", { signal: AbortSignal.timeout(8e3) });
+		if (!res.ok) {
+			debug("mcp", `Version check: registry returned ${res.status}`);
+			return;
+		}
+		const latest = (await res.json()).version;
+		if (!latest) {
+			debug("mcp", "Version check: no version field in registry response");
+			return;
+		}
+		if (isOlder(installed, latest)) {
+			debug("mcp", `Update available: ${installed} -> ${latest}`);
+			store.add(projectHash, `Update available: v${installed} → v${latest}. Run: npx laminark@latest update`);
+		} else debug("mcp", `Version check: up to date (${installed})`);
+	} catch (err) {
+		debug("mcp", "Version check failed", { error: err.message });
+	}
+}
+
+//#endregion
 //#region src/index.ts
 const noGui = process.argv.includes("--no_gui");
 const db = openDatabase(getDatabaseConfig());
@@ -7370,6 +7431,7 @@ const haikuProcessor = new HaikuProcessor(db.db, projectHashRef.current, {
 });
 startServer(server).then(() => {
 	haikuProcessor.start();
+	checkForUpdate(notificationStore, projectHashRef.current);
 }).catch((err) => {
 	debug("mcp", "Fatal: failed to start server", { error: err.message });
 	clearInterval(embedTimer);

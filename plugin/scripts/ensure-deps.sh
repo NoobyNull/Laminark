@@ -110,5 +110,17 @@ if (startIdx >= 0 && endIdx >= 0) {
   fi
 fi
 
+# Non-blocking background version check — stderr hint if update available
+(
+  LATEST=$(timeout 5 npm view laminark version 2>/dev/null) || true
+  if [ -n "$LATEST" ] && [ "$LATEST" != "$CURRENT_VERSION" ]; then
+    # Simple version comparison: check if latest is newer
+    OLDER=$(printf '%s\n%s' "$CURRENT_VERSION" "$LATEST" | sort -V | head -n1)
+    if [ "$OLDER" = "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" != "$LATEST" ]; then
+      echo "[Laminark] Update available: v${CURRENT_VERSION} -> v${LATEST} — run: bash \"$PLUGIN_ROOT/scripts/update.sh\"" >&2
+    fi
+  fi
+) &
+
 cd "$PLUGIN_ROOT"
 exec "$@"

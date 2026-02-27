@@ -49,6 +49,7 @@ import { PathTracker } from './paths/path-tracker.js';
 import { broadcast } from './web/routes/sse.js';
 import { createWebServer, startWebServer } from './web/server.js';
 import { ToolRegistryRepository } from './storage/tool-registry.js';
+import { checkForUpdate } from './mcp/version-check.js';
 
 const noGui = process.argv.includes('--no_gui');
 
@@ -353,6 +354,7 @@ const haikuProcessor = new HaikuProcessor(db.db, projectHashRef.current, {
 
 startServer(server).then(() => {
   haikuProcessor.start();
+  void checkForUpdate(notificationStore, projectHashRef.current);
 }).catch((err) => {
   debug('mcp', 'Fatal: failed to start server', { error: err.message });
   clearInterval(embedTimer);
