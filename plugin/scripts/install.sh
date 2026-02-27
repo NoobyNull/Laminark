@@ -1,8 +1,7 @@
 #!/bin/bash
 # Install Laminark as a Claude Code plugin
 #
-# Downloads from npm and directly populates the plugin cache.
-# Registers the marketplace and plugin metadata so Claude Code recognizes it.
+# Downloads from npm and sets up the marketplace directory structure.
 #
 # Usage: curl -fsSL https://raw.githubusercontent.com/NoobyNull/Laminark/master/plugin/scripts/install.sh | bash
 #   or:  ./plugin/scripts/install.sh
@@ -32,10 +31,10 @@ if ! command -v npm &> /dev/null; then
 fi
 
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
-CACHE_BASE="$CLAUDE_HOME/plugins/cache/laminark"
 MARKETPLACE_BASE="$CLAUDE_HOME/plugins/marketplaces/laminark"
+SETTINGS_FILE="$CLAUDE_HOME/settings.json"
 
-# Step 1: Download the package to a temp dir
+# Step 1: Download the package
 echo "Fetching latest version from npm..."
 LATEST_VERSION=$(npm view laminark version 2>/dev/null || echo "")
 if [ -z "$LATEST_VERSION" ]; then
@@ -81,8 +80,6 @@ fi
 echo "  Dependencies verified."
 
 # Step 3: Remove legacy installations
-SETTINGS_FILE="$CLAUDE_HOME/settings.json"
-
 if [ -f "$SETTINGS_FILE" ]; then
   node -e '
 const fs = require("fs");
@@ -128,36 +125,19 @@ if (changed) {
 ' "$SETTINGS_FILE"
 fi
 
-# Step 4: Populate the plugin cache directly
+# Step 4: Set up the marketplace directory
 echo ""
-echo "Installing to plugin cache..."
+echo "Installing plugin..."
 
-PLUGIN_CACHE="$CACHE_BASE/laminark/$LATEST_VERSION"
-
-# Remove any existing cache for this version
-rm -rf "$PLUGIN_CACHE"
-mkdir -p "$PLUGIN_CACHE"
-
-# Copy everything from the extracted plugin
-cp -a "$EXTRACTED/." "$PLUGIN_CACHE/"
-
-# Write sentinel — deps are already verified
-echo "$LATEST_VERSION" > "$PLUGIN_CACHE/.deps-ok"
-
-# Remove orphan marker if present
-rm -f "$PLUGIN_CACHE/.orphaned_at"
-
-echo "  Cache populated."
-
-# Step 5: Set up the marketplace source
-echo "Setting up marketplace..."
-
-# Create marketplace structure
 mkdir -p "$MARKETPLACE_BASE/.claude-plugin"
 mkdir -p "$MARKETPLACE_BASE/plugin"
 
-# Copy plugin files to marketplace (without node_modules — the cache has them)
-rsync -a --exclude node_modules "$EXTRACTED/" "$MARKETPLACE_BASE/plugin/" 2>/dev/null || cp -a "$EXTRACTED/." "$MARKETPLACE_BASE/plugin/"
+# Copy plugin files (with deps)
+rsync -a --delete "$EXTRACTED/" "$MARKETPLACE_BASE/plugin/" 2>/dev/null \
+  || { rm -rf "$MARKETPLACE_BASE/plugin" && cp -a "$EXTRACTED" "$MARKETPLACE_BASE/plugin"; }
+
+# Write deps sentinel
+echo "$LATEST_VERSION" > "$MARKETPLACE_BASE/plugin/.deps-ok"
 
 # Write marketplace.json
 cat > "$MARKETPLACE_BASE/.claude-plugin/marketplace.json" << MKJSON
@@ -178,16 +158,14 @@ cat > "$MARKETPLACE_BASE/.claude-plugin/marketplace.json" << MKJSON
 }
 MKJSON
 
-# Copy repo-level files the marketplace expects
-for f in .gitignore README.md CHANGELOG.md tsconfig.json package.json package-lock.json; do
-  if [ -f "$PKG_ROOT/$f" ]; then
-    cp "$PKG_ROOT/$f" "$MARKETPLACE_BASE/$f" 2>/dev/null || true
-  fi
+# Copy repo-level files
+for f in .gitignore README.md CHANGELOG.md package.json; do
+  [ -f "$PKG_ROOT/$f" ] && cp "$PKG_ROOT/$f" "$MARKETPLACE_BASE/$f" 2>/dev/null || true
 done
 
-echo "  Marketplace registered."
+echo "  Plugin installed."
 
-# Step 6: Register with Claude Code's plugin system
+# Step 5: Register with Claude Code
 echo ""
 echo "Registering plugin..."
 
@@ -204,27 +182,19 @@ if command -v claude &> /dev/null && [ -z "$CLAUDECODE" ]; then
   fi
 fi
 
-# Fallback: write registration files directly (CLI may fail silently)
+# Fallback: write registration files directly
 if [ "$REGISTERED" = false ]; then
   INSTALLED_FILE="$CLAUDE_HOME/plugins/installed_plugins.json"
   mkdir -p "$CLAUDE_HOME/plugins"
 
   node -e '
 const fs = require("fs");
-const path = process.argv[1];
-const version = process.argv[2];
-
+const path = process.argv[1], version = process.argv[2];
 let data = { version: 2, plugins: {} };
 if (fs.existsSync(path)) {
   try { data = JSON.parse(fs.readFileSync(path, "utf8")); } catch {}
 }
-
-data.plugins.laminark = {
-  marketplace: "laminark",
-  version: version,
-  enabled: true
-};
-
+data.plugins.laminark = { marketplace: "laminark", version: version, enabled: true };
 fs.writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
 ' "$INSTALLED_FILE" "$LATEST_VERSION"
 
@@ -232,30 +202,23 @@ fs.writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
   node -e '
 const fs = require("fs");
 const settingsPath = process.argv[1];
-
 let settings = {};
 if (fs.existsSync(settingsPath)) {
   try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch {}
 }
-
 if (!settings.enabledPlugins) settings.enabledPlugins = {};
 settings.enabledPlugins["laminark@laminark"] = true;
-
 fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
 ' "$SETTINGS_FILE"
 
   echo "  Registered via direct file write."
 fi
 
-# Clean up old version caches
-if [ -d "$CACHE_BASE/laminark" ]; then
-  for OLD_DIR in "$CACHE_BASE/laminark"/*/; do
-    OLD_VER=$(basename "$OLD_DIR")
-    if [ "$OLD_VER" != "$LATEST_VERSION" ] && [ -d "$OLD_DIR" ]; then
-      rm -rf "$OLD_DIR"
-      echo "  Removed old cache: v$OLD_VER"
-    fi
-  done
+# Clean up orphaned cache dirs from old install approach
+OLD_CACHE="$CLAUDE_HOME/plugins/cache/laminark/laminark"
+if [ -d "$OLD_CACHE" ]; then
+  rm -rf "$OLD_CACHE"
+  echo "  Cleaned up legacy cache."
 fi
 
 # Done
@@ -267,7 +230,7 @@ echo "  1. Start a new Claude Code session"
 echo "  2. Verify with: /plugin (should show laminark)"
 echo "  3. Check tools with: /mcp (should show laminark tools)"
 
-# Step 7: Recommend GSD (Get Shit Done) workflow plugin
+# Recommend GSD
 echo ""
 GSD_INSTALLED=false
 if [ -d "${CLAUDE_HOME}/commands/gsd" ] || [ -d "${CLAUDE_HOME}/plugins/gsd" ] || [ -d "${CLAUDE_HOME}/get-shit-done" ]; then
