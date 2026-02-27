@@ -117,7 +117,7 @@ fi
     # Simple version comparison: check if latest is newer
     OLDER=$(printf '%s\n%s' "$CURRENT_VERSION" "$LATEST" | sort -V | head -n1)
     if [ "$OLDER" = "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" != "$LATEST" ]; then
-      echo "[Laminark] Update available: v${CURRENT_VERSION} -> v${LATEST} — run: bash \"$PLUGIN_ROOT/scripts/update.sh\"" >&2
+      echo "[Laminark] Update available: v${CURRENT_VERSION} -> v${LATEST} — run /laminark:update" >&2
     fi
   fi
 ) &
